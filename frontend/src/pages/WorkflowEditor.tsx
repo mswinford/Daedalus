@@ -9,7 +9,7 @@ import {
   useEdgesState,
   type Edge,
 } from '@xyflow/react'
-import { ArrowLeft, Save, Play, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react'
 
 import { workflowsApi, type ValidationResult } from '@/lib/api'
 import {
@@ -50,6 +50,9 @@ export default function WorkflowEditor() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
+  const [inputJson, setInputJson] = useState('')
+  const [showInput, setShowInput] = useState(false)
+  const [inputError, setInputError] = useState<string | null>(null)
 
   const { data: workflow, isLoading } = useQuery({
     queryKey: ['workflow', id],
@@ -119,8 +122,30 @@ export default function WorkflowEditor() {
   })
 
   const runMutation = useMutation({
-    mutationFn: () => workflowsApi.run(id!),
+    mutationFn: (input: Record<string, any>) => workflowsApi.run(id!, input),
   })
+
+  const handleRun = () => {
+    const trimmed = inputJson.trim()
+    if (!trimmed) {
+      setInputError(null)
+      runMutation.mutate({})
+      return
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      setInputError('Invalid JSON')
+      return
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      setInputError('Input must be a JSON object, e.g. {"score": 40}')
+      return
+    }
+    setInputError(null)
+    runMutation.mutate(parsed as Record<string, any>)
+  }
 
   if (isLoading) return <div className="p-6 text-zinc-500">Loading...</div>
   if (!workflow) return <div className="p-6 text-zinc-500">Workflow not found</div>
@@ -159,7 +184,16 @@ export default function WorkflowEditor() {
             Save
           </button>
           <button
-            onClick={() => runMutation.mutate()}
+            onClick={() => setShowInput((s) => !s)}
+            className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+              showInput ? 'border-zinc-500 bg-zinc-800 text-zinc-100' : 'border-zinc-700 text-zinc-200 hover:bg-zinc-800'
+            }`}
+          >
+            <Braces size={14} />
+            Input
+          </button>
+          <button
+            onClick={handleRun}
             disabled={runMutation.isPending}
             className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
           >
@@ -168,6 +202,25 @@ export default function WorkflowEditor() {
           </button>
         </div>
       </header>
+
+      {showInput && (
+        <div className="border-b border-zinc-800 bg-zinc-950 px-4 py-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-zinc-400">Run input (JSON) — optional</label>
+            {inputJson && (
+              <button onClick={() => setInputJson('')} className="text-xs text-zinc-500 hover:text-zinc-300">Clear</button>
+            )}
+          </div>
+          <textarea
+            value={inputJson}
+            onChange={(e) => { setInputJson(e.target.value); if (inputError) setInputError(null) }}
+            placeholder='Leave blank to run with no input, or e.g. {"score": 40}'
+            spellCheck={false}
+            className="mt-1 h-16 w-full resize-y rounded-md border border-zinc-800 bg-zinc-900 p-2 font-mono text-xs text-zinc-200 outline-none focus:border-zinc-600"
+          />
+          {inputError && <p className="mt-1 text-xs text-red-400">{inputError}</p>}
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
@@ -229,7 +282,26 @@ export default function WorkflowEditor() {
       {/* Bottom: run output */}
       {runMutation.data && (
         <div className="border-t border-zinc-800 p-3">
-          <pre className="max-h-40 overflow-auto text-xs text-zinc-400">{JSON.stringify(runMutation.data, null, 2)}</pre>
+          <div className="mb-1 flex items-center gap-2 text-xs">
+            <span className={runMutation.data.status === 'completed' ? 'font-medium text-emerald-400' : 'font-medium text-red-400'}>
+              {runMutation.data.status}
+            </span>
+            <span className="text-zinc-600">{runMutation.data.id}</span>
+          </div>
+          {runMutation.data.error ? (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-red-300">{runMutation.data.error}</pre>
+          ) : (
+            <div className="space-y-2">
+              {runMutation.data.output_data?.output && (
+                <p className="text-sm text-zinc-100">{runMutation.data.output_data.output}</p>
+              )}
+              {runMutation.data.output_data?.node_outputs && (
+                <pre className="max-h-40 overflow-auto text-xs text-zinc-500">
+                  {JSON.stringify(runMutation.data.output_data.node_outputs, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

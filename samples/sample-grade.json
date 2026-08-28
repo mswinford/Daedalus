@@ -1,0 +1,66 @@
+{
+  "id": "sample-grade",
+  "name": "Score Grader (Sample)",
+  "description": "Demo flow: grade a test score and route pass/fail. Runs with no input (defaults to a score of 87). Send {\"score\": <int>} to try other branches.",
+  "schema_version": 1,
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 0, "y": 200 },
+      "config": { "input_fields": ["score"] }
+    },
+    {
+      "id": "grade",
+      "type": "custom_function",
+      "position": { "x": 280, "y": 200 },
+      "config": {
+        "code": "score = state[\"data\"].get(\"score\", 87)\nif score >= 90:\n    grade = \"A\"\nelif score >= 80:\n    grade = \"B\"\nelif score >= 70:\n    grade = \"C\"\nelif score >= 60:\n    grade = \"D\"\nelse:\n    grade = \"F\"\nresult[\"score\"] = score\nresult[\"grade\"] = grade\nresult[\"output\"] = f\"Score {score} -> Grade {grade}\"\n",
+        "timeout_seconds": 30,
+        "input_fields": ["score"],
+        "output_fields": ["grade"]
+      }
+    },
+    {
+      "id": "route",
+      "type": "conditional",
+      "position": { "x": 560, "y": 200 },
+      "config": {
+        "conditions": [
+          { "type": "json_path", "expression": "$_node_outputs.grade.score >= 80" },
+          { "type": "json_path", "expression": "$_node_outputs.grade.score < 80" }
+        ],
+        "default_branch": "fail"
+      }
+    },
+    {
+      "id": "pass_node",
+      "type": "transform",
+      "position": { "x": 840, "y": 80 },
+      "config": { "mode": "template", "template": "PASSED — nice work!", "output_field": "output" }
+    },
+    {
+      "id": "fail_node",
+      "type": "transform",
+      "position": { "x": 840, "y": 320 },
+      "config": { "mode": "template", "template": "FAILED — keep studying", "output_field": "output" }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 1120, "y": 200 },
+      "config": { "output_fields": [] }
+    }
+  ],
+  "edges": [
+    { "id": "e_start_grade", "source_node_id": "start", "source_handle": "default", "target_node_id": "grade" },
+    { "id": "e_grade_route", "source_node_id": "grade", "source_handle": "default", "target_node_id": "route" },
+    { "id": "e_route_pass", "source_node_id": "route", "source_handle": "pass", "target_node_id": "pass_node" },
+    { "id": "e_route_fail", "source_node_id": "route", "source_handle": "fail", "target_node_id": "fail_node" },
+    { "id": "e_pass_end", "source_node_id": "pass_node", "source_handle": "default", "target_node_id": "end" },
+    { "id": "e_fail_end", "source_node_id": "fail_node", "source_handle": "default", "target_node_id": "end" }
+  ],
+  "tools": [],
+  "models": [],
+  "state_schema": null
+}

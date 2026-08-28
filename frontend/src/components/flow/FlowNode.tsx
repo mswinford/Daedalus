@@ -60,7 +60,7 @@ export default function FlowNode({ data, selected }: NodeProps) {
         ring,
       ].join(' ')}
     >
-      {!isStart && <Handle type="target" position={Position.Top} id="in" />}
+      {!isStart && <Handle type="target" position={Position.Left} id="in" />}
 
       {d.validation && (
         <AlertTriangle
