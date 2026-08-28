@@ -64,6 +64,6 @@ export const workflowsApi = {
   delete: (id: string) => api.delete(`/workflows/${id}`),
   run: (id: string, input: Record<string, any> = {}) =>
     api.post<WorkflowRun>(`/workflows/${id}/run`, input).then(r => r.data),
-  validate: (id: string) =>
-    api.post<ValidationResult>(`/workflows/${id}/validate`).then(r => r.data),
+  validate: (id: string, body?: Workflow) =>
+    api.post<ValidationResult>(`/workflows/${id}/validate`, body ?? null).then(r => r.data),
 }

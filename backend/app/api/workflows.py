@@ -45,9 +45,16 @@ async def get_workflow(workflow_id: str):
 
 
 @router.post("/workflows/{workflow_id}/validate")
-async def validate_endpoint(workflow_id: str):
-    """Dry-run structural validation of a workflow (no execution)."""
-    workflow = _load_workflow(workflow_id)  # 404 if missing
+async def validate_endpoint(workflow_id: str, workflow: Workflow | None = None):
+    """Dry-run structural validation of a workflow (no execution).
+
+    If a workflow body is provided, validates that (unsaved canvas state).
+    Otherwise falls back to the saved file on disk.
+    """
+    if workflow is None:
+        workflow = _load_workflow(workflow_id)  # 404 if missing
+    else:
+        workflow.id = workflow_id
     result = validate_workflow(workflow)
     return result.model_dump()
 

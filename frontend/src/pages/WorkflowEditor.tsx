@@ -206,7 +206,18 @@ function WorkflowEditorInner() {
   })
 
   const validateMutation = useMutation({
-    mutationFn: () => workflowsApi.validate(id!),
+    mutationFn: () =>
+      workflowsApi.validate(id!, {
+        id: workflow!.id,
+        name: workflow!.name,
+        description: workflow!.description ?? null,
+        schema_version: workflow!.schema_version,
+        nodes: rfToNodes(nodes),
+        edges: rfToEdges(edges),
+        tools: workflow!.tools,
+        models: workflow!.models,
+        state_schema: workflow!.state_schema ?? null,
+      }),
     onSuccess: (r) => setValidation(r),
   })
 
