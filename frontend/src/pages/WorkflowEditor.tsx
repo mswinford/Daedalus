@@ -12,7 +12,7 @@ import {
   type Edge,
   type Connection,
 } from '@xyflow/react'
-import { ArrowLeft, Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu } from 'lucide-react'
 
 import { workflowsApi, type ValidationResult } from '@/lib/api'
 import {
@@ -33,6 +33,8 @@ import {
 } from '@/lib/graphTransform'
 import FlowNode from '@/components/flow/FlowNode'
 import ConfigPanel from '@/components/flow/ConfigPanel'
+import ModelsPanel from '@/components/flow/ModelsPanel'
+import type { ModelConfig } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
 
@@ -58,6 +60,8 @@ function WorkflowEditorInner() {
   const [inputJson, setInputJson] = useState('')
   const [showInput, setShowInput] = useState(false)
   const [inputError, setInputError] = useState<string | null>(null)
+  const [models, setModels] = useState<ModelConfig[]>([])
+  const [showModels, setShowModels] = useState(false)
 
   const { data: workflow, isLoading } = useQuery({
     queryKey: ['workflow', id],
@@ -68,6 +72,7 @@ function WorkflowEditorInner() {
     if (!workflow) return
     setNodes(nodesToRF(workflow.nodes, workflow.edges))
     setEdges(edgesToRF(workflow.edges))
+    setModels(workflow.models)
     setSelectedId(null)
     setValidation(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,7 +204,7 @@ function WorkflowEditorInner() {
         nodes: rfToNodes(nodes),
         edges: rfToEdges(edges),
         tools: workflow!.tools,
-        models: workflow!.models,
+        models,
         state_schema: workflow!.state_schema ?? null,
       }),
     onSuccess: () => {
@@ -219,7 +224,7 @@ function WorkflowEditorInner() {
         nodes: rfToNodes(nodes),
         edges: rfToEdges(edges),
         tools: workflow!.tools,
-        models: workflow!.models,
+        models,
         state_schema: workflow!.state_schema ?? null,
       }),
     onSuccess: (r) => setValidation(r),
@@ -265,6 +270,13 @@ function WorkflowEditorInner() {
           <h1 className="font-medium">{workflow.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowModels(true)}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            <Cpu size={14} />
+            Models
+          </button>
           {validation && (
             <span className={`mr-1 flex items-center gap-1 text-xs ${validation.valid ? 'text-emerald-400' : 'text-red-400'}`}>
               {validation.valid ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
@@ -397,7 +409,7 @@ function WorkflowEditorInner() {
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Config</p>
           <ConfigPanel
             node={selectedNode}
-            models={workflow.models}
+            models={models}
             tools={workflow.tools}
             onConfigChange={handleConfigChange}
             onDeleteNode={handleDeleteNode}
@@ -405,6 +417,11 @@ function WorkflowEditorInner() {
           />
         </aside>
       </div>
+
+      {/* Models modal */}
+      {showModels && (
+        <ModelsPanel models={models} onChange={setModels} onClose={() => setShowModels(false)} />
+      )}
 
       {/* Bottom: run output */}
       {runMutation.data && (
