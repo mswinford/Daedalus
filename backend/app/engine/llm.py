@@ -66,9 +66,14 @@ class OpenAICompatibleProvider(LLMProvider):
             api_key=self.api_key,
         )
 
-        openai_messages = [
-            {"role": m.role, "content": m.content} for m in messages
-        ]
+        openai_messages = []
+        for m in messages:
+            msg: dict[str, Any] = {"role": m.role, "content": m.content}
+            if m.tool_calls:
+                msg["tool_calls"] = m.tool_calls
+            if m.tool_call_id:
+                msg["tool_call_id"] = m.tool_call_id
+            openai_messages.append(msg)
 
         kwargs = {
             "model": self.model,

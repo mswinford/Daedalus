@@ -1,5 +1,6 @@
 """Translate workflow JSON into a LangGraph StateGraph."""
 import asyncio
+import json
 import re
 from typing import Any, Callable
 from langgraph.graph import StateGraph, START, END
@@ -10,9 +11,11 @@ from schema.models import (
     Workflow, Node, Edge, AgentNodeConfig,
     StartNodeConfig, EndNodeConfig, ConditionalNodeConfig,
     TransformNodeConfig, CustomFunctionNodeConfig, HumanInLoopNodeConfig,
+    ToolDefinition,
 )
-from app.engine.llm import create_provider, LLMProvider
+from app.engine.llm import create_provider, LLMProvider, Message
 from app.engine.conditions import evaluate_condition, ConditionError, _resolve_path
+from app.engine.tools import build_tool_schema, execute_tool
 from app.sandbox.runner import run_sandboxed
 
 
@@ -94,41 +97,69 @@ class GraphBuilder:
         return state
 
     def _agent_node(self, node: Node) -> Callable:
-        """Create an agent node function."""
+        """Create an agent node function with tool-calling loop."""
         config: AgentNodeConfig = node.config
         provider = self.providers.get(config.model_id)
         if not provider:
             raise ValueError(f"Model {config.model_id} not found")
 
-        async def agent_func(state: AgentState) -> AgentState:
-            messages = state.get("messages", [])
-            system_prompt = config.system_prompt
+        tools_by_name: dict[str, ToolDefinition] = {}
+        tool_schemas: list[dict[str, Any]] = []
+        for tid in config.tool_ids:
+            tool_def = next((t for t in self.workflow.tools if t.id == tid), None)
+            if tool_def:
+                tools_by_name[tool_def.name] = tool_def
+                tool_schemas.append(build_tool_schema(tool_def))
 
-            # Build messages for the LLM call
-            from app.engine.llm import Message
-            llm_messages = [
-                Message(role="system", content=system_prompt),
-            ]
+        async def agent_func(state: AgentState) -> AgentState:
+            messages = list(state.get("messages", []))
+            system_prompt = config.system_prompt
+            llm_messages = [Message(role="system", content=system_prompt)]
             llm_messages.extend(messages)
 
-            result = await provider.chat(
-                messages=llm_messages,
-                temperature=config.temperature,
-            )
+            tools = tool_schemas if tool_schemas else None
+            final_content = ""
 
-            # Append assistant message
+            for _ in range(config.max_iterations):
+                result = await provider.chat(
+                    messages=llm_messages,
+                    tools=tools,
+                    temperature=config.temperature,
+                )
+                final_content = result.content
+
+                if not result.tool_calls:
+                    llm_messages.append(Message(role="assistant", content=result.content))
+                    break
+
+                llm_messages.append(Message(
+                    role="assistant", content=result.content, tool_calls=result.tool_calls,
+                ))
+
+                for tc in result.tool_calls:
+                    func_name = tc.get("function", {}).get("name", "")
+                    try:
+                        args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    tool_def = tools_by_name.get(func_name)
+                    if tool_def:
+                        tool_result = await execute_tool(tool_def, args, dict(state))
+                    else:
+                        tool_result = json.dumps({"error": f"Unknown tool: {func_name}"})
+                    llm_messages.append(Message(
+                        role="tool", content=tool_result, tool_call_id=tc.get("id", ""),
+                    ))
+
             new_messages = list(messages)
-            new_messages.append(Message(
-                role="assistant",
-                content=result.content,
-            ))
+            new_messages.append(Message(role="assistant", content=final_content))
 
             return {
                 "messages": new_messages,
-                "output": result.content,
+                "output": final_content,
                 "_node_outputs": {
                     **state.get("_node_outputs", {}),
-                    node.id: {"content": result.content, "tokens": result.tokens_output},
+                    node.id: {"content": final_content},
                 },
             }
 
