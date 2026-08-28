@@ -1,4 +1,5 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { useEffect } from 'react'
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { Play, Flag, Bot, GitBranch, Shuffle, User, Code2, AlertTriangle } from 'lucide-react'
 
 import { NODE_META, type NodeType } from '@/lib/workflowTypes'
@@ -37,13 +38,19 @@ function subtitle(nodeType: NodeType, config: FlowNodeData['config']): string {
   }
 }
 
-export default function FlowNode({ data, selected }: NodeProps) {
+export default function FlowNode({ data, selected, id }: NodeProps) {
   const d = data as FlowNodeData
   const meta = NODE_META[d.nodeType]
   const Icon = ICONS[d.nodeType]
   const isStart = d.nodeType === 'start'
   const isEnd = d.nodeType === 'end'
   const handles = d.branchHandles ?? (isEnd ? [] : ['default'])
+
+  const updateNodeInternals = useUpdateNodeInternals()
+  const handleKey = handles.join(',')
+  useEffect(() => {
+    if (!isStart && !isEnd) updateNodeInternals(id)
+  }, [handleKey, id, isStart, isEnd, updateNodeInternals])
 
   const ring =
     d.validation === 'error'

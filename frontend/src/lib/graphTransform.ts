@@ -28,11 +28,18 @@ export function sourceHandlesFor(node: WorkflowNode, edges: WorkflowEdge[]): str
   const cfg = node.config as ConditionalNodeConfig
   const branches = edges.filter((e) => e.source_node_id === node.id && e.source_handle !== 'default')
   const handles: string[] = []
+  const seen = new Set<string>()
   cfg.conditions.forEach((_cond, i) => {
-    handles.push(branches[i]?.source_handle ?? `branch_${i + 1}`)
+    let name = branches[i]?.source_handle ?? `branch_${i + 1}`
+    while (seen.has(name)) name = `${name}_`
+    seen.add(name)
+    handles.push(name)
   })
   const fallback = cfg.default_branch ?? 'default'
-  if (!handles.includes(fallback)) handles.push(fallback)
+  if (!seen.has(fallback)) {
+    seen.add(fallback)
+    handles.push(fallback)
+  }
   return handles
 }
 
@@ -82,13 +89,3 @@ export function rfToEdges(edges: Edge[]): WorkflowEdge[] {
   }))
 }
 
-// Inject a transient validation highlight into node data without touching config.
-export function applyValidation(
-  nodes: FlowNodeType[],
-  issues: Map<string, 'error' | 'warning'>,
-): FlowNodeType[] {
-  return nodes.map((n) => ({
-    ...n,
-    data: { ...n.data, validation: issues.get(n.id) },
-  }))
-}

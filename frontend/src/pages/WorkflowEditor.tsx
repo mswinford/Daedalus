@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
@@ -29,7 +29,6 @@ import {
   rfToNodes,
   rfToEdges,
   sourceHandlesFor,
-  applyValidation,
   type FlowNodeType,
 } from '@/lib/graphTransform'
 import FlowNode from '@/components/flow/FlowNode'
@@ -74,15 +73,16 @@ function WorkflowEditorInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflow?.id])
 
-  const issueMap = useMemo(() => {
+  const validationRef = useRef<Map<string, 'error' | 'warning'>>(new Map())
+
+  useEffect(() => {
+    if (!validation) return
     const m = new Map<string, 'error' | 'warning'>()
-    if (!validation) return m
     for (const w of validation.warnings) if (w.node_id) m.set(w.node_id, 'warning')
     for (const e of validation.errors) if (e.node_id) m.set(e.node_id, 'error')
-    return m
-  }, [validation])
-
-  const displayNodes = useMemo(() => applyValidation(nodes, issueMap), [nodes, issueMap])
+    validationRef.current = m
+    setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: m.get(n.id) } })))
+  }, [validation, setNodes])
 
   const selectedNode: WorkflowNode | null = useMemo(() => {
     if (!selectedId) return null
@@ -202,7 +202,11 @@ function WorkflowEditorInner() {
         models: workflow!.models,
         state_schema: workflow!.state_schema ?? null,
       }),
-    onSuccess: () => setValidation(null),
+    onSuccess: () => {
+      setValidation(null)
+      validationRef.current = new Map()
+      setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: undefined } })))
+    },
   })
 
   const validateMutation = useMutation({
@@ -353,7 +357,7 @@ function WorkflowEditorInner() {
           onDragOver={handleDragOver}
         >
           <ReactFlow
-            nodes={displayNodes}
+            nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
