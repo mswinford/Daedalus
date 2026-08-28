@@ -34,6 +34,20 @@ export interface WorkflowRun {
   events: any[]
 }
 
+export interface ValidationIssue {
+  level: 'error' | 'warning'
+  code: string
+  message: string
+  node_id?: string
+  edge_id?: string
+}
+
+export interface ValidationResult {
+  valid: boolean
+  errors: ValidationIssue[]
+  warnings: ValidationIssue[]
+}
+
 export const workflowsApi = {
   list: () => api.get<WorkflowSummary[]>('/workflows').then(r => r.data),
   get: (id: string) => api.get<Workflow>(`/workflows/${id}`).then(r => r.data),
@@ -42,4 +56,6 @@ export const workflowsApi = {
   delete: (id: string) => api.delete(`/workflows/${id}`),
   run: (id: string, input: Record<string, any> = {}) =>
     api.post<WorkflowRun>(`/workflows/${id}/run`, input).then(r => r.data),
+  validate: (id: string) =>
+    api.post<ValidationResult>(`/workflows/${id}/validate`).then(r => r.data),
 }

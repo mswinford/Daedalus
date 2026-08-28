@@ -5,6 +5,7 @@ import uuid
 
 from schema.models import Workflow
 from app.config import get_settings
+from app.engine.validation import validate_workflow
 
 router = APIRouter()
 settings = get_settings()
@@ -41,6 +42,14 @@ async def list_workflows():
 async def get_workflow(workflow_id: str):
     """Get a workflow by ID."""
     return _load_workflow(workflow_id)
+
+
+@router.post("/workflows/{workflow_id}/validate")
+async def validate_endpoint(workflow_id: str):
+    """Dry-run structural validation of a workflow (no execution)."""
+    workflow = _load_workflow(workflow_id)  # 404 if missing
+    result = validate_workflow(workflow)
+    return result.model_dump()
 
 
 @router.post("/workflows", status_code=201)
