@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react'
+import type { Edge } from '@xyflow/react'
 
 import {
   type WorkflowNode,
@@ -19,6 +20,8 @@ interface Props {
   models: ModelConfig[]
   tools: ToolDefinition[]
   onConfigChange: (nodeId: string, config: NodeConfig) => void
+  onDeleteNode: (nodeId: string) => void
+  edges: Edge[]
 }
 
 // ─── small form primitives ──────────────────────────────────────────────────
@@ -119,18 +122,32 @@ function AgentEditor({ config, set, models, tools }: { config: AgentNodeConfig; 
   )
 }
 
-function ConditionalEditor({ config, set }: { config: ConditionalNodeConfig; set: (c: ConditionalNodeConfig) => void }) {
+function ConditionalEditor({ config, set, nodeId, edges }: { config: ConditionalNodeConfig; set: (c: ConditionalNodeConfig) => void; nodeId: string; edges: Edge[] }) {
   const update = (i: number, patch: Partial<ConditionalNodeConfig['conditions'][number]>) => {
     const conditions = config.conditions.map((c, idx) => (idx === i ? { ...c, ...patch } : c))
     set({ ...config, conditions })
   }
+
+  // Derive the handle name for condition index i (matches sourceHandlesFor logic).
+  const branches = edges.filter((e) => e.source === nodeId && e.sourceHandle !== 'default')
+  const handleFor = (i: number) => branches[i]?.sourceHandle ?? `branch_${i + 1}`
+  const hasConnectedEdge = (i: number) => {
+    const h = handleFor(i)
+    return edges.some((e) => e.source === nodeId && e.sourceHandle === h)
+  }
+
   return (
     <div className="space-y-3">
       {config.conditions.map((c, i) => (
         <div key={i} className="rounded-md border border-zinc-800 p-2">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-medium text-zinc-400">Branch {i + 1}</span>
-            <button onClick={() => set({ ...config, conditions: config.conditions.filter((_, idx) => idx !== i) })} className="text-zinc-500 hover:text-red-400">
+            <button
+              onClick={() => set({ ...config, conditions: config.conditions.filter((_, idx) => idx !== i) })}
+              disabled={hasConnectedEdge(i)}
+              title={hasConnectedEdge(i) ? 'Disconnect this branch edge first' : undefined}
+              className="text-zinc-500 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30"
+            >
               <Trash2 size={13} />
             </button>
           </div>
@@ -225,7 +242,7 @@ function CustomFunctionEditor({ config, set }: { config: CustomFunctionNodeConfi
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, onConfigChange }: Props) {
+export default function ConfigPanel({ node, models, tools, onConfigChange, onDeleteNode, edges }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -244,12 +261,22 @@ export default function ConfigPanel({ node, models, tools, onConfigChange }: Pro
       {node.type === 'start' && <StartEditor config={node.config} set={set} />}
       {node.type === 'end' && <EndEditor config={node.config} set={set} />}
       {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} />}
-      {node.type === 'conditional' && <ConditionalEditor config={node.config} set={set} />}
+      {node.type === 'conditional' && <ConditionalEditor config={node.config} set={set} nodeId={node.id} edges={edges} />}
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}
       {node.type === 'human_in_loop' && (
         <p className="text-sm text-zinc-500">Human-in-loop nodes are not editable until Phase 3.</p>
       )}
+
+      <div className="border-t border-zinc-800 pt-3">
+        <button
+          onClick={() => onDeleteNode(node.id)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-900/50 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-950/30"
+        >
+          <Trash2 size={14} />
+          Delete node
+        </button>
+      </div>
     </div>
   )
 }

@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Edge,
+  type Connection,
 } from '@xyflow/react'
 import { ArrowLeft, Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react'
 
@@ -15,6 +18,8 @@ import { workflowsApi, type ValidationResult } from '@/lib/api'
 import {
   ALL_NODE_TYPES,
   NODE_META,
+  defaultConfig,
+  type NodeType,
   type WorkflowNode,
   type NodeConfig,
 } from '@/lib/workflowTypes'
@@ -42,9 +47,10 @@ const nodeTypes = {
   custom_function: FlowNode,
 }
 
-export default function WorkflowEditor() {
+function WorkflowEditorInner() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { screenToFlowPosition } = useReactFlow()
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeType>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -59,7 +65,6 @@ export default function WorkflowEditor() {
     queryFn: () => workflowsApi.get(id!),
   })
 
-  // (Re)initialize the canvas whenever a different workflow is loaded.
   useEffect(() => {
     if (!workflow) return
     setNodes(nodesToRF(workflow.nodes, workflow.edges))
@@ -99,6 +104,90 @@ export default function WorkflowEditor() {
       }),
     )
   }
+
+  // ─── Node creation (drag from palette) ─────────────────────────────────────
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      const type = e.dataTransfer.getData('application/reactflow') as NodeType
+      if (!type || !ALL_NODE_TYPES.includes(type)) return
+      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const newId = crypto.randomUUID()
+      const config = defaultConfig(type)
+      const newNode: FlowNodeType = {
+        id: newId,
+        type,
+        position,
+        data: {
+          nodeType: type,
+          config,
+          branchHandles: type === 'conditional' ? ['default'] : type === 'end' ? [] : ['default'],
+        },
+      }
+      setNodes((ns) => [...ns, newNode])
+      setSelectedId(newId)
+    },
+    [screenToFlowPosition, setNodes],
+  )
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  // ─── Edge creation ─────────────────────────────────────────────────────────
+
+  const handleConnect = useCallback(
+    (params: Connection) => {
+      if (params.source === params.target) return
+      setEdges((eds) => [
+        ...eds,
+        {
+          id: crypto.randomUUID(),
+          source: params.source,
+          sourceHandle: params.sourceHandle ?? 'default',
+          target: params.target,
+          type: 'default',
+          data: { semanticType: 'static', condition: null },
+        },
+      ])
+    },
+    [setEdges],
+  )
+
+  // ─── Node deletion (cascade edges) ─────────────────────────────────────────
+
+  const handleNodesDelete = useCallback(
+    (deleted: FlowNodeType[]) => {
+      const ids = new Set(deleted.map((n) => n.id))
+      setEdges((eds) => eds.filter((e) => !ids.has(e.source) && !ids.has(e.target)))
+      if (selectedId && ids.has(selectedId)) setSelectedId(null)
+    },
+    [setEdges, selectedId],
+  )
+
+  // ─── Edge deletion ─────────────────────────────────────────────────────────
+
+  const handleEdgesDelete = useCallback(
+    (_deleted: Edge[]) => {
+      // No additional cleanup needed; React Flow removes them from state.
+    },
+    [],
+  )
+
+  // ─── Delete node from config panel ─────────────────────────────────────────
+
+  const handleDeleteNode = useCallback(
+    (nodeId: string) => {
+      setNodes((ns) => ns.filter((n) => n.id !== nodeId))
+      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
+      setSelectedId(null)
+    },
+    [setNodes, setEdges],
+  )
+
+  // ─── Save / Validate / Run ─────────────────────────────────────────────────
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -224,31 +313,47 @@ export default function WorkflowEditor() {
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: node legend */}
+        {/* Left: node palette (draggable) */}
         <aside className="w-48 border-r border-zinc-800 p-3">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Node types</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Add nodes</p>
           <div className="space-y-1">
             {ALL_NODE_TYPES.map((t) => (
-              <div key={t} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-300">
+              <div
+                key={t}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/reactflow', t)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                className="flex cursor-grab items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-1.5 text-sm text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 active:cursor-grabbing"
+              >
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_META[t].color }} />
                 {NODE_META[t].label}
               </div>
             ))}
           </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-zinc-600">Drag onto canvas to add. Click a node to edit. Delete key removes selection.</p>
         </aside>
 
         {/* Center: canvas */}
-        <main className="relative flex-1 bg-zinc-900/30">
+        <main
+          className="relative flex-1 bg-zinc-900/30"
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
           <ReactFlow
             nodes={displayNodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onConnect={handleConnect}
+            onNodesDelete={handleNodesDelete}
+            onEdgesDelete={handleEdgesDelete}
             nodeTypes={nodeTypes}
             onNodeClick={(_e, n) => setSelectedId(n.id)}
+            onEdgeClick={() => setSelectedId(null)}
             onPaneClick={() => setSelectedId(null)}
-            nodesConnectable={false}
-            deleteKeyCode={null}
+            deleteKeyCode="Delete"
             fitView
           >
             <Background color="#27272a" gap={16} />
@@ -275,7 +380,14 @@ export default function WorkflowEditor() {
         {/* Right: config panel */}
         <aside className="w-72 overflow-y-auto border-l border-zinc-800 p-3">
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Config</p>
-          <ConfigPanel node={selectedNode} models={workflow.models} tools={workflow.tools} onConfigChange={handleConfigChange} />
+          <ConfigPanel
+            node={selectedNode}
+            models={workflow.models}
+            tools={workflow.tools}
+            onConfigChange={handleConfigChange}
+            onDeleteNode={handleDeleteNode}
+            edges={edges}
+          />
         </aside>
       </div>
 
@@ -305,5 +417,13 @@ export default function WorkflowEditor() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function WorkflowEditor() {
+  return (
+    <ReactFlowProvider>
+      <WorkflowEditorInner />
+    </ReactFlowProvider>
   )
 }

@@ -192,3 +192,23 @@ export const ALL_NODE_TYPES: NodeType[] = [
   'human_in_loop',
   'custom_function',
 ]
+
+// Returns a sensible empty config for a newly created node of the given type.
+export function defaultConfig(type: NodeType): NodeConfig {
+  switch (type) {
+    case 'start':
+      return { input_fields: [] }
+    case 'end':
+      return { output_fields: [] }
+    case 'agent':
+      return { model_id: '', system_prompt: '', temperature: null, tool_ids: [], max_iterations: 5 }
+    case 'conditional':
+      return { conditions: [], default_branch: null }
+    case 'transform':
+      return { mode: 'template', template: '', field_mappings: null, custom_function_id: null, output_field: '' }
+    case 'human_in_loop':
+      return { input_fields: [], approval_required: true, approval_message: null, timeout_seconds: null, output_fields: [] }
+    case 'custom_function':
+      return { code: '', timeout_seconds: 10, input_fields: [], output_fields: [] }
+  }
+}
