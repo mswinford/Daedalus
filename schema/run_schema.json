@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "RunEvent": {
+      "description": "An event emitted during workflow execution.",
+      "properties": {
+        "timestamp": {
+          "description": "Unix timestamp",
+          "title": "Timestamp",
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "run_start",
+            "run_end",
+            "node_start",
+            "node_end",
+            "node_error",
+            "llm_call",
+            "llm_token",
+            "tool_call",
+            "tool_result",
+            "human_request",
+            "human_respond",
+            "retry"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node Id"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        }
+      },
+      "required": [
+        "timestamp",
+        "type"
+      ],
+      "title": "RunEvent",
+      "type": "object"
+    },
+    "RunStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "paused"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    }
+  },
+  "description": "A single execution of a workflow.",
+  "properties": {
+    "id": {
+      "description": "Unique run identifier",
+      "title": "Id",
+      "type": "string"
+    },
+    "workflow_id": {
+      "description": "Reference to the workflow",
+      "title": "Workflow Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/RunStatus",
+      "default": "pending"
+    },
+    "input_data": {
+      "additionalProperties": true,
+      "title": "Input Data",
+      "type": "object"
+    },
+    "output_data": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Data"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "started_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Started At"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completed At"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/RunEvent"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "total_tokens_input": {
+      "default": 0,
+      "title": "Total Tokens Input",
+      "type": "integer"
+    },
+    "total_tokens_output": {
+      "default": 0,
+      "title": "Total Tokens Output",
+      "type": "integer"
+    },
+    "estimated_cost_usd": {
+      "default": 0.0,
+      "title": "Estimated Cost Usd",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "workflow_id"
+  ],
+  "title": "WorkflowRun",
+  "type": "object"
+}

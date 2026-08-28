@@ -1,0 +1,45 @@
+import axios from 'axios'
+
+const api = axios.create({
+  baseURL: '/api',
+})
+
+export interface WorkflowSummary {
+  id: string
+  name: string
+  description?: string
+}
+
+export interface Workflow {
+  id: string
+  name: string
+  description?: string
+  schema_version: number
+  nodes: any[]
+  edges: any[]
+  tools: any[]
+  models: any[]
+  state_schema?: any
+}
+
+export interface WorkflowRun {
+  id: string
+  workflow_id: string
+  status: string
+  input_data: Record<string, any>
+  output_data?: Record<string, any>
+  error?: string
+  started_at?: number
+  completed_at?: number
+  events: any[]
+}
+
+export const workflowsApi = {
+  list: () => api.get<WorkflowSummary[]>('/workflows').then(r => r.data),
+  get: (id: string) => api.get<Workflow>(`/workflows/${id}`).then(r => r.data),
+  create: (data: Partial<Workflow>) => api.post<Workflow>('/workflows', data).then(r => r.data),
+  update: (id: string, data: Workflow) => api.put<Workflow>(`/workflows/${id}`, data).then(r => r.data),
+  delete: (id: string) => api.delete(`/workflows/${id}`),
+  run: (id: string, input: Record<string, any> = {}) =>
+    api.post<WorkflowRun>(`/workflows/${id}/run`, input).then(r => r.data),
+}
