@@ -72,3 +72,54 @@ def test_transform_template_missing_path_renders_empty():
         {},
     )
     assert out["output"] == "[]"
+
+
+# --- #4: transform custom_function mode ---
+
+def test_transform_custom_function_writes_full_result_to_data():
+    code = 'result["grade"] = "A"\nresult["score"] = 95'
+    out = run_workflow_sync(
+        _wf(code, ["grade"], {
+            "mode": "custom_function",
+            "custom_function_id": "cf",
+            "output_field": "analysis",
+        }),
+        {},
+    )
+    assert out["data"]["analysis"] == {"grade": "A", "score": 95}
+    assert out["node_outputs"]["tf"] == {"grade": "A", "score": 95}
+
+
+def test_transform_custom_function_dangling_id_raises():
+    import pytest
+    with pytest.raises(ValueError, match="unknown or non-custom_function"):
+        run_workflow_sync(
+            _wf('result["x"] = 1', ["x"], {
+                "mode": "custom_function",
+                "custom_function_id": "nonexistent",
+                "output_field": "out",
+            }),
+            {},
+        )
+
+
+def test_transform_custom_function_wrong_type_raises():
+    import pytest
+    wf = Workflow(
+        id="wf", name="wf",
+        nodes=[
+            Node(id="start", type="start", config={}),
+            Node(id="tf", type="transform", config={
+                "mode": "custom_function",
+                "custom_function_id": "start",
+                "output_field": "out",
+            }),
+            Node(id="end", type="end", config={}),
+        ],
+        edges=[
+            Edge(id="s", source_node_id="start", source_handle="default", target_node_id="tf"),
+            Edge(id="t", source_node_id="tf", source_handle="default", target_node_id="end"),
+        ],
+    )
+    with pytest.raises(ValueError, match="unknown or non-custom_function"):
+        run_workflow_sync(wf, {})

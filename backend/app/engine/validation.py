@@ -200,6 +200,30 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
                         node_id=n.id,
                     ))
 
+        elif n.type == "transform":
+            if cfg.mode == "custom_function":
+                ref_id = cfg.custom_function_id
+                if not ref_id:
+                    errors.append(ValidationIssue(
+                        level="error", code="E_TRANSFORM_FUNCTION_MISSING",
+                        message=f"Transform '{n.id}' uses custom_function mode but has no custom_function_id",
+                        node_id=n.id,
+                    ))
+                else:
+                    ref = nodes_by_id.get(ref_id)
+                    if not ref:
+                        errors.append(ValidationIssue(
+                            level="error", code="E_TRANSFORM_FUNCTION_MISSING",
+                            message=f"Transform '{n.id}' references unknown node '{ref_id}'",
+                            node_id=n.id,
+                        ))
+                    elif ref.type != "custom_function":
+                        errors.append(ValidationIssue(
+                            level="error", code="E_TRANSFORM_FUNCTION_TYPE",
+                            message=f"Transform '{n.id}' references node '{ref_id}' which is not a custom_function (it's {ref.type})",
+                            node_id=n.id,
+                        ))
+
         elif n.type == "human_in_loop":
             warnings.append(ValidationIssue(
                 level="warning", code="W_HUMAN_NOT_SUPPORTED",
