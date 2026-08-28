@@ -1,5 +1,6 @@
 """Translate workflow JSON into a LangGraph StateGraph."""
 import asyncio
+import re
 from typing import Any, Callable
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -11,8 +12,23 @@ from schema.models import (
     TransformNodeConfig, CustomFunctionNodeConfig, HumanInLoopNodeConfig,
 )
 from app.engine.llm import create_provider, LLMProvider
-from app.engine.conditions import evaluate_condition, ConditionError
+from app.engine.conditions import evaluate_condition, ConditionError, _resolve_path
 from app.sandbox.runner import run_sandboxed
+
+
+_TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+
+
+def _render_template(template: str, state: dict) -> str:
+    """Replace {{path}} placeholders with values resolved from state.
+
+    Paths are dot-separated and may be nested (e.g. data.score or
+    _node_outputs.grade.label). Missing paths render as an empty string.
+    """
+    def _sub(match):
+        value = _resolve_path(state, match.group(1))
+        return "" if value is None else str(value)
+    return _TEMPLATE_VAR_RE.sub(_sub, template)
 
 
 # LangGraph state type
@@ -130,19 +146,19 @@ class GraphBuilder:
         async def transform_func(state: AgentState) -> AgentState:
             output = ""
             if config.mode == "template" and config.template:
-                # Simple template substitution
-                output = config.template
-                for field_name, field_value in state.items():
-                    if isinstance(field_value, str):
-                        output = output.replace(f"{{{{{field_name}}}}}", field_value)
+                output = _render_template(config.template, state)
             elif config.mode == "mapping" and config.field_mappings:
                 result = {}
                 for mapping in config.field_mappings:
-                    result[mapping.target] = state.get(mapping.source, "")
+                    value = _resolve_path(state, mapping.source)
+                    result[mapping.target] = "" if value is None else value
                 output = str(result)
+
+            new_data = {**state.get("data", {}), config.output_field: output}
 
             return {
                 "output": output,
+                "data": new_data,
                 "_node_outputs": {
                     **state.get("_node_outputs", {}),
                     node.id: {config.output_field: output},
@@ -163,8 +179,17 @@ class GraphBuilder:
             if "error" in result:
                 raise RuntimeError(f"Custom function '{node.id}' failed: {result['error']}")
 
+            # Write back the declared output fields into `data` so downstream
+            # nodes can address them (e.g. $.data.grade). Undeclared keys stay
+            # only in _node_outputs.
+            new_data = {**state.get("data", {})}
+            for field in config.output_fields:
+                if field in result:
+                    new_data[field] = result[field]
+
             return {
                 "output": str(result),
+                "data": new_data,
                 "_node_outputs": {
                     **state.get("_node_outputs", {}),
                     node.id: result,

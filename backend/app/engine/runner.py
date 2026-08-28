@@ -44,5 +44,6 @@ def run_workflow_sync(workflow: Workflow, input_data: dict[str, Any]) -> dict[st
     return {
         "output": result.get("output", ""),
         "messages": result.get("messages", []),
+        "data": result.get("data", {}),
         "node_outputs": result.get("_node_outputs", {}),
     }

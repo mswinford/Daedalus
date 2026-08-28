@@ -9,43 +9,52 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 1 complete)
+## Current Status (Phase 2 MVP complete; closing engine data-flow gaps)
 
-> Last updated after the validate-endpoint commit (`864367d`). Use this section as the
-> source of truth when resuming in a new session — it supersedes the phase notes below.
+> Last updated after Phase 2.1 item #1 (custom_function write-back + nested reads).
+> Use this section as the source of truth when resuming in a new session — it supersedes
+> the phase notes below.
 
 ### What works today (shippable)
 - **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
   synchronously via `POST /api/workflows/{id}/run`.
 - **Node types wired in the builder**: `agent`, `conditional`, `transform`
   (`template` + `mapping` modes), `custom_function` (RestrictedPython sandbox).
-- **Conditional routing**: conditional nodes AND edge-level conditions. Only the
-  `json_path` condition type is implemented; `regex` and `llm` raise
-  `NotImplementedError`. Fallback resolution: preferred handle → `"default"` →
-  (edge-level only) first static edge → `ConditionError`.
+- **Data flow (Phase 2.1 #1)**: `custom_function` writes its declared `output_fields` back
+  into shared `data`; `transform` `template`/`mapping` resolve nested dot-paths
+  (`{{data.user.name}}`, `source: data.profile.city`) via `_resolve_path` and write their
+  `output_field` into `data`. `run_workflow_sync` now returns `data`.
+- **Conditional routing**: conditional nodes AND edge-level conditions. `json_path` +
+  `regex` implemented; `llm` raises `NotImplementedError`. Fallback resolution: preferred
+  handle → `"default"` → (edge-level only) first static edge → `ConditionError`.
 - **LLM layer**: OpenAI-compatible provider works (OpenAI / Ollama / llama.cpp / vLLM /
-  LM Studio). Anthropic raises `NotImplementedError` (Phase 4).
+  LM Studio). Anthropic raises `NotImplementedError` (Phase 4). Tool-calling plumbing exists
+  (`Message.tool_calls`, `chat(tools=...)`) but there is no agent tool loop yet.
 - **REST API**: full workflow CRUD + `run` + `validate`. See table below for status.
 - **Static validation**: `POST /api/workflows/{id}/validate` checks duplicate node ids,
   dangling edges, missing start/end, cycle detection, unreachable nodes, conditional
   branch-count mismatches, unknown model/tool references.
-- **Frontend (partial)**: `src/pages/WorkflowList.tsx` (create/list/delete) and
-  `src/pages/WorkflowEditor.tsx` (shell with Save + Run buttons). The graph canvas is a
-  **placeholder** — no React Flow yet. There is **no Validate button in the UI** yet (the
-  API + client method exist). `@xyflow/react` v12.11.5 is installed but unused; there is no
-  `src/components/` dir yet. Only files: `App.tsx`, `main.tsx`, `index.css`, `lib/api.ts`,
-  the two pages above.
-- **Tests**: 49 passing (`python -m pytest -q`). Frontend typechecks clean (`tsc --noEmit`).
+- **Frontend (Phase 2 MVP)**: read-only React Flow canvas (`FlowNode`, `graphTransform`),
+  per-node config panel (`ConfigPanel`), Validate + Save + Run buttons, optional collapsible
+  JSON run-input box, and a run output display with a status badge. Node inputs sit on the
+  left edge (left→right flow). Sample workflow installed at
+  `~/.ai-forge/workflows/sample-grade.json`.
+- **Tests**: 54 passing (`python -m pytest backend/tests/ -q`). Frontend typechecks clean.
 
-### Known gaps vs. this plan (Phase 1 leftovers)
-- `custom_function` can read state but its result only lands in `output` /
-  `_node_outputs`; it cannot write back into the shared `data.*` fields.
-- Agent nodes ignore `tool_ids` and `max_iterations` — a single chat call, no tool loop.
-- `state_schema` field is defined but not used by the builder (state is a fixed TypedDict).
-- Transform `custom_function` mode is not wired in the builder (only `template`/`mapping`).
+### Known gaps vs. this plan (engine data-flow — Phase 2.1)
+Order: #1 → #4 → #3 → #2. One commit per item so each is independently revertable.
+- [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
+  (done: `builder.py`, `runner.py`, `tests/test_transform.py`).
+- [ ] **#4 Transform `custom_function` mode** — look up the referenced node, run its code in
+  the sandbox, write to `data[output_field]`. (`TransformNodeConfig.custom_function_id`.)
+- [ ] **#3 State schema wiring** — validate/coerce run input against
+  `workflow.state_schema.fields` in runner/start_node.
+- [ ] **#2 Agent tool loop** — tool schema builder + executor, LLM message serialization for
+  tool calls, and the agent iteration loop (respect `max_iterations`). The LLM layer already
+  supports tool calling; only the orchestration is missing.
 
 ### What is deferred by design
-- **Phase 2** — React Flow graph editor, per-node config panel, Validate button UI,
+- **Phase 2 (later increments)** — editable canvas (add/delete/connect nodes & edges),
   async execution + WebSocket streaming, run log/debug panel.
 - **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
