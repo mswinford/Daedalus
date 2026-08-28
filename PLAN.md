@@ -9,9 +9,9 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 2.1 complete — all engine data-flow gaps closed)
+## Current Status (Phase 2.2 — editable canvas + model config)
 
-> Last updated after Phase 2.1 items #1, #4, #3, #2 (all done).
+> Last updated: editable canvas done, conditional handle alignment fixed, models panel next.
 > Use this section as the source of truth when resuming in a new session — it supersedes
 > the phase notes below.
 
@@ -41,10 +41,11 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   dangling edges, missing start/end, cycle detection, unreachable nodes, conditional
   branch-count mismatches, unknown model/tool references, transform custom_function
   reference integrity.
-- **Frontend (Phase 2 MVP)**: read-only React Flow canvas (`FlowNode`, `graphTransform`),
-  per-node config panel (`ConfigPanel`), Validate + Save + Run buttons, optional collapsible
-  JSON run-input box, and a run output display with a status badge. Node inputs sit on the
-  left edge (left→right flow). Sample workflow installed at
+- **Frontend (Phase 2)**: editable React Flow canvas — drag/drop nodes from palette,
+  draw/delete edges, delete nodes (cascade), per-node config panel (`ConfigPanel`),
+  Validate + Save + Run buttons, optional collapsible JSON run-input box, and a run
+  output display with a status badge. Conditional node handles update live when
+  branches are added/removed (`useUpdateNodeInternals`). Sample workflow installed at
   `~/.ai-forge/workflows/sample-grade.json`.
 - **Tests**: 74 passing (`python -m pytest backend/tests/ -q`). Frontend typechecks clean.
 
@@ -54,18 +55,29 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **#3 State schema wiring** — validate run input against `workflow.state_schema.fields`
 - [x] **#2 Agent tool loop** — tool schema builder + executor, LLM message serialization, bounded iteration loop
 
+### Next up (Phase 2.2)
+- [ ] **#5 Models panel** — frontend-only: add/edit/delete `ModelConfig` entries in the
+  editor so users can configure an LLM endpoint and assign it to agent nodes.
+  - Where: right-side panel or a "Models" tab in the top bar (TBD during impl).
+  - Fields: name, provider (`openai_compatible`), model, base_url, api_key_ref,
+    default_temperature. No secrets store yet — `api_key_ref` is the literal key
+    (or empty for local models like Ollama).
+  - Backend already works: `builder.py` → `create_provider()` → `OpenAICompatibleProvider`.
+  - Save path already round-trips `workflow.models` via PUT — zero backend changes needed.
+  - Acceptance: user adds a model in UI → selects it on an agent node → Run calls the LLM.
+
 ### What is deferred by design
-- **Phase 2 (later increments)** — editable canvas (add/delete/connect nodes & edges),
-  async execution + WebSocket streaming, run log/debug panel.
+- **Phase 2 (later increments)** — async execution + WebSocket streaming, run log/debug panel,
+  secrets store (`~/.ai-forge/secrets.json` + env-var precedence), test-connection endpoint.
 - **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
 
-### Phase 2 — Design (decided, not started)
+### Phase 2 — Design (completed)
 
 > Scope decision: build **MVP first** = read-only React Flow canvas + per-node config panel
-> + working Validate button, keeping the existing **sync** Run. Defer editable canvas
-> (add/delete/connect nodes & edges) and async + WebSocket streaming to a later increment.
+> + working Validate button, keeping the existing **sync** Run. Editable canvas shipped in
+> a follow-up increment. Async + WebSocket streaming still deferred.
 
 #### Files to create / change
 | File | Action | Purpose |
