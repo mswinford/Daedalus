@@ -9,6 +9,102 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
+## Current Status (Phase 1 complete)
+
+> Last updated after the validate-endpoint commit (`864367d`). Use this section as the
+> source of truth when resuming in a new session — it supersedes the phase notes below.
+
+### What works today (shippable)
+- **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
+  synchronously via `POST /api/workflows/{id}/run`.
+- **Node types wired in the builder**: `agent`, `conditional`, `transform`
+  (`template` + `mapping` modes), `custom_function` (RestrictedPython sandbox).
+- **Conditional routing**: conditional nodes AND edge-level conditions. Only the
+  `json_path` condition type is implemented; `regex` and `llm` raise
+  `NotImplementedError`. Fallback resolution: preferred handle → `"default"` →
+  (edge-level only) first static edge → `ConditionError`.
+- **LLM layer**: OpenAI-compatible provider works (OpenAI / Ollama / llama.cpp / vLLM /
+  LM Studio). Anthropic raises `NotImplementedError` (Phase 4).
+- **REST API**: full workflow CRUD + `run` + `validate`. See table below for status.
+- **Static validation**: `POST /api/workflows/{id}/validate` checks duplicate node ids,
+  dangling edges, missing start/end, cycle detection, unreachable nodes, conditional
+  branch-count mismatches, unknown model/tool references.
+- **Frontend (partial)**: `src/pages/WorkflowList.tsx` (create/list/delete) and
+  `src/pages/WorkflowEditor.tsx` (shell with Save + Run buttons). The graph canvas is a
+  **placeholder** — no React Flow yet. There is **no Validate button in the UI** yet (the
+  API + client method exist). `@xyflow/react` v12.11.5 is installed but unused; there is no
+  `src/components/` dir yet. Only files: `App.tsx`, `main.tsx`, `index.css`, `lib/api.ts`,
+  the two pages above.
+- **Tests**: 49 passing (`python -m pytest -q`). Frontend typechecks clean (`tsc --noEmit`).
+
+### Known gaps vs. this plan (Phase 1 leftovers)
+- `custom_function` can read state but its result only lands in `output` /
+  `_node_outputs`; it cannot write back into the shared `data.*` fields.
+- Agent nodes ignore `tool_ids` and `max_iterations` — a single chat call, no tool loop.
+- `state_schema` field is defined but not used by the builder (state is a fixed TypedDict).
+- Transform `custom_function` mode is not wired in the builder (only `template`/`mapping`).
+
+### What is deferred by design
+- **Phase 2** — React Flow graph editor, per-node config panel, Validate button UI,
+  async execution + WebSocket streaming, run log/debug panel.
+- **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
+- **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
+  observability/Prometheus.
+
+### Phase 2 — Design (decided, not started)
+
+> Scope decision: build **MVP first** = read-only React Flow canvas + per-node config panel
+> + working Validate button, keeping the existing **sync** Run. Defer editable canvas
+> (add/delete/connect nodes & edges) and async + WebSocket streaming to a later increment.
+
+#### Files to create / change
+| File | Action | Purpose |
+|---|---|---|
+| `frontend/src/lib/workflowTypes.ts` | new | TS types mirroring `schema/models.py`: `NodeType`, `EdgeType`, `ConditionConfig`, all node config interfaces, `WorkflowDoc`. |
+| `frontend/src/lib/graphTransform.ts` | new | Backend ⇄ React Flow conversion (`nodesToRF`, `edgesToRF`, `rfToNodes`, `rfToEdges`), conditional handle derivation (`sourceHandlesFor`), derived display (`applyDerived`). |
+| `frontend/src/components/flow/FlowNode.tsx` | new | One generic custom node registered under all 7 type keys; renders handles per type. |
+| `frontend/src/components/flow/ConfigPanel.tsx` | new | Right-side per-type config editor forms. |
+| `frontend/src/pages/WorkflowEditor.tsx` | rewrite | Top bar (Back, Validate, Save, Run), left palette, center `<ReactFlow>` canvas, right ConfigPanel. |
+| `frontend/src/lib/api.ts` | modify | Tighten `Workflow.nodes`/`edges` from `any[]` to the typed arrays above. |
+
+#### Data mapping (backend ⇄ React Flow)
+- Node `{id,type,position:{x,y},config}` → RF node `{id, type:<same string>, position, data:{config, ...derived}}`.
+  - `NodeType` is a `typing.Literal[...]`, **not** an enum — use plain strings (`"start"`, `"agent"`, …).
+- Edge `{id,source_node_id,source_handle,target_node_id,type,condition}` → RF edge
+  `{id, source, sourceHandle, target, data:{semanticType, condition}}`.
+  - RF `type` is always `'default'`; the backend semantic type (`static`/`conditional`/`error`)
+    lives in `data.semanticType`.
+
+#### Conditional node handles (the tricky part)
+- Contract: outgoing edges with `source_handle != "default"` are **branches**, matched
+  **positionally** to `config.conditions[i]` ↔ `branches[i]`. Fallback = `default_branch`,
+  else the `"default"` handle, else `ConditionError`.
+- Handle names are **derived, not stored**: for condition `i`, name = `branches[i].sourceHandle`
+  if present else `branch_{i+1}`; plus one default handle = `default_branch ?? "default"`.
+  This keeps existing named branches working AND lets a new branch appear when a condition is added.
+
+#### Derived display pattern
+- Keep raw `nodes`/`edges` in React Flow state (`useNodesState`/`useEdgesState`).
+- Compute `displayNodes`/`displayEdges` via `useMemo(applyDerived)` — injects
+  `data.branchHandles` (conditional nodes) and validation flags. Pass the derived arrays to `<ReactFlow>`.
+
+#### Validation highlighting
+- Validate button → `workflowsApi.validate(id)` → `ValidationResult{errors,warnings}`.
+- Build a `Map<string,'error'|'warning'>` keyed by `node_id`/`edge_id`; errors = red ring/stroke,
+  warnings = amber. Surface the issue list in a panel/toast.
+
+#### Config panel forms (per type)
+start: `input_fields` · end: `output_fields` · agent: `model_id`, `system_prompt`, `temperature`,
+`tool_ids`, `max_iterations` · conditional: `conditions[]` (`type` json_path/regex/llm + `expression`),
+`default_branch` · transform: `mode` (template/mapping/custom_function) + fields ·
+custom_function: `code`, `timeout_seconds`, input/output fields · human_in_loop: Phase 3 — render as
+"not yet supported" for now.
+
+#### Verify
+- `npx tsc --noEmit` (strict, `noUnusedLocals`/`noUnusedParameters`) and `npm run build`.
+
+---
+
 ## Architecture
 
 ```
@@ -162,18 +258,24 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Backend API
 
+Status: `[done]` = implemented and tested, `[plan]` = not yet built.
+
 ```
-POST   /api/workflows              # Create workflow
-GET    /api/workflows              # List workflows
-GET    /api/workflows/:id          # Get workflow definition
-PUT    /api/workflows/:id          # Update workflow
-DELETE /api/workflows/:id          # Delete workflow
-POST   /api/workflows/:id/run      # Execute workflow (returns run ID)
-GET    /api/workflows/:id/runs/:runId  # Get run status + logs
-WS     /ws/runs/:runId             # Real-time execution stream
-POST   /api/workflows/:id/validate # Dry-run validation
-GET    /metrics                    # Prometheus metrics endpoint
+[done] POST   /api/workflows              # Create workflow
+[done] GET    /api/workflows              # List workflows
+[done] GET    /api/workflows/:id          # Get workflow definition
+[done] PUT    /api/workflows/:id          # Update workflow
+[done] DELETE /api/workflows/:id          # Delete workflow
+[done] POST   /api/workflows/:id/run      # Execute (sync; returns full run object)
+[plan] GET    /api/workflows/:id/runs/:runId  # Get run status + logs
+[plan] WS     /ws/runs/:runId             # Real-time execution stream
+[done] POST   /api/workflows/:id/validate # Static graph validation
+[plan] GET    /metrics                    # Prometheus metrics endpoint
 ```
+
+> Note: `POST .../run` is currently **synchronous** — it blocks until the workflow
+> finishes and returns the full `WorkflowRun`. The async + run-ID + WebSocket model in
+> this plan is Phase 2.
 
 ---
 

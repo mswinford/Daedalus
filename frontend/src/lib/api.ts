@@ -1,5 +1,13 @@
 import axios from 'axios'
 
+import {
+  type WorkflowNode,
+  type WorkflowEdge,
+  type ToolDefinition,
+  type ModelConfig,
+  type StateField,
+} from './workflowTypes'
+
 const api = axios.create({
   baseURL: '/api',
 })
@@ -13,13 +21,13 @@ export interface WorkflowSummary {
 export interface Workflow {
   id: string
   name: string
-  description?: string
+  description?: string | null
   schema_version: number
-  nodes: any[]
-  edges: any[]
-  tools: any[]
-  models: any[]
-  state_schema?: any
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  tools: ToolDefinition[]
+  models: ModelConfig[]
+  state_schema?: { fields: StateField[] } | null
 }
 
 export interface WorkflowRun {

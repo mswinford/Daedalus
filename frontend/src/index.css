@@ -8,3 +8,21 @@ body {
   background: #09090b;
   color: #fafafa;
 }
+
+/* Dark-theme overrides for React Flow (v12 CSS variables) */
+.react-flow {
+  --xy-controls-button-background-color: #18181b;
+  --xy-controls-button-background-color-hover: #27272a;
+  --xy-controls-button-color: #e4e4e7;
+  --xy-controls-button-color-hover: #ffffff;
+  --xy-controls-button-border-color: #3f3f46;
+
+  --xy-minimap-background-color: #18181b;
+  --xy-minimap-mask-background-color: rgba(24, 24, 27, 0.6);
+  --xy-minimap-node-background-color: #52525b;
+
+  --xy-attribution-background-color: rgba(9, 9, 11, 0.5);
+}
+.react-flow__attribution a {
+  color: #a1a1aa;
+}
