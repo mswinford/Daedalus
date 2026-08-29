@@ -9,15 +9,15 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 2 complete → Phase 3 next)
+## Current Status (Phase 3 in progress)
 
-> Last updated: Phase 2 complete. Agent node works end-to-end with LLM calls and a tool-calling
-> loop; Models + Tools panels are in the editor; `http` tools support URL templating, secrets-store
-> resolution in headers, and per-request timeout. Runs emit a per-node execution trace (timing,
-> intermediate output, LLM tokens + estimated cost) streamed live over WebSocket to the editor's
-> bottom debug panel. The editor is a sidebar / master-detail layout with debounced auto-save.
-> Secrets store (`~/.ai-forge/secrets.json` + env-var precedence) is implemented with a UI panel.
-> Next up: human-in-loop nodes (Phase 3). Use this section as the source of truth when resuming in
+> Last updated: Phase 3 underway. Human-in-loop nodes are implemented end-to-end: LangGraph
+> `interrupt()` pauses execution, the run stores its state via `MemorySaver` checkpointer, and the
+> frontend shows a paused state with an input form + resume button. The editor is a sidebar /
+> master-detail layout with debounced auto-save; runs stream live over WebSocket. Secrets store,
+> per-agent message isolation, async execution, and the run debug panel are all shipped.
+> Next up: SQLite checkpointing (replace MemorySaver for crash recovery), timeout auto-fail,
+> "Pending Approvals" sidebar section. Use this section as the source of truth when resuming in
 > a new session — it supersedes the phase notes below.
 
 ### What works today (shippable)
@@ -91,7 +91,13 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Sample workflows**: `samples/sample-grade.json` (conditional routing demo),
   `samples/sample-agent.json` (agent node with LLM call + transform), and
   `samples/sample-order-assistant.json` (agent + two sandboxed `custom_function` tools).
-- **Tests**: 106 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
+- **Human-in-loop nodes**: `interrupt()` in builder pauses the graph; `MemorySaver` checkpointer
+  with `thread_id` preserves state; `POST /runs/{id}/resume` sends human input via
+  `Command(resume=...)`. Frontend: RunPanel shows paused state (purple indicator) with a dynamic
+  `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
+  event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
+  toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
+- **Tests**: 111 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -109,7 +115,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ### What is deferred by design
 - **Phase 2 (remaining)** — test-connection endpoint.
-- **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
+- **Phase 3 (remaining)** — SQLite checkpointing (replace MemorySaver for crash recovery),
+  timeout auto-fail, "Pending Approvals" sidebar section.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
 
@@ -128,7 +135,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `get_secret()` in sandbox; `${NAME}` in http headers; REST API + frontend panel.
 - [x] **Per-agent message isolation** *(done 2026-08-28)* — `messages_by_node` dict in state;
   sequential agents get fresh conversations, share only `data`. Unblocks multi-repo Option B.
-- **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
+- [x] **Human-in-loop nodes** *(done 2026-08-29)* — `interrupt()` + MemorySaver checkpointer,
+  pause/resume API, frontend approval form + resume. SQLite checkpointing still deferred.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
 Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample
@@ -198,8 +206,9 @@ Gaps to close first:
 start: `input_fields` · end: `output_fields` · agent: `model_id`, `system_prompt`, `temperature`,
 `tool_ids`, `max_iterations` · conditional: `conditions[]` (`type` json_path/regex/llm + `expression`),
 `default_branch` · transform: `mode` (template/mapping/custom_function) + fields ·
-custom_function: `code`, `timeout_seconds`, input/output fields · human_in_loop: Phase 3 — render as
-"not yet supported" for now.
+custom_function: `code`, `timeout_seconds`, input/output fields · human_in_loop: `approval_message`,
+`approval_required`, `timeout_seconds`, `input_fields[]` (name/label/type/required/options),
+`output_fields[]`.
 
 #### Verify
 - `npx tsc --noEmit` (strict, `noUnusedLocals`/`noUnusedParameters`) and `npm run build`.
@@ -431,6 +440,7 @@ Status: `[done]` = implemented and tested, `[plan]` = not yet built.
 [done] DELETE /api/workflows/:id          # Delete workflow
 [done] POST   /api/workflows/:id/run      # Execute (async; returns 202 + run_id)
 [done] GET    /api/runs/:runId            # Get run status + full result
+[done] POST   /api/runs/:runId/resume     # Resume a paused run with human input
 [done] WS     /api/runs/:runId/events     # Real-time execution stream (replay + live)
 [done] POST   /api/workflows/:id/validate # Static graph validation
 [done] GET    /api/secrets                # List secret names + source (values never returned)
