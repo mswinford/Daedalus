@@ -65,13 +65,13 @@ Full design and phase plan: [PLAN.md](./PLAN.md).
 cd ai-forge
 python -m venv .venv && source .venv/bin/activate   # optional but recommended
 pip install -e ".[dev]"
-ai-forge            # starts uvicorn on 127.0.0.1:3000 (auto-reload)
+python backend/cli.py   # starts uvicorn on 127.0.0.1:3000 (auto-reload)
 ```
 
-The CLI entry point is `ai-forge` (defined in `pyproject.toml`). You can also run it directly:
+`backend/cli.py` boots the FastAPI app via uvicorn with auto-reload. Equivalently, run uvicorn directly from the `backend/` directory:
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 3000 --reload
+cd backend && uvicorn app.main:app --host 127.0.0.1 --port 3000 --reload
 ```
 
 Workflows are stored as JSON files under `~/.ai-forge/workflows/`.

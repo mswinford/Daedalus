@@ -8,10 +8,10 @@
 | Single test file | `python -m pytest backend/tests/test_tools.py -q` |
 | Frontend typecheck | `cd frontend && npx tsc --noEmit` |
 | Frontend build | `cd frontend && npm run build` |
-| Backend dev server | `ai-forge` (uvicorn on :3000, auto-reload) |
+| Backend dev server | `python backend/cli.py` (uvicorn on 127.0.0.1:3000, auto-reload) |
 | Frontend dev server | `cd frontend && npm run dev` (:5173, proxies /api → :3000) |
 
-No linter or formatter is configured. TypeScript strict mode (`noUnusedLocals`, `noUnusedParameters`) is the only frontend check.
+No dedicated linter or formatter (eslint/ruff) is configured. The frontend `npm run lint` script just runs `tsc --noEmit`; TypeScript strict mode (`noUnusedLocals`, `noUnusedParameters`) is the only real check.
 
 ## Architecture (import roots)
 
@@ -22,12 +22,14 @@ Two separate Python import roots — this trips up imports:
 `conftest.py` at repo root adds both to `sys.path`. Tests must run from the repo root (`python -m pytest -q`), not from `backend/`.
 
 Key directories:
-- `schema/models.py` — all Pydantic models (WorkflowDoc, NodeConfig variants, ToolDefinition, ModelConfig, RunEvent, etc.)
+- `schema/models.py` — all Pydantic models (`Workflow`, NodeConfig variants, ToolDefinition, ModelConfig, RunEvent, etc.)
 - `backend/app/engine/` — LangGraph builder, runner, tools, conditions, validation
 - `backend/app/api/` — FastAPI routers (workflows, runs, secrets)
 - `backend/app/sandbox/` — RestrictedPython execution
-- `frontend/src/components/flow/` — React Flow canvas, ConfigPanel, RunPanel, panels
-- `frontend/src/lib/` — API client, types, graph transforms
+- `frontend/src/pages/` — WorkflowEditor (React Flow canvas + editor shell), EmptyState
+- `frontend/src/components/layout/` — AppLayout route shell, WorkflowSidebar (list/create/delete/search)
+- `frontend/src/components/flow/` — ConfigPanel, RunPanel (+ inline human-input form), ModelsPanel, ToolsPanel, SecretsPanel, FlowNode (custom React Flow node)
+- `frontend/src/lib/` — api.ts (axios + WS stream), graphTransform.ts, workflowTypes.ts
 
 ## Gotchas
 

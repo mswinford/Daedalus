@@ -28,7 +28,7 @@ dev = [
 ai-forge = "ai_forge.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend/app"]
+packages = ["backend/app", "schema", "ai_forge"]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
