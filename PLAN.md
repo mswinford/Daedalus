@@ -9,9 +9,9 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 2.2 — editable canvas + model config)
+## Current Status (Phase 2.2 — complete)
 
-> Last updated: editable canvas done, conditional handle alignment fixed, models panel next.
+> Last updated: all Phase 2.2 items done. Agent node works end-to-end with LLM calls.
 > Use this section as the source of truth when resuming in a new session — it supersedes
 > the phase notes below.
 
@@ -21,6 +21,9 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Node types wired in the builder**: `agent` (with tool-calling loop), `conditional`,
   `transform` (`template` + `mapping` + `custom_function` modes), `custom_function`
   (RestrictedPython sandbox).
+- **Agent node**: reads `state["data"]` as user message (if no prior messages), calls LLM
+  with system prompt, supports tool-calling loop. Output lands in `state["output"]`,
+  `state["messages"]`, and `_node_outputs[<id>].content`.
 - **Data flow**: `custom_function` writes declared `output_fields` into shared `data`;
   `transform` resolves nested dot-paths via `_resolve_path`; `transform` in
   `custom_function` mode runs a referenced node's sandbox code and writes the full result
@@ -43,10 +46,14 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   reference integrity.
 - **Frontend (Phase 2)**: editable React Flow canvas — drag/drop nodes from palette,
   draw/delete edges, delete nodes (cascade), per-node config panel (`ConfigPanel`),
-  Validate + Save + Run buttons, optional collapsible JSON run-input box, and a run
-  output display with a status badge. Conditional node handles update live when
-  branches are added/removed (`useUpdateNodeInternals`). Sample workflow installed at
-  `~/.ai-forge/workflows/sample-grade.json`.
+  Validate + Save + Run buttons, optional collapsible JSON run-input box, run output
+  display with status badge, save success toast. Conditional node handles update live
+  when branches are added/removed (`useUpdateNodeInternals`).
+- **Models panel**: modal CRUD for `ModelConfig` entries (name, provider, model, base_url,
+  api_key_ref, default_temperature). Accessible via "Models" button in top bar. Agent
+  nodes select a model from this list. Save persists models to workflow JSON.
+- **Sample workflows**: `samples/sample-grade.json` (conditional routing demo) and
+  `samples/sample-agent.json` (agent node with LLM call + transform).
 - **Tests**: 74 passing (`python -m pytest backend/tests/ -q`). Frontend typechecks clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
@@ -55,16 +62,13 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **#3 State schema wiring** — validate run input against `workflow.state_schema.fields`
 - [x] **#2 Agent tool loop** — tool schema builder + executor, LLM message serialization, bounded iteration loop
 
-### Next up (Phase 2.2)
-- [ ] **#5 Models panel** — frontend-only: add/edit/delete `ModelConfig` entries in the
-  editor so users can configure an LLM endpoint and assign it to agent nodes.
-  - Where: right-side panel or a "Models" tab in the top bar (TBD during impl).
-  - Fields: name, provider (`openai_compatible`), model, base_url, api_key_ref,
-    default_temperature. No secrets store yet — `api_key_ref` is the literal key
-    (or empty for local models like Ollama).
-  - Backend already works: `builder.py` → `create_provider()` → `OpenAICompatibleProvider`.
-  - Save path already round-trips `workflow.models` via PUT — zero backend changes needed.
-  - Acceptance: user adds a model in UI → selects it on an agent node → Run calls the LLM.
+### Phase 2.2 — ALL DONE
+- [x] **#5 Models panel** — modal CRUD for ModelConfig in editor top bar. User adds model →
+  selects on agent node → Run calls LLM end-to-end.
+- [x] **Agent non-system message fix** — if no user/assistant messages exist in state,
+  synthesize one from `state["data"]` (JSON-serialized) so the LLM API is always satisfied.
+- [x] **Save toast** — ephemeral "Saved" indicator appears on successful save.
+- [x] **Sample agent workflow** — `samples/sample-agent.json` demonstrates agent → transform flow.
 
 ### What is deferred by design
 - **Phase 2 (later increments)** — async execution + WebSocket streaming, run log/debug panel,
@@ -72,6 +76,12 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
+
+### Suggested next steps (Phase 2.3 / Phase 3)
+- **Tools panel** — UI for CRUD on `ToolDefinition` entries (similar to Models panel).
+- **Run log / debug panel** — show per-node execution timing, intermediate state, LLM tokens.
+- **Async execution** — POST /run returns runId immediately, WebSocket streams progress.
+- **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
 
 ### Phase 2 — Design (completed)
 
