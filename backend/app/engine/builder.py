@@ -61,7 +61,12 @@ class AgentState(TypedDict):
 class GraphBuilder:
     """Translates a workflow definition into a compiled LangGraph graph."""
 
-    def __init__(self, workflow: Workflow, trace: list[RunEvent] | None = None):
+    def __init__(
+        self,
+        workflow: Workflow,
+        trace: list[RunEvent] | None = None,
+        on_event: Callable[[RunEvent], None] | None = None,
+    ):
         self.workflow = workflow
         self.graph = StateGraph(AgentState)
         self.providers: dict[str, LLMProvider] = {}
@@ -69,8 +74,17 @@ class GraphBuilder:
         # Execution trace (node_start/node_end/llm_call events). Callers may pass
         # a shared list to collect events even when a run fails mid-graph.
         self._trace: list[RunEvent] = trace if trace is not None else []
+        # Optional live hook invoked for every event as it happens (used by the
+        # WebSocket streamer). The trace list still collects everything regardless.
+        self._on_event = on_event
         self._token_usage: dict[str, dict[str, int]] = {}
         self._build_providers()
+
+    def _emit(self, event: RunEvent) -> None:
+        """Record an event in the trace and forward it to the live hook, if any."""
+        self._trace.append(event)
+        if self._on_event is not None:
+            self._on_event(event)
 
     # ─── Execution tracing ────────────────────────────────────────────────
 
@@ -100,7 +114,7 @@ class GraphBuilder:
         bucket = self._token_usage.setdefault(model_id, {"input": 0, "output": 0})
         bucket["input"] += result.tokens_input
         bucket["output"] += result.tokens_output
-        self._trace.append(RunEvent(
+        self._emit(RunEvent(
             type="llm_call", node_id=node_id, timestamp=time.time(),
             data={
                 "model": model_id,
@@ -114,19 +128,19 @@ class GraphBuilder:
         """Wrap a node function to emit node_start/node_end (or node_error) with timing."""
         async def wrapped(state: AgentState) -> AgentState:
             started = time.perf_counter()
-            self._trace.append(RunEvent(type="node_start", node_id=node_id, timestamp=time.time()))
+            self._emit(RunEvent(type="node_start", node_id=node_id, timestamp=time.time()))
             try:
                 result = await func(state)
             except Exception as exc:
                 duration_ms = (time.perf_counter() - started) * 1000
-                self._trace.append(RunEvent(
+                self._emit(RunEvent(
                     type="node_error", node_id=node_id, timestamp=time.time(),
                     data={"error": str(exc), "duration_ms": round(duration_ms, 2)},
                 ))
                 raise
             duration_ms = (time.perf_counter() - started) * 1000
             output = result.get("_node_outputs", {}).get(node_id) if isinstance(result, dict) else None
-            self._trace.append(RunEvent(
+            self._emit(RunEvent(
                 type="node_end", node_id=node_id, timestamp=time.time(),
                 data={"duration_ms": round(duration_ms, 2), "output": _summarize(output)},
             ))

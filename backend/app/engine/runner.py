@@ -1,7 +1,7 @@
 """Execute workflows using LangGraph."""
-from typing import Any
+from typing import Any, Callable
 
-from schema.models import Workflow, StateFieldType
+from schema.models import Workflow, StateFieldType, RunEvent
 from app.engine.builder import GraphBuilder
 
 
@@ -36,18 +36,21 @@ def run_workflow_sync(
     workflow: Workflow,
     input_data: dict[str, Any],
     trace: list | None = None,
+    on_event: Callable[[RunEvent], None] | None = None,
 ) -> dict[str, Any]:
-    """Execute a workflow synchronously.
+    """Execute a workflow (blocking).
 
-    For Phase 1, this is a blocking call. In Phase 2, we'll make this async
-    with WebSocket streaming. If `trace` is provided, node/llm execution events
-    are appended to it (so partial traces survive a mid-run failure).
+    If `trace` is provided, node/llm execution events are appended to it (so
+    partial traces survive a mid-run failure). If `on_event` is provided, each
+    event is also forwarded to it as it happens — used by the async/WebSocket
+    layer to stream progress live. This call blocks for the entire run, so
+    callers that need responsiveness wrap it in a worker thread.
     """
     import asyncio
 
     _validate_input(workflow, input_data)
 
-    builder = GraphBuilder(workflow, trace=trace)
+    builder = GraphBuilder(workflow, trace=trace, on_event=on_event)
     graph = builder.build()
 
     # Build initial state from input data. Reserved keys map directly to state

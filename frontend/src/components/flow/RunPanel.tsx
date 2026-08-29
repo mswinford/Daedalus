@@ -104,14 +104,15 @@ export default function RunPanel({ run, nodes }: RunPanelProps) {
       return next
     })
 
-  const failed = run.status !== 'completed'
+  const isRunning = run.status === 'running'
+  const failed = run.status !== 'completed' && !isRunning
 
   return (
     <div className="border-t border-zinc-800 bg-zinc-950">
       {/* Header metrics */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-xs">
-        <span className={`flex items-center gap-1 font-medium ${failed ? 'text-red-400' : 'text-emerald-400'}`}>
-          {failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
+        <span className={`flex items-center gap-1 font-medium ${isRunning ? 'text-amber-400' : failed ? 'text-red-400' : 'text-emerald-400'}`}>
+          {isRunning ? <Timer size={14} /> : failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
           {run.status}
         </span>
         {totalMs != null && (

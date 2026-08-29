@@ -49,6 +49,12 @@ export interface RunEvent {
   type: RunEventType
   node_id?: string | null
   data: Record<string, any>
+  /** Monotonic per-run sequence number (added by the streaming backend). */
+  seq?: number
+}
+
+export interface RunStartResponse {
+  run_id: string
 }
 
 export interface WorkflowRun {
@@ -87,7 +93,31 @@ export const workflowsApi = {
   update: (id: string, data: Workflow) => api.put<Workflow>(`/workflows/${id}`, data).then(r => r.data),
   delete: (id: string) => api.delete(`/workflows/${id}`),
   run: (id: string, input: Record<string, any> = {}) =>
-    api.post<WorkflowRun>(`/workflows/${id}/run`, input).then(r => r.data),
+    api.post<RunStartResponse>(`/workflows/${id}/run`, input).then(r => r.data),
+  getRun: (runId: string) => api.get<WorkflowRun>(`/runs/${runId}`).then(r => r.data),
   validate: (id: string, body?: Workflow) =>
     api.post<ValidationResult>(`/workflows/${id}/validate`, body ?? null).then(r => r.data),
+}
+
+/**
+ * Subscribe to a run's live event stream over WebSocket. The server replays any
+ * events already emitted, then streams new ones until the run finishes. Returns a
+ * `close()` function; `onClose` fires when the socket closes (run done or dropped).
+ */
+export function streamRunEvents(
+  runId: string,
+  onEvent: (ev: RunEvent) => void,
+  onClose?: () => void,
+): () => void {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const ws = new WebSocket(`${proto}://${window.location.host}/api/runs/${runId}/events`)
+  ws.onmessage = (msg) => {
+    try {
+      onEvent(JSON.parse(msg.data) as RunEvent)
+    } catch {
+      // ignore malformed frames
+    }
+  }
+  ws.onclose = () => onClose?.()
+  return () => ws.close()
 }

@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react'
 import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu, Wrench } from 'lucide-react'
 
-import { workflowsApi, type ValidationResult, type Workflow } from '@/lib/api'
+import { workflowsApi, streamRunEvents, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
   ALL_NODE_TYPES,
   NODE_META,
@@ -274,31 +274,68 @@ function WorkflowEditorInner() {
     onSuccess: (r) => setValidation(r),
   })
 
-  const runMutation = useMutation({
-    mutationFn: (input: Record<string, any>) => workflowsApi.run(id!, input),
-  })
+  const [run, setRun] = useState<WorkflowRun | null>(null)
+  const runCloseRef = useRef<(() => void) | null>(null)
+  const runLastSeqRef = useRef(0)
+  const runFinishedRef = useRef(false)
 
-  const handleRun = () => {
+  const handleRun = async () => {
     const trimmed = inputJson.trim()
-    if (!trimmed) {
-      setInputError(null)
-      runMutation.mutate({})
-      return
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(trimmed)
-    } catch {
-      setInputError('Invalid JSON')
-      return
-    }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      setInputError('Input must be a JSON object, e.g. {"score": 40}')
-      return
+    let parsed: Record<string, any> = {}
+    if (trimmed) {
+      try {
+        parsed = JSON.parse(trimmed)
+      } catch {
+        setInputError('Invalid JSON')
+        return
+      }
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setInputError('Input must be a JSON object, e.g. {"score": 40}')
+        return
+      }
     }
     setInputError(null)
-    runMutation.mutate(parsed as Record<string, any>)
+
+    runCloseRef.current?.()
+    runCloseRef.current = null
+    runLastSeqRef.current = 0
+    runFinishedRef.current = false
+
+    setRun({
+      id: '', workflow_id: id!, status: 'running', input_data: parsed,
+      events: [], total_tokens_input: 0, total_tokens_output: 0, estimated_cost_usd: 0,
+    })
+
+    try {
+      const { run_id } = await workflowsApi.run(id!, parsed)
+      setRun((r) => (r ? { ...r, id: run_id } : r))
+
+      const close = streamRunEvents(
+        run_id,
+        (ev) => {
+          if (ev.seq != null && ev.seq <= runLastSeqRef.current) return
+          if (ev.seq != null) runLastSeqRef.current = ev.seq
+          setRun((r) => (r ? { ...r, events: [...r.events, ev] } : r))
+          const terminal = ev.type === 'run_end' || (ev.type === 'node_error' && !!ev.data?.fatal)
+          if (terminal) {
+            runFinishedRef.current = true
+            workflowsApi.getRun(run_id).then(setRun).catch(() => {})
+            close()
+          }
+        },
+        () => {
+          if (!runFinishedRef.current) {
+            setRun((r) => (r ? { ...r, status: 'failed', error: r.error ?? 'Connection lost' } : r))
+          }
+        },
+      )
+      runCloseRef.current = close
+    } catch (err) {
+      setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+    }
   }
+
+  useEffect(() => () => runCloseRef.current?.(), [])
 
   // Debounced auto-save: persist ~800ms after the last edit while dirty.
   useEffect(() => {
@@ -389,11 +426,11 @@ function WorkflowEditorInner() {
           </button>
           <button
             onClick={handleRun}
-            disabled={runMutation.isPending}
+            disabled={run?.status === 'running'}
             className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
           >
             <Play size={14} />
-            Run
+            {run?.status === 'running' ? 'Running…' : 'Run'}
           </button>
         </div>
       </header>
@@ -508,7 +545,7 @@ function WorkflowEditorInner() {
       )}
 
       {/* Bottom: run log / debug panel */}
-      {runMutation.data && <RunPanel run={runMutation.data} nodes={nodes} />}
+      {run && <RunPanel run={run} nodes={nodes} />}
     </div>
   )
 }
