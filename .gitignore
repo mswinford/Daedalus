@@ -11,3 +11,7 @@ node_modules/
 secrets.json
 .cortexkit/
 .opencode/
+
+# Graphify
+graphify-out/cost.json
+graphify-out/cache/
