@@ -9,11 +9,13 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 2.2 — complete)
+## Current Status (Phase 2.3 in progress)
 
-> Last updated: all Phase 2.2 items done. Agent node works end-to-end with LLM calls.
-> Use this section as the source of truth when resuming in a new session — it supersedes
-> the phase notes below.
+> Last updated: Phase 2.2 complete + Tools panel + hardened `http` tool (Phase 2.3). Agent node
+> works end-to-end with LLM calls and a tool-calling loop; Models + Tools panels are in the editor;
+> `http` tools support URL templating, env-var secrets in headers, and per-request timeout.
+> Next up: run log / debug panel. Use this section as the source of truth when resuming in a new
+> session — it supersedes the phase notes below.
 
 ### What works today (shippable)
 - **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
@@ -33,6 +35,12 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Agent tool loop**: agents with `tool_ids` get a bounded iteration loop — LLM call →
   tool_calls → execute (builtin / custom_function / http) → append results → repeat until
   no tool_calls or `max_iterations`. Tool schemas built from `ToolDefinition.parameters`.
+- **Tool execution boundary**: `custom_function` tools run in the RestrictedPython sandbox —
+  compute-only (no `import`, no network, no filesystem; see `backend/app/sandbox/runner.py`).
+  `http` and `builtin` tools run **outside** the sandbox (`backend/app/engine/tools.py`). The
+  `http` handler supports URL templating from arguments (`{owner}/{repo}`), optional headers that
+  can read secrets from the environment (`Authorization: Bearer ${GITHUB_TOKEN}`), and a
+  per-request `timeout_seconds`. Args consumed by the URL are not re-sent in query/body.
 - **Conditional routing**: conditional nodes AND edge-level conditions. `json_path` +
   `regex` implemented; `llm` raises `NotImplementedError`. Fallback resolution: preferred
   handle → `"default"` → (edge-level only) first static edge → `ConditionError`.
@@ -56,8 +64,9 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   (name/type/required), and implementation (`builtin` / `custom_function` / `http`, each with its
   own config fields). Accessible via "Tools" button in top bar. Agent nodes select tools from this
   list (checkbox). Save persists tools to workflow JSON. Frontend-only; no backend change needed.
-- **Sample workflows**: `samples/sample-grade.json` (conditional routing demo) and
-  `samples/sample-agent.json` (agent node with LLM call + transform).
+- **Sample workflows**: `samples/sample-grade.json` (conditional routing demo),
+  `samples/sample-agent.json` (agent node with LLM call + transform), and
+  `samples/sample-order-assistant.json` (agent + two sandboxed `custom_function` tools).
 - **Tests**: 74 passing (`python -m pytest backend/tests/ -q`). Frontend typechecks clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
@@ -83,7 +92,10 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ### Suggested next steps (Phase 2.3 / Phase 3)
 - [x] **Tools panel** — UI for CRUD on `ToolDefinition` entries (done 2026-08-28; see "What works today").
-- **Run log / debug panel** — show per-node execution timing, intermediate state, LLM tokens.
+- [x] **Harden the `http` tool** *(done 2026-08-28)* — URL path templating (`{owner}/{repo}`),
+  headers with env-var secrets (`${GITHUB_TOKEN}`), per-request timeout. In `backend/app/engine/tools.py`;
+  makes `http` tools usable against real APIs (GitHub, etc.) and unblocks the deferred experiment below.
+- **Run log / debug panel** *(up next)* — show per-node execution timing, intermediate state, LLM tokens.
 - **Async execution** — POST /run returns runId immediately, WebSocket streams progress.
 - **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
 
