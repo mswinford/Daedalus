@@ -1,28 +1,31 @@
 # AI Forge
 
-A standalone web app for building **AI agent workflows** on [LangGraph](https://github.com/langchain-ai/langgraph). Workflows are directed graphs of nodes (agents, conditionals, transforms, sandboxed Python) with file-based persistence. A visual graph editor is in progress; the full engine and REST API are already usable today via the API.
+A standalone web app for building **AI agent workflows** on [LangGraph](https://github.com/langchain-ai/langgraph). Workflows are directed graphs of nodes (agents, conditionals, transforms, sandboxed Python, human-in-loop gates) with file-based persistence. Author them in the visual React Flow editor or via the REST API.
 
-> **Status:** Phase 1 complete — the workflow engine, REST API, static validation, and a partial frontend are working. The drag-and-drop graph canvas (Phase 2) is not built yet, so authoring workflows currently means writing JSON (or using the minimal list page). See [Current features](#current-features) and [Known limitations](#known-limitations).
+> **Status:** Phase 3 — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject), async execution with live WebSocket streaming, a secrets store, and per-agent message isolation are all implemented. See [Current features](#current-features) and [Known limitations](#known-limitations).
 
 ---
 
 ## Current features
 
 **Engine (works now)**
-- LangGraph-based execution of `start → … → end` graphs, run synchronously over HTTP.
-- Node types: `agent` (with tool-calling loop), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython).
+- LangGraph-based execution of `start → … → end` graphs, run **asynchronously** over HTTP with live event streaming.
+- Node types: `agent` (with tool-calling loop), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), and `human_in_loop` (pause / resume / reject).
 - Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
+- Per-agent message isolation — each agent keeps its own conversation; agents share only structured `data`.
+- Run input validated against the workflow's `state_schema` (if defined) before execution.
 
 **API (works now)**
-- Full workflow CRUD + `run` + `validate`. See [REST API](#rest-api).
+- Full workflow CRUD + async `run` + `validate`, plus run retrieval, resume, and a secrets store. See [REST API](#rest-api).
 
-**Frontend (partial)**
-- Workflow **list** page: create, list, delete.
-- Workflow **editor** shell with Save and Run buttons; the graph canvas is a placeholder.
-- No Validate button in the UI yet (the endpoint exists and can be called directly).
+**Frontend (works now)**
+- Sidebar **master-detail** layout: workflow list with search, create, rename, delete.
+- Full React Flow **graph editor**: drag-and-drop nodes, connect edges, per-node **config panel**.
+- **Run debug panel**: live node/LLM trace, token + cost totals, expandable outputs, and a paused-state form for human-in-loop (approve / reject).
+- Models, tools, and secrets management panels. Auto-save with an unsaved/saving/saved indicator.
 
-**Tests:** 49 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
+**Tests:** 111 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
 
 ---
 
@@ -30,20 +33,20 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 
 ```
 Frontend (React + TS + Vite, React Flow) ──REST/WS──▶ Backend (FastAPI)
-                                                        ├─ API layer (CRUD, run, validate)
-                                                        ├─ Engine (LangGraph builder + runner)
-                                                        ├─ LLM providers (OpenAI-compatible)
-                                                        ├─ Sandbox (RestrictedPython)
-                                                        └─ Persistence (JSON files in ~/.ai-forge)
+                                                         ├─ API layer (CRUD, run, resume, validate, secrets)
+                                                         ├─ Engine (LangGraph builder + runner)
+                                                         ├─ LLM providers (OpenAI-compatible)
+                                                         ├─ Sandbox (RestrictedPython)
+                                                         └─ Persistence (JSON files in ~/.ai-forge)
 ```
 
 | Layer | Technology |
 |---|---|
-| Frontend | React + TypeScript + Vite, React Flow, TailwindCSS |
+| Frontend | React + TypeScript + Vite, React Flow, TailwindCSS, React Query |
 | Backend | FastAPI + Python 3.11+ |
-| Workflow engine | LangGraph |
+| Workflow engine | LangGraph (in-memory `MemorySaver` checkpointer for pause/resume) |
 | LLM layer | LangChain (OpenAI-compatible), abstract provider interface |
-| Persistence | One JSON file per workflow in `~/.ai-forge/workflows/` |
+| Persistence | One JSON file per workflow in `~/.ai-forge/workflows/`; secrets in `~/.ai-forge/secrets.json` |
 | Sandboxing | RestrictedPython (containers planned for Phase 4) |
 
 Full design and phase plan: [PLAN.md](./PLAN.md).
@@ -87,20 +90,20 @@ npm install
 npm run dev         # Vite dev server on http://localhost:5173
 ```
 
-The dev server proxies `/api` and `/ws` to the backend on port `3000`, so both must be running. Open http://localhost:5173.
+The dev server proxies `/api` (including WebSocket upgrades) to the backend on port `3000`, so both must be running. Open http://localhost:5173.
 
 ### 3. Run the tests
 
 ```bash
-python -m pytest -q          # backend (49 tests)
-cd frontend && npm run lint  # frontend typecheck
+python -m pytest -q          # backend (111 tests)
+cd frontend && npm run lint  # frontend typecheck (tsc --noEmit)
 ```
 
 ---
 
 ## Using the app
 
-Because the visual editor is not finished, the practical way to use AI Forge today is through the REST API. The flow is: **create a workflow (JSON) → validate it → run it with input**.
+Author workflows visually in the editor, or drive everything through the REST API. The flow is: **create a workflow (JSON) → validate it → run it with input**. Runs are asynchronous — `POST .../run` returns a `run_id` immediately and you follow progress over WebSocket or by polling.
 
 > **How data flows through a run** — state shape, per-node read/write behavior, routing, condition syntax, and a worked example: [docs/data-flow.md](./docs/data-flow.md).
 
@@ -146,16 +149,18 @@ Validate it:
 curl -s http://127.0.0.1:3000/api/workflows/grade/validate
 ```
 
-Run it (both branches):
+Run it — this returns `202` with a `run_id`:
 
 ```bash
 curl -s http://127.0.0.1:3000/api/workflows/grade/run \
-  -H 'Content-Type: application/json' -d '{ "score": 95 }'   # -> PASSED
-curl -s http://127.0.0.1:3000/api/workflows/grade/run \
-  -H 'Content-Type: application/json' -d '{ "score": 40 }'   # -> FAILED
+  -H 'Content-Type: application/json' -d '{ "score": 95 }'   # -> { "run_id": "…" }
 ```
 
-The run endpoint is **synchronous** and returns the full `WorkflowRun` object, including `output_data`, per-node `_node_outputs`, token counts, and any `error`.
+Then follow the run — either stream events live over WebSocket (`ws://…/api/runs/{run_id}/events`) or poll for the result:
+
+```bash
+curl -s http://127.0.0.1:3000/api/runs/{run_id}   # -> status + output_data once completed
+```
 
 ### Agent example (needs an LLM)
 
@@ -222,8 +227,14 @@ Base URL: `http://127.0.0.1:3000`
 | `GET` | `/api/workflows/{id}` | Get one workflow |
 | `PUT` | `/api/workflows/{id}` | Update workflow |
 | `DELETE` | `/api/workflows/{id}` | Delete workflow |
-| `POST` | `/api/workflows/{id}/run` | Run synchronously (body = input data) |
+| `POST` | `/api/workflows/{id}/run` | Run asynchronously (body = input data; returns `202` + `run_id`) |
 | `POST` | `/api/workflows/{id}/validate` | Static validation (returns issues + warnings) |
+| `GET` | `/api/runs/{runId}` | Get run status + result (polling) |
+| `POST` | `/api/runs/{runId}/resume` | Resume a paused run with human input |
+| `WS` | `/api/runs/{runId}/events` | Live execution event stream (replays past events, then streams) |
+| `GET` | `/api/secrets` | List secret names + source (values are never returned) |
+| `PUT` | `/api/secrets` | Upsert a secret |
+| `DELETE` | `/api/secrets/{name}` | Delete a secret |
 
 ### Workflow JSON shape
 
@@ -237,7 +248,7 @@ Base URL: `http://127.0.0.1:3000`
   "edges": [ /* Edge[] */ ],
   "models": [ /* ModelConfig[] */ ],   // referenced by agent nodes
   "tools":  [ /* ToolDefinition[] */], // referenced by agent nodes via tool_ids
-  "state_schema": { /* optional, not yet used by the engine */ }
+  "state_schema": { /* optional; validated against run input if defined */ }
 }
 ```
 
@@ -256,25 +267,24 @@ Base URL: `http://127.0.0.1:3000`
 | `conditional` | ✅ | Routes by condition; `json_path` and `regex` work, `llm` not implemented |
 | `transform` | ✅ | `template`, `mapping`, and `custom_function` modes all work |
 | `custom_function` | ✅ | Sandboxed Python (RestrictedPython), timeout enforced |
-| `human_in_loop` | ⏳ Phase 3 | Raises `NotImplementedError` |
+| `human_in_loop` | ✅ | Pauses the run for human input/approval; resume or reject via `POST /runs/{id}/resume` |
 
 ---
 
 ## Known limitations
 
-- **No visual graph editor yet** — author workflows as JSON. The React Flow canvas, per-node config panel, and Validate button are Phase 2.
-- **Synchronous runs** — `POST .../run` blocks until completion. Async execution + WebSocket streaming is Phase 2.
 - **`llm` condition type** raises `NotImplementedError`; `json_path` and `regex` work.
 - **Anthropic provider** not implemented (OpenAI-compatible only).
-- **`state_schema`** is defined but unused by the engine; state is a fixed internal shape.
-- **Multiple agent nodes** in one run share a single conversation (`messages`), so a second agent continues the first's context instead of seeing the raw input again.
+- **`error`-typed edges** are defined in the schema but not wired to failure handling — node exceptions currently fail the run (emitted as a fatal `node_error` event).
+- **Checkpointing is in-memory** (`MemorySaver`) — paused runs must be resumed within the same process; SQLite persistence is deferred.
+- **Human-in-loop timeout** (`timeout_seconds`) is metadata only; auto-fail-on-timeout is not yet enforced.
 
 ---
 
 ## Roadmap
 
-- **Phase 2 (next):** React Flow graph editor + per-node config panel, Validate button UI, async execution with WebSocket streaming, run log/debug panel.
-- **Phase 3:** human-in-loop nodes, SQLite checkpointing, pause/resume.
+- **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
+- **Phase 3 (mostly done):** human-in-loop nodes with pause/resume/reject; deferred: SQLite checkpointing, auto-fail-on-timeout.
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
 
 Full detail in [PLAN.md](./PLAN.md).
