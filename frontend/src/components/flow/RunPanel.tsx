@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play } from 'lucide-react'
+import { CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X } from 'lucide-react'
 
 import type { WorkflowRun, RunEvent, HumanInterruptField } from '@/lib/api'
 import { NODE_META, type NodeType } from '@/lib/workflowTypes'
@@ -142,13 +142,24 @@ function HumanInputForm({
           </label>
         ))}
       </div>
-      <button
-        onClick={handleSubmit}
-        className="mt-3 flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500"
-      >
-        <Play size={14} />
-        {approvalRequired ? 'Approve & Resume' : 'Submit & Resume'}
-      </button>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={handleSubmit}
+          className="flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500"
+        >
+          <Play size={14} />
+          {approvalRequired ? 'Approve & Resume' : 'Submit & Resume'}
+        </button>
+        {approvalRequired && (
+          <button
+            onClick={() => onSubmit({ approved: false })}
+            className="flex items-center gap-1.5 rounded-md border border-red-800 bg-red-950/40 px-3 py-1.5 text-sm font-medium text-red-300 hover:bg-red-900/40"
+          >
+            <X size={14} />
+            Reject
+          </button>
+        )}
+      </div>
     </div>
   )
 }

@@ -375,6 +375,10 @@ class GraphBuilder:
             }
             response = interrupt(payload)
 
+            # Rejection: if approval is required and the human explicitly rejected, fail the run.
+            if config.approval_required and isinstance(response, dict) and response.get("approved") is False:
+                raise RuntimeError(f"Human rejected at node '{node.id}'")
+
             new_data = {**state.get("data", {})}
             output_fields = config.output_fields or []
             if isinstance(response, dict):
