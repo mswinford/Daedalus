@@ -9,3 +9,5 @@ build/
 node_modules/
 .env
 secrets.json
+.cortexkit/
+.opencode/
