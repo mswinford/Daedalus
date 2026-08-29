@@ -35,6 +35,7 @@ import FlowNode from '@/components/flow/FlowNode'
 import ConfigPanel from '@/components/flow/ConfigPanel'
 import ModelsPanel from '@/components/flow/ModelsPanel'
 import ToolsPanel from '@/components/flow/ToolsPanel'
+import RunPanel from '@/components/flow/RunPanel'
 import type { ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
@@ -448,31 +449,8 @@ function WorkflowEditorInner() {
         <ToolsPanel tools={tools} onChange={setTools} onClose={() => setShowTools(false)} />
       )}
 
-      {/* Bottom: run output */}
-      {runMutation.data && (
-        <div className="border-t border-zinc-800 p-3">
-          <div className="mb-1 flex items-center gap-2 text-xs">
-            <span className={runMutation.data.status === 'completed' ? 'font-medium text-emerald-400' : 'font-medium text-red-400'}>
-              {runMutation.data.status}
-            </span>
-            <span className="text-zinc-600">{runMutation.data.id}</span>
-          </div>
-          {runMutation.data.error ? (
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-red-300">{runMutation.data.error}</pre>
-          ) : (
-            <div className="space-y-2">
-              {runMutation.data.output_data?.output && (
-                <p className="text-sm text-zinc-100">{runMutation.data.output_data.output}</p>
-              )}
-              {runMutation.data.output_data?.node_outputs && (
-                <pre className="max-h-40 overflow-auto text-xs text-zinc-500">
-                  {JSON.stringify(runMutation.data.output_data.node_outputs, null, 2)}
-                </pre>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Bottom: run log / debug panel */}
+      {runMutation.data && <RunPanel run={runMutation.data} nodes={nodes} />}
     </div>
   )
 }

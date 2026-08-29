@@ -30,6 +30,27 @@ export interface Workflow {
   state_schema?: { fields: StateField[] } | null
 }
 
+export type RunEventType =
+  | 'run_start'
+  | 'run_end'
+  | 'node_start'
+  | 'node_end'
+  | 'node_error'
+  | 'llm_call'
+  | 'llm_token'
+  | 'tool_call'
+  | 'tool_result'
+  | 'human_request'
+  | 'human_respond'
+  | 'retry'
+
+export interface RunEvent {
+  timestamp: number
+  type: RunEventType
+  node_id?: string | null
+  data: Record<string, any>
+}
+
 export interface WorkflowRun {
   id: string
   workflow_id: string
@@ -39,7 +60,10 @@ export interface WorkflowRun {
   error?: string
   started_at?: number
   completed_at?: number
-  events: any[]
+  events: RunEvent[]
+  total_tokens_input: number
+  total_tokens_output: number
+  estimated_cost_usd: number
 }
 
 export interface ValidationIssue {
