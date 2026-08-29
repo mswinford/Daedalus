@@ -34,7 +34,7 @@ function subtitle(nodeType: NodeType, config: FlowNodeData['config']): string {
     case 'custom_function':
       return 'sandboxed python'
     case 'human_in_loop':
-      return 'phase 3'
+      return (config as { approval_required: boolean }).approval_required ? 'approval gate' : 'human input'
   }
 }
 

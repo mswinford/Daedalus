@@ -57,6 +57,21 @@ export interface RunStartResponse {
   run_id: string
 }
 
+export interface HumanInterruptField {
+  name: string
+  label: string
+  type: 'text' | 'number' | 'boolean' | 'select'
+  required: boolean
+  options?: string[] | null
+}
+
+export interface HumanInterruptValue {
+  node_id: string
+  message: string
+  fields: HumanInterruptField[]
+  approval_required: boolean
+}
+
 export interface WorkflowRun {
   id: string
   workflow_id: string
@@ -64,6 +79,7 @@ export interface WorkflowRun {
   input_data: Record<string, any>
   output_data?: Record<string, any>
   error?: string
+  interrupt_value?: HumanInterruptValue
   started_at?: number
   completed_at?: number
   events: RunEvent[]
@@ -108,6 +124,8 @@ export const workflowsApi = {
   run: (id: string, input: Record<string, any> = {}) =>
     api.post<RunStartResponse>(`/workflows/${id}/run`, input).then(r => r.data),
   getRun: (runId: string) => api.get<WorkflowRun>(`/runs/${runId}`).then(r => r.data),
+  resumeRun: (runId: string, humanInput: Record<string, any>) =>
+    api.post(`/runs/${runId}/resume`, humanInput).then(r => r.data),
   validate: (id: string, body?: Workflow) =>
     api.post<ValidationResult>(`/workflows/${id}/validate`, body ?? null).then(r => r.data),
 }

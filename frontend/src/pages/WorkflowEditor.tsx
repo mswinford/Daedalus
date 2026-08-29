@@ -281,6 +281,30 @@ function WorkflowEditorInner() {
   const runLastSeqRef = useRef(0)
   const runFinishedRef = useRef(false)
 
+  const streamEvents = (runId: string): (() => void) => {
+    let close: () => void = () => {}
+    close = streamRunEvents(
+      runId,
+      (ev) => {
+        if (ev.seq != null && ev.seq <= runLastSeqRef.current) return
+        if (ev.seq != null) runLastSeqRef.current = ev.seq
+        setRun((r) => (r ? { ...r, events: [...r.events, ev] } : r))
+        const terminal = ev.type === 'run_end' || (ev.type === 'node_error' && !!ev.data?.fatal)
+        if (terminal || ev.type === 'human_request') {
+          runFinishedRef.current = true
+          workflowsApi.getRun(runId).then(setRun).catch(() => {})
+          close()
+        }
+      },
+      () => {
+        if (!runFinishedRef.current) {
+          setRun((r) => (r ? { ...r, status: 'failed', error: r.error ?? 'Connection lost' } : r))
+        }
+      },
+    )
+    return close
+  }
+
   const handleRun = async () => {
     const trimmed = inputJson.trim()
     let parsed: Record<string, any> = {}
@@ -311,26 +335,23 @@ function WorkflowEditorInner() {
     try {
       const { run_id } = await workflowsApi.run(id!, parsed)
       setRun((r) => (r ? { ...r, id: run_id } : r))
+      const close = streamEvents(run_id)
+      runCloseRef.current = close
+    } catch (err) {
+      setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+    }
+  }
 
-      const close = streamRunEvents(
-        run_id,
-        (ev) => {
-          if (ev.seq != null && ev.seq <= runLastSeqRef.current) return
-          if (ev.seq != null) runLastSeqRef.current = ev.seq
-          setRun((r) => (r ? { ...r, events: [...r.events, ev] } : r))
-          const terminal = ev.type === 'run_end' || (ev.type === 'node_error' && !!ev.data?.fatal)
-          if (terminal) {
-            runFinishedRef.current = true
-            workflowsApi.getRun(run_id).then(setRun).catch(() => {})
-            close()
-          }
-        },
-        () => {
-          if (!runFinishedRef.current) {
-            setRun((r) => (r ? { ...r, status: 'failed', error: r.error ?? 'Connection lost' } : r))
-          }
-        },
-      )
+  const handleResume = async (humanInput: Record<string, any>) => {
+    if (!run?.id) return
+    runCloseRef.current?.()
+    runCloseRef.current = null
+    runFinishedRef.current = false
+    setRun((r) => (r ? { ...r, status: 'running' } : r))
+
+    try {
+      await workflowsApi.resumeRun(run.id, humanInput)
+      const close = streamEvents(run.id)
       runCloseRef.current = close
     } catch (err) {
       setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
@@ -557,7 +578,7 @@ function WorkflowEditorInner() {
       {showSecrets && <SecretsPanel onClose={() => setShowSecrets(false)} />}
 
       {/* Bottom: run log / debug panel */}
-      {run && <RunPanel run={run} nodes={nodes} />}
+      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} />}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { CheckCircle2, XCircle, Timer, Coins, Cpu } from 'lucide-react'
+import { CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play } from 'lucide-react'
 
-import type { WorkflowRun, RunEvent } from '@/lib/api'
+import type { WorkflowRun, RunEvent, HumanInterruptField } from '@/lib/api'
 import { NODE_META, type NodeType } from '@/lib/workflowTypes'
 import type { FlowNodeType } from '@/lib/graphTransform'
 
@@ -75,9 +75,85 @@ function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>): Nod
 interface RunPanelProps {
   run: WorkflowRun
   nodes: FlowNodeType[]
+  onResume?: (input: Record<string, any>) => void
 }
 
-export default function RunPanel({ run, nodes }: RunPanelProps) {
+function HumanInputForm({
+  fields,
+  approvalRequired,
+  onSubmit,
+}: {
+  fields: HumanInterruptField[]
+  approvalRequired: boolean
+  onSubmit: (input: Record<string, any>) => void
+}) {
+  const [values, setValues] = useState<Record<string, string>>({})
+
+  const handleSubmit = () => {
+    const input: Record<string, any> = {}
+    for (const f of fields) {
+      const raw = values[f.name] ?? ''
+      if (f.type === 'number') input[f.name] = raw ? Number(raw) : null
+      else if (f.type === 'boolean') input[f.name] = raw === 'true'
+      else input[f.name] = raw
+    }
+    if (approvalRequired) input.approved = true
+    onSubmit(input)
+  }
+
+  return (
+    <div className="rounded-md border border-amber-900/50 bg-amber-950/20 p-3">
+      <p className="mb-2 text-sm font-medium text-amber-300">Human input required</p>
+      <div className="space-y-2">
+        {fields.map((f) => (
+          <label key={f.name} className="block">
+            <span className="text-xs text-zinc-400">
+              {f.label}{f.required && <span className="text-red-400"> *</span>}
+            </span>
+            {f.type === 'select' && f.options ? (
+              <select
+                className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
+                value={values[f.name] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+              >
+                <option value="">—</option>
+                {f.options.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            ) : f.type === 'boolean' ? (
+              <select
+                className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
+                value={values[f.name] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+              >
+                <option value="">—</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            ) : (
+              <input
+                type={f.type === 'number' ? 'number' : 'text'}
+                className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
+                value={values[f.name] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+              />
+            )}
+          </label>
+        ))}
+      </div>
+      <button
+        onClick={handleSubmit}
+        className="mt-3 flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500"
+      >
+        <Play size={14} />
+        {approvalRequired ? 'Approve & Resume' : 'Submit & Resume'}
+      </button>
+    </div>
+  )
+}
+
+export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const nodeTypeById = useMemo(() => {
@@ -105,14 +181,15 @@ export default function RunPanel({ run, nodes }: RunPanelProps) {
     })
 
   const isRunning = run.status === 'running'
-  const failed = run.status !== 'completed' && !isRunning
+  const isPaused = run.status === 'paused'
+  const failed = run.status !== 'completed' && !isRunning && !isPaused
 
   return (
     <div className="border-t border-zinc-800 bg-zinc-950">
       {/* Header metrics */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-xs">
-        <span className={`flex items-center gap-1 font-medium ${isRunning ? 'text-amber-400' : failed ? 'text-red-400' : 'text-emerald-400'}`}>
-          {isRunning ? <Timer size={14} /> : failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
+        <span className={`flex items-center gap-1 font-medium ${isRunning ? 'text-amber-400' : isPaused ? 'text-purple-400' : failed ? 'text-red-400' : 'text-emerald-400'}`}>
+          {isRunning ? <Timer size={14} /> : isPaused ? <PauseCircle size={14} /> : failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
           {run.status}
         </span>
         {totalMs != null && (
@@ -143,6 +220,18 @@ export default function RunPanel({ run, nodes }: RunPanelProps) {
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
             Execution · {executions.length} node{executions.length === 1 ? '' : 's'}
           </p>
+          {isPaused && run.interrupt_value && onResume && (
+            <div className="mb-2">
+              {run.interrupt_value.message && (
+                <p className="mb-1 text-sm text-zinc-300">{run.interrupt_value.message}</p>
+              )}
+              <HumanInputForm
+                fields={run.interrupt_value.fields}
+                approvalRequired={run.interrupt_value.approval_required}
+                onSubmit={onResume}
+              />
+            </div>
+          )}
           {run.error && (
             <pre className="mb-2 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-red-900/50 bg-red-950/30 p-2 text-xs text-red-300">
               {run.error}

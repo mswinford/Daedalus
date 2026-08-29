@@ -4,7 +4,9 @@ import json
 import re
 import time
 from typing import Any, Callable
+from langgraph.errors import GraphInterrupt
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import interrupt
 from typing_extensions import TypedDict
 
 from schema.models import (
@@ -130,6 +132,8 @@ class GraphBuilder:
             self._emit(RunEvent(type="node_start", node_id=node_id, timestamp=time.time()))
             try:
                 result = await func(state)
+            except GraphInterrupt:
+                raise
             except Exception as exc:
                 duration_ms = (time.perf_counter() - started) * 1000
                 self._emit(RunEvent(
@@ -359,9 +363,48 @@ class GraphBuilder:
         return custom_func
 
     def _human_in_loop_node(self, node: Node) -> Callable:
-        """Human-in-loop node: pauses for input."""
+        """Human-in-loop node: pauses execution until a human provides input."""
+        config: HumanInLoopNodeConfig = node.config
+
         async def human_func(state: AgentState) -> AgentState:
-            raise NotImplementedError("Human-in-loop coming in Phase 3")
+            payload = {
+                "node_id": node.id,
+                "message": config.approval_message or "Please provide input",
+                "fields": [f.model_dump() for f in config.input_fields],
+                "approval_required": config.approval_required,
+            }
+            response = interrupt(payload)
+
+            new_data = {**state.get("data", {})}
+            output_fields = config.output_fields or []
+            if isinstance(response, dict):
+                if len(output_fields) == 1:
+                    key = output_fields[0]
+                    if key in response:
+                        new_data[key] = response[key]
+                    elif len(config.input_fields) == 1:
+                        new_data[key] = response.get(config.input_fields[0].name)
+                    else:
+                        new_data[key] = response
+                elif output_fields:
+                    for i, key in enumerate(output_fields):
+                        if key in response:
+                            new_data[key] = response[key]
+                        elif i < len(config.input_fields):
+                            new_data[key] = response.get(config.input_fields[i].name)
+                else:
+                    new_data.update(response)
+            elif output_fields:
+                new_data[output_fields[0]] = response
+
+            return {
+                "output": str(response),
+                "data": new_data,
+                "_node_outputs": {
+                    **state.get("_node_outputs", {}),
+                    node.id: {"response": response},
+                },
+            }
         return human_func
 
     def _find_default_edge(self, edges: list, preferred_handle: str | None,
@@ -453,7 +496,7 @@ class GraphBuilder:
                     self.graph.add_edge(START, node.id)
                     break
 
-    def build(self) -> Any:
+    def build(self, checkpointer: Any = None) -> Any:
         """Build and return the compiled LangGraph graph."""
         # Add nodes
         for node in self.workflow.nodes:
@@ -466,4 +509,4 @@ class GraphBuilder:
         self._build_edges()
 
         # Compile
-        return self.graph.compile()
+        return self.graph.compile(checkpointer=checkpointer)

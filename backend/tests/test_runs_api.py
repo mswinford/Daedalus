@@ -118,3 +118,110 @@ def test_ws_unknown_run_sends_fatal_error(client):
         ev = ws.receive_json()
         assert ev["type"] == "node_error"
         assert ev["data"]["fatal"] is True
+
+
+# ─── Human-in-loop tests ─────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def hil_client(tmp_path, monkeypatch):
+    """Client with a workflow containing a human_in_loop node."""
+    monkeypatch.setattr(wf_module.settings, "workflows_dir", tmp_path)
+
+    wf = {
+        "id": "hil-wf",
+        "name": "HIL WF",
+        "description": None,
+        "schema_version": 1,
+        "nodes": [
+            {"id": "start", "type": "start", "position": {"x": 0, "y": 0}, "config": {}},
+            {"id": "human", "type": "human_in_loop", "position": {"x": 200, "y": 0},
+             "config": {
+                 "input_fields": [
+                     {"name": "answer", "label": "Your answer", "type": "text", "required": True}
+                 ],
+                 "approval_required": False,
+                 "output_fields": ["human_answer"],
+             }},
+            {"id": "cf", "type": "custom_function", "position": {"x": 400, "y": 0},
+             "config": {"code": 'result["doubled"] = state["data"].get("human_answer", "") + "!"',
+                        "output_fields": ["doubled"]}},
+            {"id": "end", "type": "end", "position": {"x": 600, "y": 0}, "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source_node_id": "start", "source_handle": "default", "target_node_id": "human"},
+            {"id": "e2", "source_node_id": "human", "source_handle": "default", "target_node_id": "cf"},
+            {"id": "e3", "source_node_id": "cf", "source_handle": "default", "target_node_id": "end"},
+        ],
+        "tools": [],
+        "models": [],
+    }
+    (tmp_path / "hil-wf.json").write_text(json.dumps(wf))
+
+    with TestClient(app) as c:
+        yield c
+
+
+def test_hil_run_pauses(hil_client):
+    """A run hitting a human_in_loop node pauses with status='paused'."""
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+    body = _wait_for_run(hil_client, run_id)
+
+    assert body["status"] == "paused"
+    assert body["interrupt_value"] is not None
+    payload = body["interrupt_value"]
+    assert payload["node_id"] == "human"
+    assert len(payload["fields"]) == 1
+    assert payload["fields"][0]["name"] == "answer"
+
+    types = [e["type"] for e in body["events"]]
+    assert "human_request" in types
+
+
+def test_hil_resume_completes(hil_client):
+    """Resuming a paused run with input completes the workflow."""
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_client, run_id)
+
+    resp = hil_client.post(f"/api/runs/{run_id}/resume", json={"answer": "hello"})
+    assert resp.status_code == 202
+
+    body = _wait_for_run(hil_client, run_id)
+    assert body["status"] == "completed"
+    assert body["output_data"]["node_outputs"]["cf"]["doubled"] == "hello!"
+
+
+def test_hil_resume_wrong_status_409(hil_client):
+    """Resuming a non-paused run returns 409."""
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_client, run_id)
+
+    # Resume once to complete it
+    hil_client.post(f"/api/runs/{run_id}/resume", json={"answer": "x"})
+    _wait_for_run(hil_client, run_id)
+
+    resp = hil_client.post(f"/api/runs/{run_id}/resume", json={"answer": "y"})
+    assert resp.status_code == 409
+
+
+def test_hil_resume_unknown_404(hil_client):
+    resp = hil_client.post("/api/runs/nonexistent/resume", json={"a": 1})
+    assert resp.status_code == 404
+
+
+def test_hil_ws_streams_to_human_request(hil_client):
+    """WebSocket streams events until human_request, then closes."""
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+
+    with hil_client.websocket_connect(f"/api/runs/{run_id}/events") as ws:
+        events = []
+        while True:
+            ev = ws.receive_json()
+            events.append(ev)
+            if ev["type"] == "human_request":
+                break
+
+    types = [e["type"] for e in events]
+    assert "node_start" in types
+    assert "human_request" in types
+    assert "run_end" not in types

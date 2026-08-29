@@ -225,11 +225,21 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
                         ))
 
         elif n.type == "human_in_loop":
-            warnings.append(ValidationIssue(
-                level="warning", code="W_HUMAN_NOT_SUPPORTED",
-                message=f"Human-in-loop '{n.id}' is not implemented until Phase 3",
-                node_id=n.id,
-            ))
+            cfg = n.config
+            if not cfg.output_fields:
+                warnings.append(ValidationIssue(
+                    level="error", code="E_HIL_NO_OUTPUTS",
+                    message=f"Human-in-loop '{n.id}' has no output_fields defined",
+                    node_id=n.id,
+                ))
+            for f in cfg.input_fields:
+                if not f.name:
+                    warnings.append(ValidationIssue(
+                        level="error", code="E_HIL_FIELD_NO_NAME",
+                        message=f"Human-in-loop '{n.id}' has an input field with no name",
+                        node_id=n.id,
+                    ))
+                    break
 
         if n.type not in ("start", "end") and not out_edges.get(n.id):
             warnings.append(ValidationIssue(
