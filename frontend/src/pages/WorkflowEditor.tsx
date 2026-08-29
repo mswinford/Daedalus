@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   ReactFlow,
@@ -359,6 +359,33 @@ function WorkflowEditorInner() {
   }
 
   useEffect(() => () => runCloseRef.current?.(), [])
+
+  // Open a specific run when navigated here with ?run=<id> (e.g. from the
+  // Pending Approvals section in the sidebar).
+  const [searchParams] = useSearchParams()
+  const pendingRunId = searchParams.get('run')
+  useEffect(() => {
+    if (!pendingRunId) return
+    let cancelled = false
+    runCloseRef.current?.()
+    runCloseRef.current = null
+    runLastSeqRef.current = 0
+    runFinishedRef.current = false
+    workflowsApi
+      .getRun(pendingRunId)
+      .then((r) => {
+        if (cancelled) return
+        setRun(r)
+        if (r.status === 'running' || r.status === 'paused') {
+          runCloseRef.current = streamEvents(r.id)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, pendingRunId])
 
   // Debounced auto-save: persist ~800ms after the last edit while dirty.
   useEffect(() => {

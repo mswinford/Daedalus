@@ -284,7 +284,7 @@ Base URL: `http://127.0.0.1:3000`
 ## Roadmap
 
 - **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
-- **Phase 3 (mostly done):** human-in-loop nodes with pause/resume/reject; deferred: SQLite checkpointing, auto-fail-on-timeout.
+- **Phase 3 (mostly done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, and a Pending Approvals sidebar; deferred: SQLite checkpointing.
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
 
 Full detail in [PLAN.md](./PLAN.md).

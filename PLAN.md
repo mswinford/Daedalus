@@ -115,8 +115,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ### What is deferred by design
 - **Phase 2 (remaining)** — test-connection endpoint.
-- **Phase 3 (remaining)** — SQLite checkpointing (replace MemorySaver for crash recovery),
-  timeout auto-fail, "Pending Approvals" sidebar section.
+- **Phase 3 (remaining)** — SQLite checkpointing (replace MemorySaver for crash recovery).
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
 
@@ -137,6 +136,14 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   sequential agents get fresh conversations, share only `data`. Unblocks multi-repo Option B.
 - [x] **Human-in-loop nodes** *(done 2026-08-29)* — `interrupt()` + MemorySaver checkpointer,
   pause/resume API, frontend approval form + resume. SQLite checkpointing still deferred.
+- [x] **Human-in-loop timeout auto-fail** *(done 2026-08-29)* — optional `timeout_seconds` on the
+  node; an asyncio timer fails the run at the deadline (terminal `human_timeout` event) unless
+  resumed first. Interrupt payload carries `timeout_seconds` + `requested_at`; RunPanel shows a
+  live countdown and hides approve/reject once the client-side deadline passes.
+- [x] **Pending Approvals sidebar** *(done 2026-08-29)* — `GET /api/runs/paused` lists paused runs
+  (oldest first); the workflow sidebar shows a "Pending approvals" section with per-run countdowns,
+  refreshed every 5s. Clicking an entry opens the workflow editor with that run loaded in the RunPanel
+  via `?run=<id>` (reconnects to the event stream, so the approval form works).
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
 Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample

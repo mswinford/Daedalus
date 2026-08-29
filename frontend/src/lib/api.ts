@@ -93,6 +93,16 @@ export interface WorkflowRun {
   estimated_cost_usd: number
 }
 
+export interface PausedRunSummary {
+  id: string
+  workflow_id: string
+  node_id?: string | null
+  message?: string | null
+  requested_at?: number | null
+  timeout_seconds?: number | null
+  started_at?: number
+}
+
 export interface ValidationIssue {
   level: 'error' | 'warning'
   code: string
@@ -129,6 +139,7 @@ export const workflowsApi = {
   run: (id: string, input: Record<string, any> = {}) =>
     api.post<RunStartResponse>(`/workflows/${id}/run`, input).then(r => r.data),
   getRun: (runId: string) => api.get<WorkflowRun>(`/runs/${runId}`).then(r => r.data),
+  listPausedRuns: () => api.get<PausedRunSummary[]>('/runs/paused').then(r => r.data),
   resumeRun: (runId: string, humanInput: Record<string, any>) =>
     api.post(`/runs/${runId}/resume`, humanInput).then(r => r.data),
   validate: (id: string, body?: Workflow) =>

@@ -1,9 +1,58 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Search, Trash2 } from 'lucide-react'
+import { Hourglass, Plus, Search, Trash2 } from 'lucide-react'
 
-import { workflowsApi, type WorkflowSummary } from '@/lib/api'
+import { workflowsApi, type PausedRunSummary, type WorkflowSummary } from '@/lib/api'
+
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [active])
+  return now
+}
+
+function countdownLabel(run: PausedRunSummary, now: number): { text: string; expired: boolean } {
+  if (run.timeout_seconds == null || run.requested_at == null) return { text: 'waiting', expired: false }
+  const remainingMs = run.requested_at * 1000 + run.timeout_seconds * 1000 - now
+  if (remainingMs <= 0) return { text: 'timed out', expired: true }
+  const s = Math.ceil(remainingMs / 1000)
+  const m = Math.floor(s / 60)
+  return { text: m > 0 ? `${m}m ${s % 60}s left` : `${s}s left`, expired: false }
+}
+
+function PendingApprovalRow({
+  run,
+  workflowName,
+  now,
+  onOpen,
+}: {
+  run: PausedRunSummary
+  workflowName: string
+  now: number
+  onOpen: () => void
+}) {
+  const { text, expired } = countdownLabel(run, now)
+  return (
+    <button
+      onClick={onOpen}
+      title={`Open run ${run.id}`}
+      className="w-full rounded-md px-3 py-2 text-left transition-colors hover:bg-zinc-900"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />
+        <p className="min-w-0 flex-1 truncate text-sm text-zinc-200">{workflowName}</p>
+        <span className={`shrink-0 text-xs ${expired ? 'text-red-400' : 'text-amber-400'}`}>{text}</span>
+      </div>
+      {run.message && (
+        <p className="truncate pl-3 text-xs text-zinc-500">{run.message}</p>
+      )}
+    </button>
+  )
+}
 
 function SidebarRow({
   workflow,
@@ -49,6 +98,14 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
     queryKey: ['workflows'],
     queryFn: () => workflowsApi.list(),
   })
+
+  const { data: pausedRuns } = useQuery({
+    queryKey: ['runs', 'paused'],
+    queryFn: () => workflowsApi.listPausedRuns(),
+    refetchInterval: 5000,
+  })
+  const now = useNow((pausedRuns?.length ?? 0) > 0)
+  const workflowName = (id: string) => data?.find((w) => w.id === id)?.name ?? id
 
   const createMutation = useMutation({
     mutationFn: (name: string) =>
@@ -132,6 +189,26 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
           />
         </div>
       </div>
+
+      {pausedRuns && pausedRuns.length > 0 && (
+        <div className="border-b border-zinc-800 p-3">
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-amber-400">
+            <Hourglass size={12} />
+            Pending approvals ({pausedRuns.length})
+          </p>
+          <div className="space-y-0.5">
+            {pausedRuns.map((run) => (
+              <PendingApprovalRow
+                key={run.id}
+                run={run}
+                workflowName={workflowName(run.workflow_id)}
+                now={now}
+                onOpen={() => navigate(`/workflows/${run.workflow_id}?run=${run.id}`)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
         {isLoading ? (

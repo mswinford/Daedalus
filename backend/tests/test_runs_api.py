@@ -227,6 +227,25 @@ def test_hil_ws_streams_to_human_request(hil_client):
     assert "run_end" not in types
 
 
+def test_list_paused_runs(hil_client):
+    """GET /runs/paused lists paused runs and drops them once resumed."""
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_client, run_id)
+
+    body = hil_client.get("/api/runs/paused").json()
+    assert len(body) == 1
+    entry = body[0]
+    assert entry["id"] == run_id
+    assert entry["workflow_id"] == "hil-wf"
+    assert entry["node_id"] == "human"
+    assert entry["requested_at"] is not None
+
+    hil_client.post(f"/api/runs/{run_id}/resume", json={"answer": "x"})
+    _wait_for_run(hil_client, run_id)
+
+    assert hil_client.get("/api/runs/paused").json() == []
+
+
 # ─── Human-in-loop timeout tests ─────────────────────────────────────────────
 
 

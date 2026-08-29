@@ -267,6 +267,27 @@ async def resume_run(run_id: str, human_input: dict[str, Any] = Body(default={})
     return {"run_id": run_id, "status": "resuming"}
 
 
+@router.get("/runs/paused")
+def list_paused_runs():
+    """List runs currently waiting for human input, oldest first."""
+    out = []
+    for record in RUNS.values():
+        if record.status != "paused":
+            continue
+        iv = record.interrupt_value if isinstance(record.interrupt_value, dict) else {}
+        out.append({
+            "id": record.run_id,
+            "workflow_id": record.workflow_id,
+            "node_id": iv.get("node_id"),
+            "message": iv.get("message"),
+            "requested_at": iv.get("requested_at"),
+            "timeout_seconds": iv.get("timeout_seconds"),
+            "started_at": record.started_at,
+        })
+    out.sort(key=lambda r: r["requested_at"] or 0)
+    return out
+
+
 @router.get("/runs/{run_id}")
 def get_run(run_id: str):
     """Fetch a run's current state (in-memory; gone after a process restart)."""
