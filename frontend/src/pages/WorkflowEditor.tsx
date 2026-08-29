@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   ReactFlow,
@@ -11,10 +11,12 @@ import {
   useReactFlow,
   type Edge,
   type Connection,
+  type NodeChange,
+  type EdgeChange,
 } from '@xyflow/react'
-import { ArrowLeft, Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu, Wrench } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu, Wrench } from 'lucide-react'
 
-import { workflowsApi, type ValidationResult } from '@/lib/api'
+import { workflowsApi, type ValidationResult, type Workflow } from '@/lib/api'
 import {
   ALL_NODE_TYPES,
   NODE_META,
@@ -52,7 +54,6 @@ const nodeTypes = {
 
 function WorkflowEditorInner() {
   const { id } = useParams()
-  const navigate = useNavigate()
   const { screenToFlowPosition } = useReactFlow()
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeType>([])
@@ -66,7 +67,7 @@ function WorkflowEditorInner() {
   const [tools, setTools] = useState<ToolDefinition[]>([])
   const [showModels, setShowModels] = useState(false)
   const [showTools, setShowTools] = useState(false)
-  const [saveToast, setSaveToast] = useState(false)
+  const [dirty, setDirty] = useState(false)
 
   const { data: workflow, isLoading } = useQuery({
     queryKey: ['workflow', id],
@@ -81,6 +82,7 @@ function WorkflowEditorInner() {
     setTools(workflow.tools)
     setSelectedId(null)
     setValidation(null)
+    setDirty(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflow?.id])
 
@@ -95,6 +97,32 @@ function WorkflowEditorInner() {
     setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: m.get(n.id) } })))
   }, [validation, setNodes])
 
+  const dirtyRef = useRef(false)
+  const latestPayloadRef = useRef<Workflow | null>(null)
+
+  const buildPayload = useCallback((): Workflow | null => {
+    if (!workflow || !id) return null
+    return {
+      id: workflow.id,
+      name: workflow.name,
+      description: workflow.description ?? null,
+      schema_version: workflow.schema_version,
+      nodes: rfToNodes(nodes),
+      edges: rfToEdges(edges),
+      tools,
+      models,
+      state_schema: workflow.state_schema ?? null,
+    }
+  }, [workflow, id, nodes, edges, tools, models])
+
+  useEffect(() => {
+    latestPayloadRef.current = buildPayload()
+  }, [buildPayload])
+
+  useEffect(() => {
+    dirtyRef.current = dirty
+  }, [dirty])
+
   const selectedNode: WorkflowNode | null = useMemo(() => {
     if (!selectedId) return null
     const n = nodes.find((x) => x.id === selectedId)
@@ -103,6 +131,7 @@ function WorkflowEditorInner() {
   }, [nodes, selectedId])
 
   const handleConfigChange = (nodeId: string, config: NodeConfig) => {
+    setDirty(true)
     setNodes((ns) =>
       ns.map((n) => {
         if (n.id !== nodeId) return n
@@ -138,6 +167,7 @@ function WorkflowEditorInner() {
       }
       setNodes((ns) => [...ns, newNode])
       setSelectedId(newId)
+      setDirty(true)
     },
     [screenToFlowPosition, setNodes],
   )
@@ -146,6 +176,24 @@ function WorkflowEditorInner() {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
   }, [])
+
+  // Wrap React Flow's change handlers to mark the doc dirty on meaningful
+  // changes (drag/move/delete), ignoring pure selection & dimension updates.
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<FlowNodeType>[]) => {
+      onNodesChange(changes)
+      if (changes.some((c) => c.type !== 'select' && c.type !== 'dimensions')) setDirty(true)
+    },
+    [onNodesChange],
+  )
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      onEdgesChange(changes)
+      if (changes.some((c) => c.type !== 'select')) setDirty(true)
+    },
+    [onEdgesChange],
+  )
 
   // ─── Edge creation ─────────────────────────────────────────────────────────
 
@@ -163,6 +211,7 @@ function WorkflowEditorInner() {
           data: { semanticType: 'static', condition: null },
         },
       ])
+      setDirty(true)
     },
     [setEdges],
   )
@@ -174,6 +223,7 @@ function WorkflowEditorInner() {
       const ids = new Set(deleted.map((n) => n.id))
       setEdges((eds) => eds.filter((e) => !ids.has(e.source) && !ids.has(e.target)))
       if (selectedId && ids.has(selectedId)) setSelectedId(null)
+      setDirty(true)
     },
     [setEdges, selectedId],
   )
@@ -194,6 +244,7 @@ function WorkflowEditorInner() {
       setNodes((ns) => ns.filter((n) => n.id !== nodeId))
       setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
       setSelectedId(null)
+      setDirty(true)
     },
     [setNodes, setEdges],
   )
@@ -201,40 +252,25 @@ function WorkflowEditorInner() {
   // ─── Save / Validate / Run ─────────────────────────────────────────────────
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      workflowsApi.update(id!, {
-        id: workflow!.id,
-        name: workflow!.name,
-        description: workflow!.description ?? null,
-        schema_version: workflow!.schema_version,
-        nodes: rfToNodes(nodes),
-        edges: rfToEdges(edges),
-        tools,
-        models,
-        state_schema: workflow!.state_schema ?? null,
-      }),
+    mutationFn: () => {
+      const payload = buildPayload()
+      if (!payload) throw new Error('Workflow not loaded')
+      return workflowsApi.update(id!, payload)
+    },
     onSuccess: () => {
+      setDirty(false)
       setValidation(null)
       validationRef.current = new Map()
       setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: undefined } })))
-      setSaveToast(true)
-      setTimeout(() => setSaveToast(false), 2000)
     },
   })
 
   const validateMutation = useMutation({
-    mutationFn: () =>
-      workflowsApi.validate(id!, {
-        id: workflow!.id,
-        name: workflow!.name,
-        description: workflow!.description ?? null,
-        schema_version: workflow!.schema_version,
-        nodes: rfToNodes(nodes),
-        edges: rfToEdges(edges),
-        tools,
-        models,
-        state_schema: workflow!.state_schema ?? null,
-      }),
+    mutationFn: () => {
+      const payload = buildPayload()
+      if (!payload) throw new Error('Workflow not loaded')
+      return workflowsApi.validate(id!, payload)
+    },
     onSuccess: (r) => setValidation(r),
   })
 
@@ -264,17 +300,32 @@ function WorkflowEditorInner() {
     runMutation.mutate(parsed as Record<string, any>)
   }
 
+  // Debounced auto-save: persist ~800ms after the last edit while dirty.
+  useEffect(() => {
+    if (!dirty || !workflow) return
+    const t = setTimeout(() => saveMutation.mutate(), 800)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, workflow, nodes, edges, tools, models])
+
+  // Flush pending changes on unmount (workflow switch / navigating away).
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current && id && latestPayloadRef.current) {
+        workflowsApi.update(id, latestPayloadRef.current).catch(() => {})
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
   if (isLoading) return <div className="p-6 text-zinc-500">Loading...</div>
   if (!workflow) return <div className="p-6 text-zinc-500">Workflow not found</div>
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950">
+    <div className="flex h-full flex-col bg-zinc-950">
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/')} className="rounded-md p-1.5 text-zinc-400 hover:text-zinc-100">
-            <ArrowLeft size={18} />
-          </button>
           <h1 className="font-medium">{workflow.name}</h1>
         </div>
         <div className="flex items-center gap-2">
@@ -306,16 +357,23 @@ function WorkflowEditorInner() {
             <ShieldCheck size={14} />
             Validate
           </button>
-          {saveToast && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400">
-              <CheckCircle2 size={14} />
+          {saveMutation.isPending ? (
+            <span className="mr-1 text-xs text-zinc-400">Saving…</span>
+          ) : dirty ? (
+            <span className="mr-1 flex items-center gap-1.5 text-xs text-amber-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              Unsaved
+            </span>
+          ) : (
+            <span className="mr-1 flex items-center gap-1 text-xs text-emerald-400">
+              <CheckCircle2 size={13} />
               Saved
             </span>
           )}
           <button
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-zinc-200 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
           >
             <Save size={14} />
             Save
@@ -392,8 +450,8 @@ function WorkflowEditorInner() {
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
             onNodesDelete={handleNodesDelete}
             onEdgesDelete={handleEdgesDelete}
@@ -441,12 +499,12 @@ function WorkflowEditorInner() {
 
       {/* Models modal */}
       {showModels && (
-        <ModelsPanel models={models} onChange={setModels} onClose={() => setShowModels(false)} />
+        <ModelsPanel models={models} onChange={(m) => { setModels(m); setDirty(true) }} onClose={() => setShowModels(false)} />
       )}
 
       {/* Tools modal */}
       {showTools && (
-        <ToolsPanel tools={tools} onChange={setTools} onClose={() => setShowTools(false)} />
+        <ToolsPanel tools={tools} onChange={(t) => { setTools(t); setDirty(true) }} onClose={() => setShowTools(false)} />
       )}
 
       {/* Bottom: run log / debug panel */}

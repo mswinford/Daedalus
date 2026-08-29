@@ -1,14 +1,24 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import WorkflowList from './pages/WorkflowList'
+import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom'
+import AppLayout from './components/layout/AppLayout'
+import EmptyState from './pages/EmptyState'
 import WorkflowEditor from './pages/WorkflowEditor'
+
+// Remount the editor per workflow so transient state (run panel, input JSON,
+// validation) resets on switch. Same route with a different :id does not
+// remount on its own, hence the explicit key.
+function EditorRoute() {
+  const { id } = useParams()
+  return <WorkflowEditor key={id} />
+}
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<WorkflowList />} />
-        <Route path="/workflows/:id" element={<WorkflowEditor />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route element={<AppLayout />}>
+          <Route index element={<EmptyState />} />
+          <Route path="workflows/:id" element={<EditorRoute />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   )
