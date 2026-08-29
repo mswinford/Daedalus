@@ -1,0 +1,92 @@
+{
+  "id": "sample-order-assistant",
+  "name": "Order Assistant (Agent + Tools)",
+  "description": "Demo: an agent node that answers order questions using two sandboxed tools (lookup_order, calculate_total). Demonstrates the agent tool-calling loop. Requires a model configured in the Models panel. Input: {\"request\": \"What is the status of order A-1002?\"}",
+  "schema_version": 1,
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 0, "y": 200 },
+      "config": { "input_fields": ["request"] }
+    },
+    {
+      "id": "assistant",
+      "type": "agent",
+      "position": { "x": 300, "y": 200 },
+      "config": {
+        "model_id": "model-1",
+        "system_prompt": "You are a friendly order support assistant for Acme Store.\n\nUse the lookup_order tool to find order details by order id (e.g. A-1001).\nIf the customer asks about cost with tax, use the calculate_total tool with the order's price and quantity as the subtotal and the given tax rate.\n\nAnswer in plain language, 2-4 sentences. If an order is not found, say so and list the known order ids: A-1001, A-1002, A-1003.",
+        "temperature": 0.3,
+        "tool_ids": ["lookup_order", "calculate_total"],
+        "max_iterations": 6
+      }
+    },
+    {
+      "id": "format",
+      "type": "transform",
+      "position": { "x": 600, "y": 200 },
+      "config": {
+        "mode": "template",
+        "template": "Support response:\n\n{{output}}",
+        "output_field": "output"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 900, "y": 200 },
+      "config": { "output_fields": ["output"] }
+    }
+  ],
+  "edges": [
+    { "id": "e_start_assistant", "source_node_id": "start", "source_handle": "default", "target_node_id": "assistant" },
+    { "id": "e_assistant_format", "source_node_id": "assistant", "source_handle": "default", "target_node_id": "format" },
+    { "id": "e_format_end", "source_node_id": "format", "source_handle": "default", "target_node_id": "end" }
+  ],
+  "tools": [
+    {
+      "id": "lookup_order",
+      "name": "lookup_order",
+      "description": "Look up an order by its order id (e.g. A-1001). Returns the order's item, quantity, unit price and shipping status.",
+      "parameters": {
+        "order_id": { "type": "string", "description": "The order id to look up", "required": true }
+      },
+      "implementation": {
+        "type": "custom_function",
+        "config": {
+          "code": "orders = {\n    \"A-1001\": {\"item\": \"Laptop\", \"qty\": 1, \"price\": 1299.0, \"status\": \"shipped\"},\n    \"A-1002\": {\"item\": \"Mouse\", \"qty\": 2, \"price\": 25.5, \"status\": \"processing\"},\n    \"A-1003\": {\"item\": \"Keyboard\", \"qty\": 1, \"price\": 89.99, \"status\": \"delivered\"},\n}\norder_id = state[\"arguments\"][\"order_id\"]\nif order_id in orders:\n    result[\"found\"] = True\n    result[\"order\"] = orders[order_id]\nelse:\n    result[\"found\"] = False\n    result[\"message\"] = \"No order found with id \" + str(order_id)"
+        }
+      }
+    },
+    {
+      "id": "calculate_total",
+      "name": "calculate_total",
+      "description": "Calculate the total price for a subtotal with a tax rate applied. Use for questions like 'how much with 8% tax?'.",
+      "parameters": {
+        "subtotal": { "type": "number", "description": "The pre-tax amount (price times quantity)", "required": true },
+        "tax_rate": { "type": "number", "description": "Tax rate as a decimal, e.g. 0.08 for 8%", "required": true }
+      },
+      "implementation": {
+        "type": "custom_function",
+        "config": {
+          "code": "subtotal = state[\"arguments\"][\"subtotal\"]\ntax_rate = state[\"arguments\"][\"tax_rate\"]\ntax_amount = subtotal * tax_rate\nresult[\"subtotal\"] = subtotal\nresult[\"tax_amount\"] = round(tax_amount, 2)\nresult[\"total\"] = round(subtotal + tax_amount, 2)"
+        }
+      }
+    }
+  ],
+  "models": [
+    {
+      "id": "model-1",
+      "name": "Default Model",
+      "provider": "openai_compatible",
+      "model": "gpt-4o-mini",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_ref": "",
+      "default_temperature": 0.3,
+      "track_cost": false,
+      "pricing": null
+    }
+  ],
+  "state_schema": null
+}
