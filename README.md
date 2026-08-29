@@ -10,8 +10,8 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 
 **Engine (works now)**
 - LangGraph-based execution of `start → … → end` graphs, run synchronously over HTTP.
-- Node types: `agent`, `conditional`, `transform` (`template` + `mapping`), `custom_function` (sandboxed Python via RestrictedPython).
-- Conditional routing on both **nodes** and **edges**. The `json_path` condition type works; `regex`/`llm` are stubbed.
+- Node types: `agent` (with tool-calling loop), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython).
+- Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
 
 **API (works now)**
@@ -102,6 +102,8 @@ cd frontend && npm run lint  # frontend typecheck
 
 Because the visual editor is not finished, the practical way to use AI Forge today is through the REST API. The flow is: **create a workflow (JSON) → validate it → run it with input**.
 
+> **How data flows through a run** — state shape, per-node read/write behavior, routing, condition syntax, and a worked example: [docs/data-flow.md](./docs/data-flow.md).
+
 ### Minimal no-LLM example (works out of the box)
 
 This workflow needs no API keys. It takes a `score`, routes on a `json_path` condition, and produces different output for each branch.
@@ -188,7 +190,7 @@ Point an agent at any OpenAI-compatible endpoint. For a local model via Ollama:
 }
 ```
 
-> **Note:** agent nodes currently perform a single chat call. `tool_ids` and `max_iterations` are in the schema but not yet enforced (no tool loop). See [Known limitations](#known-limitations).
+Agent nodes support a tool-calling loop: give the node `tool_ids` referencing workflow-level `tools[]`, and it will call tools up to `max_iterations` times before producing its final answer. See `samples/sample-order-assistant.json` for a complete example with sandboxed tools.
 
 ### Sandboxed custom function
 
@@ -234,7 +236,7 @@ Base URL: `http://127.0.0.1:3000`
   "nodes": [ /* Node[] */ ],
   "edges": [ /* Edge[] */ ],
   "models": [ /* ModelConfig[] */ ],   // referenced by agent nodes
-  "tools":  [ /* ToolDefinition[] */], // (schema only; not yet used)
+  "tools":  [ /* ToolDefinition[] */], // referenced by agent nodes via tool_ids
   "state_schema": { /* optional, not yet used by the engine */ }
 }
 ```
@@ -250,9 +252,9 @@ Base URL: `http://127.0.0.1:3000`
 | Type | Status | Notes |
 |---|---|---|
 | `start` / `end` | ✅ | Entry/exit; entry falls back to first node if no start present |
-| `agent` | ✅ (partial) | Single chat call via OpenAI-compatible provider. No tool loop yet |
-| `conditional` | ✅ | Routes by condition; `json_path` works, `regex`/`llm` stubbed |
-| `transform` | ✅ (partial) | `template` and `mapping` modes work; `custom_function` mode not wired |
+| `agent` | ✅ | Chat via OpenAI-compatible provider + tool-calling loop (`tool_ids`, `max_iterations`) |
+| `conditional` | ✅ | Routes by condition; `json_path` and `regex` work, `llm` not implemented |
+| `transform` | ✅ | `template`, `mapping`, and `custom_function` modes all work |
 | `custom_function` | ✅ | Sandboxed Python (RestrictedPython), timeout enforced |
 | `human_in_loop` | ⏳ Phase 3 | Raises `NotImplementedError` |
 
@@ -262,11 +264,10 @@ Base URL: `http://127.0.0.1:3000`
 
 - **No visual graph editor yet** — author workflows as JSON. The React Flow canvas, per-node config panel, and Validate button are Phase 2.
 - **Synchronous runs** — `POST .../run` blocks until completion. Async execution + WebSocket streaming is Phase 2.
-- **`json_path` only** for conditions; `regex` and `llm` condition types raise `NotImplementedError`.
-- **Agent nodes** ignore `tool_ids` / `max_iterations` (single LLM call, no tool loop).
+- **`llm` condition type** raises `NotImplementedError`; `json_path` and `regex` work.
 - **Anthropic provider** not implemented (OpenAI-compatible only).
 - **`state_schema`** is defined but unused by the engine; state is a fixed internal shape.
-- **`custom_function`** results land in `output` / `_node_outputs`, not back into shared `data.*`.
+- **Multiple agent nodes** in one run share a single conversation (`messages`), so a second agent continues the first's context instead of seeing the raw input again.
 
 ---
 
