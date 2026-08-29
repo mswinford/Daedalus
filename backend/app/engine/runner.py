@@ -32,17 +32,22 @@ def _validate_input(workflow: Workflow, input_data: dict[str, Any]) -> None:
             raise ValueError(f"Field '{field.name}' expects object, got {type(value).__name__}")
 
 
-def run_workflow_sync(workflow: Workflow, input_data: dict[str, Any]) -> dict[str, Any]:
+def run_workflow_sync(
+    workflow: Workflow,
+    input_data: dict[str, Any],
+    trace: list | None = None,
+) -> dict[str, Any]:
     """Execute a workflow synchronously.
 
     For Phase 1, this is a blocking call. In Phase 2, we'll make this async
-    with WebSocket streaming.
+    with WebSocket streaming. If `trace` is provided, node/llm execution events
+    are appended to it (so partial traces survive a mid-run failure).
     """
     import asyncio
 
     _validate_input(workflow, input_data)
 
-    builder = GraphBuilder(workflow)
+    builder = GraphBuilder(workflow, trace=trace)
     graph = builder.build()
 
     # Build initial state from input data. Reserved keys map directly to state
@@ -69,10 +74,14 @@ def run_workflow_sync(workflow: Workflow, input_data: dict[str, Any]) -> dict[st
     finally:
         loop.close()
 
-    # Extract output
+    # Extract output + execution trace
     return {
         "output": result.get("output", ""),
         "messages": result.get("messages", []),
         "data": result.get("data", {}),
         "node_outputs": result.get("_node_outputs", {}),
+        "events": builder._trace,
+        "total_tokens_input": builder.total_tokens_input,
+        "total_tokens_output": builder.total_tokens_output,
+        "estimated_cost_usd": builder.estimated_cost_usd,
     }

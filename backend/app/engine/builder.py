@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+import time
 from typing import Any, Callable
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -11,7 +12,7 @@ from schema.models import (
     Workflow, Node, Edge, AgentNodeConfig,
     StartNodeConfig, EndNodeConfig, ConditionalNodeConfig,
     TransformNodeConfig, CustomFunctionNodeConfig, HumanInLoopNodeConfig,
-    ToolDefinition,
+    ToolDefinition, RunEvent,
 )
 from app.engine.llm import create_provider, LLMProvider, Message
 from app.engine.conditions import evaluate_condition, ConditionError, _resolve_path
@@ -34,6 +35,20 @@ def _render_template(template: str, state: dict) -> str:
     return _TEMPLATE_VAR_RE.sub(_sub, template)
 
 
+def _summarize(value: Any, limit: int = 500) -> Any:
+    """Compact, JSON-safe view of a node's output for the debug log.
+
+    Long strings are truncated so a single verbose output doesn't flood the trace.
+    """
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        text = str(value)
+    if len(text) > limit:
+        return text[:limit] + f"… ({len(text) - limit} more chars)"
+    return value
+
+
 # LangGraph state type
 class AgentState(TypedDict):
     messages: list[Any]
@@ -46,12 +61,77 @@ class AgentState(TypedDict):
 class GraphBuilder:
     """Translates a workflow definition into a compiled LangGraph graph."""
 
-    def __init__(self, workflow: Workflow):
+    def __init__(self, workflow: Workflow, trace: list[RunEvent] | None = None):
         self.workflow = workflow
         self.graph = StateGraph(AgentState)
         self.providers: dict[str, LLMProvider] = {}
         self._nodes_by_id = {n.id: n for n in workflow.nodes}
+        # Execution trace (node_start/node_end/llm_call events). Callers may pass
+        # a shared list to collect events even when a run fails mid-graph.
+        self._trace: list[RunEvent] = trace if trace is not None else []
+        self._token_usage: dict[str, dict[str, int]] = {}
         self._build_providers()
+
+    # ─── Execution tracing ────────────────────────────────────────────────
+
+    @property
+    def total_tokens_input(self) -> int:
+        return sum(v["input"] for v in self._token_usage.values())
+
+    @property
+    def total_tokens_output(self) -> int:
+        return sum(v["output"] for v in self._token_usage.values())
+
+    @property
+    def estimated_cost_usd(self) -> float:
+        """Sum per-model token usage against each model's pricing (per 1M tokens)."""
+        cost = 0.0
+        for model_id, usage in self._token_usage.items():
+            mc = next((m for m in self.workflow.models if m.id == model_id), None)
+            if not mc or not mc.pricing:
+                continue
+            price_in = mc.pricing.get("input", 0.0)
+            price_out = mc.pricing.get("output", 0.0)
+            cost += usage["input"] / 1_000_000 * price_in + usage["output"] / 1_000_000 * price_out
+        return round(cost, 6)
+
+    def _record_llm_call(self, node_id: str, model_id: str, result: "LLMResult") -> None:
+        """Accumulate token usage and emit an llm_call trace event."""
+        bucket = self._token_usage.setdefault(model_id, {"input": 0, "output": 0})
+        bucket["input"] += result.tokens_input
+        bucket["output"] += result.tokens_output
+        self._trace.append(RunEvent(
+            type="llm_call", node_id=node_id, timestamp=time.time(),
+            data={
+                "model": model_id,
+                "tokens_input": result.tokens_input,
+                "tokens_output": result.tokens_output,
+                "tool_calls": [tc.get("function", {}).get("name") for tc in result.tool_calls],
+            },
+        ))
+
+    def _instrument(self, node_id: str, func: Callable) -> Callable:
+        """Wrap a node function to emit node_start/node_end (or node_error) with timing."""
+        async def wrapped(state: AgentState) -> AgentState:
+            started = time.perf_counter()
+            self._trace.append(RunEvent(type="node_start", node_id=node_id, timestamp=time.time()))
+            try:
+                result = await func(state)
+            except Exception as exc:
+                duration_ms = (time.perf_counter() - started) * 1000
+                self._trace.append(RunEvent(
+                    type="node_error", node_id=node_id, timestamp=time.time(),
+                    data={"error": str(exc), "duration_ms": round(duration_ms, 2)},
+                ))
+                raise
+            duration_ms = (time.perf_counter() - started) * 1000
+            output = result.get("_node_outputs", {}).get(node_id) if isinstance(result, dict) else None
+            self._trace.append(RunEvent(
+                type="node_end", node_id=node_id, timestamp=time.time(),
+                data={"duration_ms": round(duration_ms, 2), "output": _summarize(output)},
+            ))
+            return result
+        return wrapped
 
     def _build_providers(self):
         """Create LLM providers from workflow model configs."""
@@ -131,6 +211,7 @@ class GraphBuilder:
                     tools=tools,
                     temperature=config.temperature,
                 )
+                self._record_llm_call(node.id, config.model_id, result)
                 final_content = result.content
 
                 if not result.tool_calls:
@@ -363,7 +444,7 @@ class GraphBuilder:
             if node.type in ("start", "end"):
                 continue  # Start and end are handled by edges
             node_func = self._get_node_func(node)
-            self.graph.add_node(node.id, node_func)
+            self.graph.add_node(node.id, self._instrument(node.id, node_func))
 
         # Add edges
         self._build_edges()
