@@ -52,6 +52,10 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Models panel**: modal CRUD for `ModelConfig` entries (name, provider, model, base_url,
   api_key_ref, default_temperature). Accessible via "Models" button in top bar. Agent
   nodes select a model from this list. Save persists models to workflow JSON.
+- **Tools panel**: modal CRUD for `ToolDefinition` entries — name, description, parameters
+  (name/type/required), and implementation (`builtin` / `custom_function` / `http`, each with its
+  own config fields). Accessible via "Tools" button in top bar. Agent nodes select tools from this
+  list (checkbox). Save persists tools to workflow JSON. Frontend-only; no backend change needed.
 - **Sample workflows**: `samples/sample-grade.json` (conditional routing demo) and
   `samples/sample-agent.json` (agent node with LLM call + transform).
 - **Tests**: 74 passing (`python -m pytest backend/tests/ -q`). Frontend typechecks clean.
@@ -78,10 +82,34 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   observability/Prometheus.
 
 ### Suggested next steps (Phase 2.3 / Phase 3)
-- **Tools panel** — UI for CRUD on `ToolDefinition` entries (similar to Models panel).
+- [x] **Tools panel** — UI for CRUD on `ToolDefinition` entries (done 2026-08-28; see "What works today").
 - **Run log / debug panel** — show per-node execution timing, intermediate state, LLM tokens.
 - **Async execution** — POST /run returns runId immediately, WebSocket streams progress.
 - **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
+
+### Deferred experiment: GitHub "user story → PR" agent sample
+Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample
+workflow where an agent intakes a user story, makes changes in a GitHub repo, and opens a PR.
+
+Two candidate shapes:
+- **Option A — single agent + tools (closest to what works today):**
+  `start(user_story, repo) → agent "coder" → transform (format PR link) → end`.
+  One agent node, generous `max_iterations`, system prompt describing the procedure
+  (create branch → implement → commit/push → open PR), driven by 3–4 GitHub tools.
+- **Option B — multi-node pipeline (more control):**
+  `start → agent "planner" (story → data.plan) → agent "implementer" (executes via github tools)
+  → conditional (regex on output: PR created?) → transform / end`.
+  Caveat: agents share one `messages` conversation per run, so the implementer continues the
+  planner's context rather than seeing fresh input. Workable here; not general.
+
+Gaps to close first:
+- **URL templating for `http` tools** — `http` implementation has a fixed URL
+  (`backend/app/engine/tools.py`), no `{owner}`/`{repo}` path placeholders. Either hardcode the
+  repo per workflow or add placeholder substitution.
+- **Secrets store** — deferred (see "deferred by design"); a GitHub token would otherwise sit in
+  plaintext in the workflow JSON.
+- **`github_*` builtins** — prefer a small set (`create_branch`, `write_file`, `create_pr`) over
+  raw `http` calls; register via `@register_builtin` in `backend/app/engine/tools.py`.
 
 ### Phase 2 — Design (completed)
 

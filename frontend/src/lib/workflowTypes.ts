@@ -144,12 +144,27 @@ export interface ModelConfig {
   pricing?: Record<string, number> | null
 }
 
+export type ToolImplementationType = 'builtin' | 'custom_function' | 'http'
+
+export interface JsonSchemaParam {
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object'
+  description?: string | null
+  required: boolean
+  enum?: string[] | null
+}
+
 export interface ToolDefinition {
   id: string
   name: string
   description: string
-  parameters: Record<string, unknown>
-  implementation: { type: string; config: Record<string, unknown> }
+  parameters: Record<string, JsonSchemaParam>
+  implementation: { type: ToolImplementationType; config: Record<string, unknown> }
+}
+
+// A single row in the tool parameter editor (keyed by param name elsewhere).
+export interface ToolParamRow {
+  key: string
+  value: JsonSchemaParam
 }
 
 export interface StateField {

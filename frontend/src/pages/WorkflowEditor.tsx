@@ -12,7 +12,7 @@ import {
   type Edge,
   type Connection,
 } from '@xyflow/react'
-import { ArrowLeft, Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu } from 'lucide-react'
+import { ArrowLeft, Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu, Wrench } from 'lucide-react'
 
 import { workflowsApi, type ValidationResult } from '@/lib/api'
 import {
@@ -34,7 +34,8 @@ import {
 import FlowNode from '@/components/flow/FlowNode'
 import ConfigPanel from '@/components/flow/ConfigPanel'
 import ModelsPanel from '@/components/flow/ModelsPanel'
-import type { ModelConfig } from '@/lib/workflowTypes'
+import ToolsPanel from '@/components/flow/ToolsPanel'
+import type { ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
 
@@ -61,7 +62,9 @@ function WorkflowEditorInner() {
   const [showInput, setShowInput] = useState(false)
   const [inputError, setInputError] = useState<string | null>(null)
   const [models, setModels] = useState<ModelConfig[]>([])
+  const [tools, setTools] = useState<ToolDefinition[]>([])
   const [showModels, setShowModels] = useState(false)
+  const [showTools, setShowTools] = useState(false)
   const [saveToast, setSaveToast] = useState(false)
 
   const { data: workflow, isLoading } = useQuery({
@@ -74,6 +77,7 @@ function WorkflowEditorInner() {
     setNodes(nodesToRF(workflow.nodes, workflow.edges))
     setEdges(edgesToRF(workflow.edges))
     setModels(workflow.models)
+    setTools(workflow.tools)
     setSelectedId(null)
     setValidation(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,7 +208,7 @@ function WorkflowEditorInner() {
         schema_version: workflow!.schema_version,
         nodes: rfToNodes(nodes),
         edges: rfToEdges(edges),
-        tools: workflow!.tools,
+        tools,
         models,
         state_schema: workflow!.state_schema ?? null,
       }),
@@ -226,7 +230,7 @@ function WorkflowEditorInner() {
         schema_version: workflow!.schema_version,
         nodes: rfToNodes(nodes),
         edges: rfToEdges(edges),
-        tools: workflow!.tools,
+        tools,
         models,
         state_schema: workflow!.state_schema ?? null,
       }),
@@ -279,6 +283,13 @@ function WorkflowEditorInner() {
           >
             <Cpu size={14} />
             Models
+          </button>
+          <button
+            onClick={() => setShowTools(true)}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            <Wrench size={14} />
+            Tools
           </button>
           {validation && (
             <span className={`mr-1 flex items-center gap-1 text-xs ${validation.valid ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -419,7 +430,7 @@ function WorkflowEditorInner() {
           <ConfigPanel
             node={selectedNode}
             models={models}
-            tools={workflow.tools}
+            tools={tools}
             onConfigChange={handleConfigChange}
             onDeleteNode={handleDeleteNode}
             edges={edges}
@@ -430,6 +441,11 @@ function WorkflowEditorInner() {
       {/* Models modal */}
       {showModels && (
         <ModelsPanel models={models} onChange={setModels} onClose={() => setShowModels(false)} />
+      )}
+
+      {/* Tools modal */}
+      {showTools && (
+        <ToolsPanel tools={tools} onChange={setTools} onClose={() => setShowTools(false)} />
       )}
 
       {/* Bottom: run output */}
