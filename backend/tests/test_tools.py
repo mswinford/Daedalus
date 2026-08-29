@@ -83,6 +83,73 @@ def test_execute_unknown_builtin():
     assert "error" in json.loads(result)
 
 
+# --- HTTP templating (no network: these error out before any request) ---
+
+def test_render_template_args():
+    from app.engine.tools import _render_template
+    rendered, missing = _render_template(
+        "https://api.github.com/repos/{owner}/{repo}", {"owner": "acme", "repo": "widget"}
+    )
+    assert rendered == "https://api.github.com/repos/acme/widget"
+    assert missing == []
+
+
+def test_render_template_env(monkeypatch):
+    from app.engine.tools import _render_template
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
+    rendered, missing = _render_template("Bearer ${GITHUB_TOKEN}", {})
+    assert rendered == "Bearer ghp_secret"
+    assert missing == []
+
+
+def test_render_template_missing(monkeypatch):
+    from app.engine.tools import _render_template
+    monkeypatch.delenv("NOPE_TOKEN", raising=False)
+    # Missing arg is left as-is; missing env var is blanked. Both are reported.
+    rendered, missing = _render_template("x={a} y=${NOPE_TOKEN}", {})
+    assert rendered == "x={a} y="
+    assert set(missing) == {"a", "NOPE_TOKEN"}
+
+
+def test_execute_http_missing_url_value():
+    tool = ToolDefinition(
+        id="t1", name="get_repo", description="Get a repo",
+        parameters={
+            "owner": JsonSchemaParam(type=StateFieldType.STRING, required=True),
+            "repo": JsonSchemaParam(type=StateFieldType.STRING, required=True),
+        },
+        implementation=ToolImplementation(
+            type=ToolImplementationType.HTTP,
+            config={"url": "https://api.github.com/repos/{owner}/{repo}", "method": "GET"},
+        ),
+    )
+    import asyncio
+    result = asyncio.run(execute_tool(tool, {"owner": "acme"}, {}))  # repo missing
+    assert "missing values" in json.loads(result)["error"]
+
+
+def test_execute_http_missing_header_env(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    tool = ToolDefinition(
+        id="t1", name="get_repo", description="Get a repo",
+        parameters={
+            "owner": JsonSchemaParam(type=StateFieldType.STRING, required=True),
+            "repo": JsonSchemaParam(type=StateFieldType.STRING, required=True),
+        },
+        implementation=ToolImplementation(
+            type=ToolImplementationType.HTTP,
+            config={
+                "url": "https://api.github.com/repos/{owner}/{repo}",
+                "method": "GET",
+                "headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"},
+            },
+        ),
+    )
+    import asyncio
+    result = asyncio.run(execute_tool(tool, {"owner": "acme", "repo": "widget"}, {}))
+    assert "header placeholders" in json.loads(result)["error"]
+
+
 # --- Agent loop (mock provider) ---
 
 class MockProvider:

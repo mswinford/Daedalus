@@ -42,6 +42,17 @@ function rowsToParams(rows: ToolParamRow[]): Record<string, JsonSchemaParam> {
   return out
 }
 
+interface HeaderRow { name: string; value: string }
+
+// Convert a stored headers object into editable rows (and back).
+function toHeaderRows(headers: unknown): HeaderRow[] {
+  if (!headers || typeof headers !== 'object') return []
+  return Object.entries(headers as Record<string, unknown>).map(([name, value]) => ({
+    name,
+    value: String(value ?? ''),
+  }))
+}
+
 function ToolForm({
   initial,
   onSave,
@@ -70,6 +81,12 @@ function ToolForm({
   const [method, setMethod] = useState(
     ((initial?.implementation.config.method as string) ?? 'GET').toUpperCase(),
   )
+  const [httpTimeout, setHttpTimeout] = useState(
+    (initial?.implementation.config.timeout_seconds as number) ?? 30,
+  )
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>(
+    toHeaderRows(initial?.implementation.config.headers),
+  )
 
   const updateRow = (i: number, patch: Partial<ToolParamRow>) => {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
@@ -88,7 +105,13 @@ function ToolForm({
     } else if (implType === 'custom_function') {
       config = { code, timeout_seconds: timeout }
     } else {
-      config = { url: url.trim(), method }
+      const headers: Record<string, string> = {}
+      for (const h of headerRows) {
+        const n = h.name.trim()
+        if (n) headers[n] = h.value
+      }
+      config = { url: url.trim(), method, timeout_seconds: httpTimeout }
+      if (Object.keys(headers).length > 0) config.headers = headers
     }
     onSave({
       id: initial?.id ?? crypto.randomUUID(),
@@ -222,19 +245,65 @@ function ToolForm({
           <div className="mt-2 space-y-2">
             <label className="block">
               <span className={labelCls}>URL</span>
-              <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/orders" />
+              <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.github.com/repos/{owner}/{repo}" />
+              <span className="mt-1 block text-[11px] text-zinc-600">
+                Use {'{param}'} to fill the path or query from tool arguments.
+              </span>
             </label>
-            <label className="block w-32">
-              <span className={labelCls}>Method</span>
-              <select className={inputCls} value={method} onChange={(e) => setMethod(e.target.value.toUpperCase())}>
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="PATCH">PATCH</option>
-                <option value="DELETE">DELETE</option>
-              </select>
-            </label>
-            <span className="block text-[11px] text-zinc-600">Parameters are sent as query params (GET) or JSON body (other methods).</span>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className={labelCls}>Method</span>
+                <select className={inputCls} value={method} onChange={(e) => setMethod(e.target.value.toUpperCase())}>
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className={labelCls}>Timeout (s)</span>
+                <input type="number" className={inputCls} value={httpTimeout} min={1} max={300} onChange={(e) => setHttpTimeout(Number(e.target.value))} />
+              </label>
+            </div>
+
+            {/* Headers */}
+            <div>
+              <span className={labelCls}>Headers</span>
+              {headerRows.map((h, i) => (
+                <div key={i} className="mb-1 flex items-center gap-1">
+                  <input
+                    className={inputCls}
+                    value={h.name}
+                    placeholder="Authorization"
+                    onChange={(e) => setHeaderRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, name: e.target.value } : r)))}
+                  />
+                  <input
+                    className={inputCls}
+                    value={h.value}
+                    placeholder="Bearer ${GITHUB_TOKEN}"
+                    onChange={(e) => setHeaderRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, value: e.target.value } : r)))}
+                  />
+                  <button
+                    onClick={() => setHeaderRows((rs) => rs.filter((_, idx) => idx !== i))}
+                    className="shrink-0 text-zinc-500 hover:text-red-400"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => setHeaderRows((rs) => [...rs, { name: '', value: '' }])}
+                className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
+              >
+                <Plus size={13} /> Add header
+              </button>
+              <span className="mt-1 block text-[11px] text-zinc-600">
+                Values support {'{param}'} (arguments) and {'${ENV_VAR}'} for secrets read from the environment.
+              </span>
+            </div>
+
+            <span className="block text-[11px] text-zinc-600">Remaining arguments are sent as query params (GET) or JSON body (other methods).</span>
           </div>
         )}
       </div>
