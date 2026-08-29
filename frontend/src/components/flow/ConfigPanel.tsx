@@ -306,7 +306,31 @@ function HumanInLoopEditor({ config, set }: { config: HumanInLoopNodeConfig; set
                 <button onClick={() => removeField(i)} className="text-xs text-red-400 hover:text-red-300">remove</button>
               </div>
               {f.type === 'select' && (
-                <input className={inputCls} placeholder="options (comma separated)" value={(f.options ?? []).join(', ')} onChange={(e) => updateField(i, { options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-zinc-500">Options</span>
+                    <button onClick={() => updateField(i, { options: [...(f.options ?? []), ''] })} className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300">
+                      <Plus size={12} /> Add
+                    </button>
+                  </div>
+                  {(f.options ?? []).map((opt, j) => (
+                    <div key={j} className="flex items-center gap-1.5">
+                      <input
+                        className={inputCls}
+                        placeholder={`option_${j + 1}`}
+                        value={opt}
+                        onChange={(e) => {
+                          const options = [...(f.options ?? [])]
+                          options[j] = e.target.value
+                          updateField(i, { options })
+                        }}
+                      />
+                      <button onClick={() => updateField(i, { options: (f.options ?? []).filter((_, k) => k !== j) })} className="text-red-400 hover:text-red-300">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           ))}
