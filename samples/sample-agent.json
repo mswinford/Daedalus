@@ -1,0 +1,62 @@
+{
+  "id": "sample-agent",
+  "name": "Text Analyzer (Agent)",
+  "description": "Demo: send text to an LLM agent for analysis. Requires a model configured in the Models panel. Input: {\"text\": \"...\"}",
+  "schema_version": 1,
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": { "x": 0, "y": 200 },
+      "config": { "input_fields": ["text"] }
+    },
+    {
+      "id": "analyze",
+      "type": "agent",
+      "position": { "x": 300, "y": 200 },
+      "config": {
+        "model_id": "model-1",
+        "system_prompt": "You are a text analysis assistant. Analyze the user's input and respond with:\n1. A one-sentence summary\n2. The overall sentiment (positive/negative/neutral)\n3. One actionable suggestion\n\nKeep your response concise (under 100 words).",
+        "temperature": 0.7,
+        "tool_ids": [],
+        "max_iterations": 5
+      }
+    },
+    {
+      "id": "format",
+      "type": "transform",
+      "position": { "x": 600, "y": 200 },
+      "config": {
+        "mode": "template",
+        "template": "Analysis complete:\n\n{{output}}",
+        "output_field": "output"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "position": { "x": 900, "y": 200 },
+      "config": { "output_fields": [] }
+    }
+  ],
+  "edges": [
+    { "id": "e_start_analyze", "source_node_id": "start", "source_handle": "default", "target_node_id": "analyze" },
+    { "id": "e_analyze_format", "source_node_id": "analyze", "source_handle": "default", "target_node_id": "format" },
+    { "id": "e_format_end", "source_node_id": "format", "source_handle": "default", "target_node_id": "end" }
+  ],
+  "tools": [],
+  "models": [
+    {
+      "id": "model-1",
+      "name": "Default Model",
+      "provider": "openai_compatible",
+      "model": "gpt-4o-mini",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_ref": "",
+      "default_temperature": 0.7,
+      "track_cost": false,
+      "pricing": null
+    }
+  ],
+  "state_schema": null
+}
