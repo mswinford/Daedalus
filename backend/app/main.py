@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.api import workflows, runs
+from app.api import workflows, runs, secrets
 
 
 @asynccontextmanager
@@ -31,6 +31,7 @@ app.add_middleware(
 # Include routers
 app.include_router(workflows.router, prefix="/api", tags=["workflows"])
 app.include_router(runs.router, prefix="/api", tags=["runs"])
+app.include_router(secrets.router, prefix="/api", tags=["secrets"])
 
 
 @app.get("/health")

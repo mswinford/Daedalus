@@ -86,6 +86,19 @@ export interface ValidationResult {
   warnings: ValidationIssue[]
 }
 
+export interface SecretInfo {
+  name: string
+  source: 'env' | 'file'
+  set: boolean
+}
+
+export const secretsApi = {
+  list: () => api.get<SecretInfo[]>('/secrets').then(r => r.data),
+  upsert: (name: string, value: string) =>
+    api.put('/secrets', { name, value }).then(r => r.data),
+  remove: (name: string) => api.delete(`/secrets/${name}`),
+}
+
 export const workflowsApi = {
   list: () => api.get<WorkflowSummary[]>('/workflows').then(r => r.data),
   get: (id: string) => api.get<Workflow>(`/workflows/${id}`).then(r => r.data),

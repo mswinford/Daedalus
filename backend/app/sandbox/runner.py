@@ -11,6 +11,8 @@ from RestrictedPython.Guards import (
 )
 from RestrictedPython.PrintCollector import PrintCollector
 
+from app.secrets import get_secret as _resolve_secret
+
 _EXTRA_BUILTINS = {
     "list": list,
     "set": set,
@@ -49,6 +51,14 @@ def _inplacevar_(op: str, lhs: Any, rhs: Any) -> Any:
         raise ValueError(f"Unknown operator: {op}") from None
 
 
+def _get_secret(name: str) -> str:
+    """Resolve a secret by name (env > file). Raises if not found."""
+    val = _resolve_secret(name)
+    if val is None:
+        raise ValueError(f"Secret '{name}' is not configured")
+    return val
+
+
 def _build_namespace(input_state: dict[str, Any]) -> dict[str, Any]:
     namespace: dict[str, Any] = {"__builtins__": {**safe_builtins, **_EXTRA_BUILTINS}}
     namespace.update({
@@ -61,6 +71,7 @@ def _build_namespace(input_state: dict[str, Any]) -> dict[str, Any]:
         "_print_": PrintCollector,
         "state": input_state,
         "result": {},
+        "get_secret": _get_secret,
     })
     return namespace
 

@@ -1,12 +1,12 @@
 """Tool schema building and execution for agent tool-calling."""
 import asyncio
 import json
-import os
 import re
 from typing import Any, Callable, Coroutine
 
 from schema.models import ToolDefinition, ToolImplementationType, StateFieldType
 from app.sandbox.runner import run_sandboxed
+from app.secrets import get_secret
 
 _ARG_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 _ENV_PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}")
@@ -24,8 +24,9 @@ def _render_template(template: str, values: dict[str, Any]) -> tuple[str, list[s
 
     def env_repl(m: re.Match[str]) -> str:
         var = m.group(1)
-        if var in os.environ:
-            return os.environ[var]
+        val = get_secret(var)
+        if val is not None:
+            return val
         missing.append(var)
         return ""
 

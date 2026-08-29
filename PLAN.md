@@ -9,15 +9,16 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 2.3 complete → Phase 3 next)
+## Current Status (Phase 2 complete → Phase 3 next)
 
-> Last updated: Phase 2.3 complete. Agent node works end-to-end with LLM calls and a tool-calling
-> loop; Models + Tools panels are in the editor; `http` tools support URL templating, env-var secrets
-> in headers, and per-request timeout. Runs emit a per-node execution trace (timing, intermediate
-> output, LLM tokens + estimated cost) streamed live over WebSocket to the editor's bottom debug panel.
-> The editor is a sidebar / master-detail layout with debounced auto-save. Next up: secrets store,
-> then human-in-loop nodes (Phase 3). Use this section as the source of truth when resuming in a new
-> session — it supersedes the phase notes below.
+> Last updated: Phase 2 complete. Agent node works end-to-end with LLM calls and a tool-calling
+> loop; Models + Tools panels are in the editor; `http` tools support URL templating, secrets-store
+> resolution in headers, and per-request timeout. Runs emit a per-node execution trace (timing,
+> intermediate output, LLM tokens + estimated cost) streamed live over WebSocket to the editor's
+> bottom debug panel. The editor is a sidebar / master-detail layout with debounced auto-save.
+> Secrets store (`~/.ai-forge/secrets.json` + env-var precedence) is implemented with a UI panel.
+> Next up: human-in-loop nodes (Phase 3). Use this section as the source of truth when resuming in
+> a new session — it supersedes the phase notes below.
 
 ### What works today (shippable)
 - **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
@@ -78,10 +79,15 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   (name/type/required), and implementation (`builtin` / `custom_function` / `http`, each with its
   own config fields). Accessible via "Tools" button in top bar. Agent nodes select tools from this
   list (checkbox). Save persists tools to workflow JSON. Frontend-only; no backend change needed.
+- **Secrets store**: `~/.ai-forge/secrets.json` (flat JSON, chmod 600) with env-var precedence
+  (`os.environ` > file). Resolved via `get_secret(name)` — available in sandboxed custom functions
+  and `${NAME}` placeholders in http tool headers. REST API: GET list (names + source only), PUT
+  upsert, DELETE. Frontend: "Secrets" button opens a modal panel for CRUD. Accessible via "Secrets"
+  button in top bar.
 - **Sample workflows**: `samples/sample-grade.json` (conditional routing demo),
   `samples/sample-agent.json` (agent node with LLM call + transform), and
   `samples/sample-order-assistant.json` (agent + two sandboxed `custom_function` tools).
-- **Tests**: 89 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
+- **Tests**: 104 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -98,8 +104,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **Sample agent workflow** — `samples/sample-agent.json` demonstrates agent → transform flow.
 
 ### What is deferred by design
-- **Phase 2 (remaining)** — secrets store (`~/.ai-forge/secrets.json` + env-var precedence),
-  test-connection endpoint.
+- **Phase 2 (remaining)** — test-connection endpoint.
 - **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
@@ -115,6 +120,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   pane, debounced auto-save with unmount flush. See "Sidebar / master-detail editor — Design".
 - [x] **Async execution** *(done 2026-08-28)* — POST /run returns 202 + runId immediately; WebSocket
   streams per-node events live (with seq-based replay/dedup); GET /runs/:id for polling fallback.
+- [x] **Secrets store** *(done 2026-08-28)* — `~/.ai-forge/secrets.json` + env-var precedence;
+  `get_secret()` in sandbox; `${NAME}` in http headers; REST API + frontend panel.
 - **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
@@ -133,11 +140,9 @@ Two candidate shapes:
   planner's context rather than seeing fresh input. Workable here; not general.
 
 Gaps to close first:
-- **URL templating for `http` tools** — `http` implementation has a fixed URL
-  (`backend/app/engine/tools.py`), no `{owner}`/`{repo}` path placeholders. Either hardcode the
-  repo per workflow or add placeholder substitution.
-- **Secrets store** — deferred (see "deferred by design"); a GitHub token would otherwise sit in
-  plaintext in the workflow JSON.
+- [x] **URL templating for `http` tools** — done (see "Harden the http tool" above).
+- [x] **Secrets store** — done; GitHub token stored in `~/.ai-forge/secrets.json`, referenced via
+  `${GITHUB_TOKEN}` in headers or `get_secret("GITHUB_TOKEN")` in sandbox.
 - **`github_*` builtins** — prefer a small set (`create_branch`, `write_file`, `create_pr`) over
   raw `http` calls; register via `@register_builtin` in `backend/app/engine/tools.py`.
 
@@ -330,10 +335,10 @@ Estimate ~1 day.
 - **Polling fallback** — GET `/runs/:runId` for historical runs and reconnection
 - **SQLite checkpointer** — Workflow state persisted for crash recovery and human-in-loop pauses
 
-### Secrets & API Keys
-- **Env vars + config file** — `~/.ai-forge/secrets.json` (gitignored), env vars take precedence
-- **`get_secret()` helper** — Available in custom function nodes
-- **UI settings page** — Shows configured/missing keys
+### Secrets & API Keys *(implemented)*
+- **Env vars + config file** — `~/.ai-forge/secrets.json` (chmod 600), env vars take precedence
+- **`get_secret()` helper** — Available in sandboxed custom function nodes and `${NAME}` in http headers
+- **UI panel** — "Secrets" button in editor top bar; list (name + source), add/update, delete
 
 ### Model Support
 - **OpenAI-compatible** — Covers OpenAI, llama.cpp, Ollama, vLLM, LM Studio (base URL + API key)
@@ -422,6 +427,9 @@ Status: `[done]` = implemented and tested, `[plan]` = not yet built.
 [done] GET    /api/runs/:runId            # Get run status + full result
 [done] WS     /api/runs/:runId/events     # Real-time execution stream (replay + live)
 [done] POST   /api/workflows/:id/validate # Static graph validation
+[done] GET    /api/secrets                # List secret names + source (values never returned)
+[done] PUT    /api/secrets                # Upsert a secret (name, value)
+[done] DELETE /api/secrets/:name          # Delete a secret
 [plan] GET    /metrics                    # Prometheus metrics endpoint
 ```
 
