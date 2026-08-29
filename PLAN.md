@@ -9,14 +9,15 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 2.3 in progress)
+## Current Status (Phase 2.3 complete → Phase 3 next)
 
-> Last updated: Phase 2.3 — Tools panel, hardened `http` tool, and run log / debug panel. Agent node
-> works end-to-end with LLM calls and a tool-calling loop; Models + Tools panels are in the editor;
-> `http` tools support URL templating, env-var secrets in headers, and per-request timeout. Runs now
-> emit a per-node execution trace (timing, intermediate output, LLM tokens + estimated cost) shown in
-> the editor's bottom debug panel. Next up: async execution + WebSocket streaming. Use this section as
-> the source of truth when resuming in a new session — it supersedes the phase notes below.
+> Last updated: Phase 2.3 complete. Agent node works end-to-end with LLM calls and a tool-calling
+> loop; Models + Tools panels are in the editor; `http` tools support URL templating, env-var secrets
+> in headers, and per-request timeout. Runs emit a per-node execution trace (timing, intermediate
+> output, LLM tokens + estimated cost) streamed live over WebSocket to the editor's bottom debug panel.
+> The editor is a sidebar / master-detail layout with debounced auto-save. Next up: secrets store,
+> then human-in-loop nodes (Phase 3). Use this section as the source of truth when resuming in a new
+> session — it supersedes the phase notes below.
 
 ### What works today (shippable)
 - **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
@@ -51,9 +52,16 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **REST API**: full workflow CRUD + `run` + `validate`. See table below for status.
 - **Run trace / debug panel**: every node is instrumented to emit `node_start`/`node_end` (with
   per-node `duration_ms` + a summarized output) and agent nodes emit `llm_call` events carrying token
-  counts; totals + estimated cost are computed from model pricing. The editor's bottom panel renders a
-  per-node timeline (expandable output, LLM tokens, timing) plus the final output. Partial traces are
-  preserved when a run fails mid-graph (`backend/app/engine/builder.py`, `frontend/.../RunPanel.tsx`).
+  counts; totals + estimated cost are computed from model pricing. Events stream live over WebSocket
+  (seq-numbered, replay-on-connect) to the editor's bottom panel which renders a per-node timeline
+  (expandable output, LLM tokens, timing) plus the final output. Partial traces are preserved when a
+  run fails mid-graph (`backend/app/engine/builder.py`, `frontend/.../RunPanel.tsx`).
+- **Async execution**: `POST /run` returns 202 + `run_id` immediately; the graph runs in a worker
+  thread via `asyncio.to_thread`. Clients subscribe over WebSocket for live events or poll
+  `GET /runs/:id`. In-memory store (max 200 runs, pruned oldest-first).
+- **Sidebar / master-detail editor**: persistent left rail lists workflows; selecting one loads it in
+  the main pane (no page hop). Debounced auto-save (~800ms) + unmount flush. `key={id}` ensures fresh
+  state per workflow.
 - **Static validation**: `POST /api/workflows/{id}/validate` checks duplicate node ids,
   dangling edges, missing start/end, cycle detection, unreachable nodes, conditional
   branch-count mismatches, unknown model/tool references, transform custom_function
@@ -73,7 +81,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Sample workflows**: `samples/sample-grade.json` (conditional routing demo),
   `samples/sample-agent.json` (agent node with LLM call + transform), and
   `samples/sample-order-assistant.json` (agent + two sandboxed `custom_function` tools).
-- **Tests**: 74 passing (`python -m pytest backend/tests/ -q`). Frontend typechecks clean.
+- **Tests**: 89 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -90,8 +98,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **Sample agent workflow** — `samples/sample-agent.json` demonstrates agent → transform flow.
 
 ### What is deferred by design
-- **Phase 2 (later increments)** — async execution + WebSocket streaming,
-  secrets store (`~/.ai-forge/secrets.json` + env-var precedence), test-connection endpoint.
+- **Phase 2 (remaining)** — secrets store (`~/.ai-forge/secrets.json` + env-var precedence),
+  test-connection endpoint.
 - **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
@@ -103,10 +111,10 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   makes `http` tools usable against real APIs (GitHub, etc.) and unblocks the deferred experiment below.
 - [x] **Run log / debug panel** *(done 2026-08-28)* — per-node execution trace (timing, intermediate
   output, LLM tokens + estimated cost) emitted during the run and rendered in the editor's bottom panel.
-- [ ] **Sidebar / master-detail editor** *(planned — design below)* — merge the workflow list and the
-  editor into one page: a persistent left rail of workflows with the editor in the main pane, so switching
-  workflows never leaves the page. See "Sidebar / master-detail editor — Design".
-- **Async execution** — POST /run returns runId immediately, WebSocket streams progress.
+- [x] **Sidebar / master-detail editor** *(done 2026-08-28)* — persistent left rail + editor in main
+  pane, debounced auto-save with unmount flush. See "Sidebar / master-detail editor — Design".
+- [x] **Async execution** *(done 2026-08-28)* — POST /run returns 202 + runId immediately; WebSocket
+  streams per-node events live (with seq-based replay/dedup); GET /runs/:id for polling fallback.
 - **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
@@ -410,16 +418,12 @@ Status: `[done]` = implemented and tested, `[plan]` = not yet built.
 [done] GET    /api/workflows/:id          # Get workflow definition
 [done] PUT    /api/workflows/:id          # Update workflow
 [done] DELETE /api/workflows/:id          # Delete workflow
-[done] POST   /api/workflows/:id/run      # Execute (sync; returns full run object)
-[plan] GET    /api/workflows/:id/runs/:runId  # Get run status + logs
-[plan] WS     /ws/runs/:runId             # Real-time execution stream
+[done] POST   /api/workflows/:id/run      # Execute (async; returns 202 + run_id)
+[done] GET    /api/runs/:runId            # Get run status + full result
+[done] WS     /api/runs/:runId/events     # Real-time execution stream (replay + live)
 [done] POST   /api/workflows/:id/validate # Static graph validation
 [plan] GET    /metrics                    # Prometheus metrics endpoint
 ```
-
-> Note: `POST .../run` is currently **synchronous** — it blocks until the workflow
-> finishes and returns the full `WorkflowRun`. The async + run-ID + WebSocket model in
-> this plan is Phase 2.
 
 ---
 
