@@ -117,6 +117,11 @@ class GraphBuilder:
             llm_messages = [Message(role="system", content=system_prompt)]
             llm_messages.extend(messages)
 
+            if not any(getattr(m, "role", None) in ("user", "assistant") for m in llm_messages):
+                data = state.get("data", {})
+                user_content = json.dumps(data, ensure_ascii=False) if data else "Begin."
+                llm_messages.append(Message(role="user", content=user_content))
+
             tools = tool_schemas if tool_schemas else None
             final_content = ""
 

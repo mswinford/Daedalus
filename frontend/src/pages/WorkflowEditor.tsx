@@ -62,6 +62,7 @@ function WorkflowEditorInner() {
   const [inputError, setInputError] = useState<string | null>(null)
   const [models, setModels] = useState<ModelConfig[]>([])
   const [showModels, setShowModels] = useState(false)
+  const [saveToast, setSaveToast] = useState(false)
 
   const { data: workflow, isLoading } = useQuery({
     queryKey: ['workflow', id],
@@ -211,6 +212,8 @@ function WorkflowEditorInner() {
       setValidation(null)
       validationRef.current = new Map()
       setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: undefined } })))
+      setSaveToast(true)
+      setTimeout(() => setSaveToast(false), 2000)
     },
   })
 
@@ -291,6 +294,12 @@ function WorkflowEditorInner() {
             <ShieldCheck size={14} />
             Validate
           </button>
+          {saveToast && (
+            <span className="flex items-center gap-1 text-xs text-emerald-400">
+              <CheckCircle2 size={14} />
+              Saved
+            </span>
+          )}
           <button
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
