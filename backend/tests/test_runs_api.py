@@ -225,3 +225,102 @@ def test_hil_ws_streams_to_human_request(hil_client):
     assert "node_start" in types
     assert "human_request" in types
     assert "run_end" not in types
+
+
+# ─── Human-in-loop timeout tests ─────────────────────────────────────────────
+
+
+@pytest.fixture()
+def hil_timeout_client(tmp_path, monkeypatch):
+    """Like hil_client, but the human node has timeout_seconds=1."""
+    monkeypatch.setattr(wf_module.settings, "workflows_dir", tmp_path)
+
+    wf = {
+        "id": "hil-to-wf",
+        "name": "HIL Timeout WF",
+        "description": None,
+        "schema_version": 1,
+        "nodes": [
+            {"id": "start", "type": "start", "position": {"x": 0, "y": 0}, "config": {}},
+            {"id": "human", "type": "human_in_loop", "position": {"x": 200, "y": 0},
+             "config": {
+                 "input_fields": [
+                     {"name": "answer", "label": "Your answer", "type": "text", "required": True}
+                 ],
+                 "approval_required": False,
+                 "timeout_seconds": 1,
+                 "output_fields": ["human_answer"],
+             }},
+            {"id": "cf", "type": "custom_function", "position": {"x": 400, "y": 0},
+             "config": {"code": 'result["doubled"] = state["data"].get("human_answer", "") + "!"',
+                        "output_fields": ["doubled"]}},
+            {"id": "end", "type": "end", "position": {"x": 600, "y": 0}, "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source_node_id": "start", "source_handle": "default", "target_node_id": "human"},
+            {"id": "e2", "source_node_id": "human", "source_handle": "default", "target_node_id": "cf"},
+            {"id": "e3", "source_node_id": "cf", "source_handle": "default", "target_node_id": "end"},
+        ],
+        "tools": [],
+        "models": [],
+    }
+    (tmp_path / "hil-to-wf.json").write_text(json.dumps(wf))
+
+    with TestClient(app) as c:
+        yield c
+
+
+def _wait_for_status(client, run_id, status, timeout=10.0):
+    """Poll GET until the run reaches a specific status."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        body = client.get(f"/api/runs/{run_id}").json()
+        if body["status"] == status:
+            return body
+        time.sleep(0.05)
+    raise AssertionError(f"Run {run_id} never reached status '{status}'")
+
+
+def test_hil_timeout_auto_fails(hil_timeout_client):
+    """A paused run with a timeout fails automatically when no input arrives."""
+    run_id = hil_timeout_client.post("/api/workflows/hil-to-wf/run", json={}).json()["run_id"]
+
+    body = _wait_for_run(hil_timeout_client, run_id)
+    assert body["status"] == "paused"
+    # The interrupt payload carries the timeout so clients can show a countdown.
+    assert body["interrupt_value"]["timeout_seconds"] == 1
+    assert body["interrupt_value"]["requested_at"] is not None
+
+    body = _wait_for_status(hil_timeout_client, run_id, "failed")
+    assert "timed out" in (body["error"] or "")
+    assert body["completed_at"] is not None
+
+    types = [e["type"] for e in body["events"]]
+    assert "human_request" in types
+    assert types[-1] == "human_timeout"
+    timeout_event = body["events"][-1]
+    assert timeout_event["node_id"] == "human"
+    assert timeout_event["data"]["fatal"] is True
+
+    # Late input after the timeout is rejected.
+    resp = hil_timeout_client.post(f"/api/runs/{run_id}/resume", json={"answer": "late"})
+    assert resp.status_code == 409
+
+
+def test_hil_resume_before_timeout_cancels_timer(hil_timeout_client):
+    """Resuming before the deadline completes the run; the timer no longer fires."""
+    run_id = hil_timeout_client.post("/api/workflows/hil-to-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_timeout_client, run_id)
+
+    resp = hil_timeout_client.post(f"/api/runs/{run_id}/resume", json={"answer": "hello"})
+    assert resp.status_code == 202
+
+    body = _wait_for_run(hil_timeout_client, run_id)
+    assert body["status"] == "completed"
+    assert body["output_data"]["node_outputs"]["cf"]["doubled"] == "hello!"
+
+    # Wait past the original 1s deadline: the cancelled timer must not fail the run.
+    time.sleep(1.5)
+    body = hil_timeout_client.get(f"/api/runs/{run_id}").json()
+    assert body["status"] == "completed"
+    assert "human_timeout" not in [e["type"] for e in body["events"]]

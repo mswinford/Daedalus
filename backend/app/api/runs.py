@@ -8,7 +8,9 @@ Runs are lost on process restart — persistence is deferred to Phase 3.
 
 Human-in-loop: when a run hits a human_in_loop node, it pauses (status="paused")
 and emits a `human_request` event. The client calls POST /runs/{id}/resume with
-the human's input to continue execution.
+the human's input to continue execution. If the node has a timeout_seconds set,
+a background timer auto-fails the run (status="failed", terminal `human_timeout`
+event) when no input arrives in time; resuming before the deadline cancels it.
 """
 import asyncio
 import time
@@ -30,7 +32,7 @@ MAX_RUNS = 200
 
 def _is_terminal(event: dict[str, Any]) -> bool:
     """True for the event that marks a run as finished (success or fatal error)."""
-    if event.get("type") == "run_end":
+    if event.get("type") in ("run_end", "human_timeout"):
         return True
     if event.get("type") == "node_error" and event.get("data", {}).get("fatal"):
         return True
@@ -55,6 +57,7 @@ class RunRecord:
     started_at: float = field(default_factory=time.time)
     completed_at: float | None = None
     subscribers: set[asyncio.Queue] = field(default_factory=set)
+    timeout_task: asyncio.Task | None = field(default=None, repr=False)
     _seq: int = 0
     _loop: asyncio.AbstractEventLoop | None = None
 
@@ -89,6 +92,44 @@ def _prune_runs() -> None:
         RUNS.pop(record.run_id, None)
 
 
+def _cancel_human_timeout(record: RunRecord) -> None:
+    """Cancel a pending human-input timeout, if any."""
+    if record.timeout_task is not None and not record.timeout_task.done():
+        record.timeout_task.cancel()
+    record.timeout_task = None
+
+
+async def _auto_fail_on_timeout(record: RunRecord, node_id: str, timeout_seconds: int) -> None:
+    """Fail a paused run when no human input arrives within the deadline."""
+    await asyncio.sleep(timeout_seconds)
+    if record.status != "paused":
+        return  # Resumed (or otherwise finished) before the deadline.
+    error = f"Human-in-loop timed out at node '{node_id}' after {timeout_seconds}s"
+    record.status = "failed"
+    record.error = error
+    record.completed_at = time.time()
+    record.emit({
+        "type": "human_timeout",
+        "node_id": node_id,
+        "timestamp": time.time(),
+        "data": {"error": error, "fatal": True},
+    })
+    _prune_runs()
+
+
+def _schedule_human_timeout(record: RunRecord, interrupt_value: Any) -> None:
+    """If the paused human_in_loop node has a timeout, arm the auto-fail timer."""
+    if not isinstance(interrupt_value, dict):
+        return
+    node_id = interrupt_value.get("node_id")
+    timeout_seconds = interrupt_value.get("timeout_seconds")
+    if not node_id or timeout_seconds is None:
+        return
+    record.timeout_task = asyncio.create_task(
+        _auto_fail_on_timeout(record, str(node_id), int(timeout_seconds))
+    )
+
+
 async def _execute(record: RunRecord, workflow: Any, input_data: dict[str, Any]) -> None:
     """Run the graph in a worker thread (streaming events), then emit a terminal."""
     record._loop = asyncio.get_running_loop()
@@ -106,6 +147,7 @@ async def _execute(record: RunRecord, workflow: Any, input_data: dict[str, Any])
                 "timestamp": time.time(),
                 "data": {"payload": result.get("interrupt_value")},
             })
+            _schedule_human_timeout(record, result.get("interrupt_value"))
             return  # No terminal event; run is waiting for human input.
         record.status = "completed"
         record.output_data = {
@@ -159,6 +201,7 @@ async def _resume(record: RunRecord, workflow: Any, human_input: Any) -> None:
                 "timestamp": time.time(),
                 "data": {"payload": result.get("interrupt_value")},
             })
+            _schedule_human_timeout(record, result.get("interrupt_value"))
             return
         record.status = "completed"
         record.output_data = {
@@ -218,6 +261,7 @@ async def resume_run(run_id: str, human_input: dict[str, Any] = Body(default={})
             status_code=409,
             detail=f"Run {run_id} is not paused (status={record.status})",
         )
+    _cancel_human_timeout(record)
     workflow = _load_workflow(record.workflow_id)
     asyncio.create_task(_resume(record, workflow, human_input))
     return {"run_id": run_id, "status": "resuming"}

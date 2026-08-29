@@ -372,6 +372,8 @@ class GraphBuilder:
                 "message": config.approval_message or "Please provide input",
                 "fields": [f.model_dump() for f in config.input_fields],
                 "approval_required": config.approval_required,
+                "timeout_seconds": config.timeout_seconds,
+                "requested_at": time.time(),
             }
             response = interrupt(payload)
 

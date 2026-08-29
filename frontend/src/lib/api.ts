@@ -42,6 +42,7 @@ export type RunEventType =
   | 'tool_result'
   | 'human_request'
   | 'human_respond'
+  | 'human_timeout'
   | 'retry'
 
 export interface RunEvent {
@@ -70,6 +71,10 @@ export interface HumanInterruptValue {
   message: string
   fields: HumanInterruptField[]
   approval_required: boolean
+  /** Set when the run auto-fails if no input arrives within this many seconds. */
+  timeout_seconds?: number | null
+  /** Unix timestamp (seconds) when the human input was requested. */
+  requested_at?: number
 }
 
 export interface WorkflowRun {

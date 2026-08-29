@@ -331,7 +331,7 @@
             }
           ],
           "default": null,
-          "description": "Timeout in seconds. None = wait indefinitely.",
+          "description": "If set, the run auto-fails when no human input arrives within this many seconds. None = wait indefinitely.",
           "title": "Timeout Seconds"
         },
         "output_fields": {

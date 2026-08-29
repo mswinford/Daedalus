@@ -21,6 +21,7 @@
             "tool_result",
             "human_request",
             "human_respond",
+            "human_timeout",
             "retry"
           ],
           "title": "Type",

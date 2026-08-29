@@ -217,7 +217,8 @@ class HumanInLoopNodeConfig(BaseModel):
         None, description="Message shown to the human for approval"
     )
     timeout_seconds: Optional[int] = Field(
-        None, ge=0, description="Timeout in seconds. None = wait indefinitely."
+        None, ge=0,
+        description="If set, the run auto-fails when no human input arrives within this many seconds. None = wait indefinitely.",
     )
     output_fields: list[str] = Field(
         default_factory=list, description="State fields to write with human input"
@@ -332,6 +333,7 @@ class RunEvent(BaseModel):
         "tool_result",
         "human_request",
         "human_respond",
+        "human_timeout",
         "retry",
     ]
     node_id: Optional[str] = None

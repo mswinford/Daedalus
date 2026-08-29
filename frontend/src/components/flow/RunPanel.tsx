@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X } from 'lucide-react'
 
 import type { WorkflowRun, RunEvent, HumanInterruptField } from '@/lib/api'
@@ -62,6 +62,8 @@ function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>): Nod
     } else if (ev.type === 'node_error') {
       ex.error = ev.data.error
       if (typeof ev.data.duration_ms === 'number') ex.durationMs = ev.data.duration_ms
+    } else if (ev.type === 'human_timeout') {
+      ex.error = ev.data.error
     } else if (ev.type === 'llm_call') {
       ex.tokensIn = (ex.tokensIn ?? 0) + (ev.data.tokens_input ?? 0)
       ex.tokensOut = (ex.tokensOut ?? 0) + (ev.data.tokens_output ?? 0)
@@ -70,6 +72,32 @@ function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>): Nod
   }
 
   return order.map((id) => byId.get(id)!)
+}
+
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return
+    const id = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(id)
+  }, [active])
+  return now
+}
+
+function TimeoutCountdown({ deadlineMs, now }: { deadlineMs: number; now: number }) {
+  const remaining = Math.max(0, Math.ceil((deadlineMs - now) / 1000))
+  if (remaining === 0) {
+    return (
+      <p className="mb-2 flex items-center gap-1 text-xs text-red-400">
+        <Timer size={12} /> Timed out — the run has failed.
+      </p>
+    )
+  }
+  return (
+    <p className="mb-2 flex items-center gap-1 text-xs text-amber-400">
+      <Timer size={12} /> No response within {remaining}s will fail this run.
+    </p>
+  )
 }
 
 interface RunPanelProps {
@@ -195,6 +223,14 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
   const isPaused = run.status === 'paused'
   const failed = run.status !== 'completed' && !isRunning && !isPaused
 
+  // Deadline for the pending human input, if the node has a timeout configured.
+  const deadlineMs =
+    run.interrupt_value?.timeout_seconds != null && run.interrupt_value.requested_at != null
+      ? run.interrupt_value.requested_at * 1000 + run.interrupt_value.timeout_seconds * 1000
+      : null
+  const now = useNow(isPaused && deadlineMs != null)
+  const timedOut = deadlineMs != null && now >= deadlineMs
+
   return (
     <div className="border-t border-zinc-800 bg-zinc-950">
       {/* Header metrics */}
@@ -236,11 +272,14 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
               {run.interrupt_value.message && (
                 <p className="mb-1 text-sm text-zinc-300">{run.interrupt_value.message}</p>
               )}
-              <HumanInputForm
-                fields={run.interrupt_value.fields}
-                approvalRequired={run.interrupt_value.approval_required}
-                onSubmit={onResume}
-              />
+              {deadlineMs != null && <TimeoutCountdown deadlineMs={deadlineMs} now={now} />}
+              {!timedOut && (
+                <HumanInputForm
+                  fields={run.interrupt_value.fields}
+                  approvalRequired={run.interrupt_value.approval_required}
+                  onSubmit={onResume}
+                />
+              )}
             </div>
           )}
           {run.error && (
