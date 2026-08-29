@@ -56,9 +56,9 @@ def run_workflow_sync(
     # Build initial state from input data. Reserved keys map directly to state
     # channels; anything else is collected under `data` so it stays addressable
     # by conditions (e.g. $.data.score) and nodes.
-    reserved = {"messages", "output", "error", "data", "_node_outputs"}
+    reserved = {"messages_by_node", "output", "error", "data", "_node_outputs"}
     initial_state = {
-        "messages": [],
+        "messages_by_node": {},
         "output": "",
         "error": "",
         "data": {},
@@ -80,7 +80,7 @@ def run_workflow_sync(
     # Extract output + execution trace
     return {
         "output": result.get("output", ""),
-        "messages": result.get("messages", []),
+        "messages_by_node": result.get("messages_by_node", {}),
         "data": result.get("data", {}),
         "node_outputs": result.get("_node_outputs", {}),
         "events": builder._trace,

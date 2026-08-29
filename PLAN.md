@@ -38,6 +38,10 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Agent tool loop**: agents with `tool_ids` get a bounded iteration loop — LLM call →
   tool_calls → execute (builtin / custom_function / http) → append results → repeat until
   no tool_calls or `max_iterations`. Tool schemas built from `ToolDefinition.parameters`.
+- **Per-agent message isolation**: each agent node maintains its own conversation in
+  `state["messages_by_node"][node_id]`. Sequential agents do NOT inherit each other's
+  messages — they share only `state["data"]` (structured output). This enables multi-repo
+  workflows where each agent works independently. Single-agent workflows are unaffected.
 - **Tool execution boundary**: `custom_function` tools run in the RestrictedPython sandbox —
   compute-only (no `import`, no network, no filesystem; see `backend/app/sandbox/runner.py`).
   `http` and `builtin` tools run **outside** the sandbox (`backend/app/engine/tools.py`). The
@@ -87,7 +91,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Sample workflows**: `samples/sample-grade.json` (conditional routing demo),
   `samples/sample-agent.json` (agent node with LLM call + transform), and
   `samples/sample-order-assistant.json` (agent + two sandboxed `custom_function` tools).
-- **Tests**: 104 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
+- **Tests**: 106 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -122,6 +126,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   streams per-node events live (with seq-based replay/dedup); GET /runs/:id for polling fallback.
 - [x] **Secrets store** *(done 2026-08-28)* — `~/.ai-forge/secrets.json` + env-var precedence;
   `get_secret()` in sandbox; `${NAME}` in http headers; REST API + frontend panel.
+- [x] **Per-agent message isolation** *(done 2026-08-28)* — `messages_by_node` dict in state;
+  sequential agents get fresh conversations, share only `data`. Unblocks multi-repo Option B.
 - **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
@@ -136,8 +142,8 @@ Two candidate shapes:
 - **Option B — multi-node pipeline (more control):**
   `start → agent "planner" (story → data.plan) → agent "implementer" (executes via github tools)
   → conditional (regex on output: PR created?) → transform / end`.
-  Caveat: agents share one `messages` conversation per run, so the implementer continues the
-  planner's context rather than seeing fresh input. Workable here; not general.
+  Agents have isolated conversations (`messages_by_node`) — each starts fresh, sharing only
+  `state["data"]` for structured handoff. Clean for multi-repo or sequential specialist patterns.
 
 Gaps to close first:
 - [x] **URL templating for `http` tools** — done (see "Harden the http tool" above).

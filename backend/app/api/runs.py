@@ -94,7 +94,7 @@ async def _execute(record: RunRecord, workflow: Any, input_data: dict[str, Any])
         record.status = "completed"
         record.output_data = {
             "output": result.get("output", ""),
-            "messages": result.get("messages", []),
+            "messages_by_node": result.get("messages_by_node", {}),
             "data": result.get("data", {}),
             "node_outputs": result.get("node_outputs", {}),
         }

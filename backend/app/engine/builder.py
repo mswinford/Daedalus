@@ -5,7 +5,6 @@ import re
 import time
 from typing import Any, Callable
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from schema.models import (
@@ -51,7 +50,7 @@ def _summarize(value: Any, limit: int = 500) -> Any:
 
 # LangGraph state type
 class AgentState(TypedDict):
-    messages: list[Any]
+    messages_by_node: dict[str, list[Any]]
     output: str
     error: str
     data: dict[str, Any]
@@ -179,7 +178,7 @@ class GraphBuilder:
     async def _start_node(self, state: AgentState) -> AgentState:
         """Start node: initializes the workflow."""
         return {
-            "messages": [],
+            "messages_by_node": {},
             "output": "",
             "error": "",
             "data": {},
@@ -206,7 +205,7 @@ class GraphBuilder:
                 tool_schemas.append(build_tool_schema(tool_def))
 
         async def agent_func(state: AgentState) -> AgentState:
-            messages = list(state.get("messages", []))
+            messages = list(state.get("messages_by_node", {}).get(node.id, []))
             system_prompt = config.system_prompt
             llm_messages = [Message(role="system", content=system_prompt)]
             llm_messages.extend(messages)
@@ -255,7 +254,10 @@ class GraphBuilder:
             new_messages.append(Message(role="assistant", content=final_content))
 
             return {
-                "messages": new_messages,
+                "messages_by_node": {
+                    **state.get("messages_by_node", {}),
+                    node.id: new_messages,
+                },
                 "output": final_content,
                 "_node_outputs": {
                     **state.get("_node_outputs", {}),

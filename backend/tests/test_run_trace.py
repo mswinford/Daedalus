@@ -98,7 +98,7 @@ def test_agent_token_usage_and_llm_call_event():
     graph = builder.build()
 
     asyncio.run(graph.ainvoke({
-        "messages": [], "output": "", "error": "", "data": {}, "_node_outputs": {},
+        "messages_by_node": {}, "output": "", "error": "", "data": {}, "_node_outputs": {},
     }))
 
     assert fake.calls == 1
@@ -121,7 +121,7 @@ def test_agent_cost_uses_model_pricing():
     graph = builder.build()
 
     asyncio.run(graph.ainvoke({
-        "messages": [], "output": "", "error": "", "data": {}, "_node_outputs": {},
+        "messages_by_node": {}, "output": "", "error": "", "data": {}, "_node_outputs": {},
     }))
 
     # 1M input * $3/1M + 2M output * $15/1M = $3 + $30 = $33
