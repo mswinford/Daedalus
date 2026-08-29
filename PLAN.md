@@ -11,11 +11,12 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Current Status (Phase 2.3 in progress)
 
-> Last updated: Phase 2.2 complete + Tools panel + hardened `http` tool (Phase 2.3). Agent node
+> Last updated: Phase 2.3 — Tools panel, hardened `http` tool, and run log / debug panel. Agent node
 > works end-to-end with LLM calls and a tool-calling loop; Models + Tools panels are in the editor;
-> `http` tools support URL templating, env-var secrets in headers, and per-request timeout.
-> Next up: run log / debug panel. Use this section as the source of truth when resuming in a new
-> session — it supersedes the phase notes below.
+> `http` tools support URL templating, env-var secrets in headers, and per-request timeout. Runs now
+> emit a per-node execution trace (timing, intermediate output, LLM tokens + estimated cost) shown in
+> the editor's bottom debug panel. Next up: async execution + WebSocket streaming. Use this section as
+> the source of truth when resuming in a new session — it supersedes the phase notes below.
 
 ### What works today (shippable)
 - **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
@@ -48,6 +49,11 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   LM Studio). Message serialization preserves `tool_calls` and `tool_call_id` for
   round-tripping. Anthropic raises `NotImplementedError` (Phase 4).
 - **REST API**: full workflow CRUD + `run` + `validate`. See table below for status.
+- **Run trace / debug panel**: every node is instrumented to emit `node_start`/`node_end` (with
+  per-node `duration_ms` + a summarized output) and agent nodes emit `llm_call` events carrying token
+  counts; totals + estimated cost are computed from model pricing. The editor's bottom panel renders a
+  per-node timeline (expandable output, LLM tokens, timing) plus the final output. Partial traces are
+  preserved when a run fails mid-graph (`backend/app/engine/builder.py`, `frontend/.../RunPanel.tsx`).
 - **Static validation**: `POST /api/workflows/{id}/validate` checks duplicate node ids,
   dangling edges, missing start/end, cycle detection, unreachable nodes, conditional
   branch-count mismatches, unknown model/tool references, transform custom_function
@@ -84,7 +90,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **Sample agent workflow** — `samples/sample-agent.json` demonstrates agent → transform flow.
 
 ### What is deferred by design
-- **Phase 2 (later increments)** — async execution + WebSocket streaming, run log/debug panel,
+- **Phase 2 (later increments)** — async execution + WebSocket streaming,
   secrets store (`~/.ai-forge/secrets.json` + env-var precedence), test-connection endpoint.
 - **Phase 3** — human-in-loop nodes, SQLite checkpointing, pause/resume.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
@@ -95,7 +101,11 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **Harden the `http` tool** *(done 2026-08-28)* — URL path templating (`{owner}/{repo}`),
   headers with env-var secrets (`${GITHUB_TOKEN}`), per-request timeout. In `backend/app/engine/tools.py`;
   makes `http` tools usable against real APIs (GitHub, etc.) and unblocks the deferred experiment below.
-- **Run log / debug panel** *(up next)* — show per-node execution timing, intermediate state, LLM tokens.
+- [x] **Run log / debug panel** *(done 2026-08-28)* — per-node execution trace (timing, intermediate
+  output, LLM tokens + estimated cost) emitted during the run and rendered in the editor's bottom panel.
+- [ ] **Sidebar / master-detail editor** *(planned — design below)* — merge the workflow list and the
+  editor into one page: a persistent left rail of workflows with the editor in the main pane, so switching
+  workflows never leaves the page. See "Sidebar / master-detail editor — Design".
 - **Async execution** — POST /run returns runId immediately, WebSocket streams progress.
 - **Human-in-loop nodes** — pause/resume with SQLite checkpointing.
 
@@ -174,6 +184,68 @@ custom_function: `code`, `timeout_seconds`, input/output fields · human_in_loop
 
 #### Verify
 - `npx tsc --noEmit` (strict, `noUnusedLocals`/`noUnusedParameters`) and `npm run build`.
+
+### Sidebar / master-detail editor — Design (planned)
+
+> Goal: one page, no navigation hop. A persistent left rail lists workflows; the main pane is the
+> editor. Selecting an item loads it in place. Deep links (`/workflows/:id`) keep working.
+> Non-goal: a rich dashboard / gallery view (deferred).
+
+#### Target routing
+```
+<Route element={<AppLayout/>}>              // sidebar + <Outlet/>, reads active id via useParams
+  <Route index element={<EmptyState/>}/>   // "/" → nothing selected
+  <Route path="workflows/:id" element={<WorkflowEditor/>}/>
+</Route>
+```
+
+#### Files to create / change
+| File | Action | Purpose |
+|---|---|---|
+| `frontend/src/components/layout/AppLayout.tsx` | new | Shell: `flex h-screen`; `<WorkflowSidebar activeId={id}/>` + `<main class="flex-1 min-w-0"><Outlet/></main>`. Gets `id` from `useParams()` (ancestor of the `:id` route → `{}` on `/`). |
+| `frontend/src/components/layout/WorkflowSidebar.tsx` | new | The rail. Absorbs all `WorkflowList` logic (list + New + delete + search). |
+| `frontend/src/pages/WorkflowEditor.tsx` | modify | Drop standalone chrome (back arrow, brand); root `h-screen` → `h-full`; add auto-save + dirty indicator. |
+| `frontend/src/pages/WorkflowList.tsx` | delete | Create form + delete button move into the sidebar. |
+| `frontend/src/App.tsx` | modify | Nested routes under `<AppLayout>`. |
+
+#### Sidebar behavior
+- `useQuery(['workflows'])`; each row = `<Link to="/workflows/:id">`, name (+ truncated description), active highlight when `activeId === id`, trash icon on hover.
+- **New**: existing create mutation (`workflowsApi.create({id: workflow_${Date.now()}, ...})`) → `navigate('/workflows/'+id)` + invalidate `['workflows']`.
+- **Delete**: confirm → `workflowsApi.delete`; if it was the open one, `navigate('/')`, else just invalidate.
+- **Search** box (filter by name). Sort: name asc (v1). Optional: persist last-opened id to `localStorage` so `/` auto-selects it.
+
+#### Editor changes
+- Keep the per-workflow load effect (`WorkflowEditor.tsx:76-85`). Render with **`key={id}`** so each workflow gets a fresh instance — resets transient state (run panel, input JSON, validation) on switch.
+- Remove the back arrow; navigation = click another row.
+
+#### Auto-save / unsaved handling (the key decision)
+Manual-only save is unsafe when switching is one click.
+1. **Dirty tracking** — set `dirty=true` in each change handler (`handleConfigChange`, `handleConnect`, node add/delete, models/tools `onChange`); reset after the init effect populates state and after a successful save (avoids a false save on initial load).
+2. **Debounced auto-save** — when dirty, ~800ms idle → existing `workflowsApi.update(id, payload)` (same body as the Save mutation at `WorkflowEditor.tsx:203`); on success clear dirty + brief "Saved" toast.
+3. **Flush on switch** — with `key={id}`, switching unmounts the old editor. Add an unmount-cleanup effect: `return () => { if (dirtyRef.current) update(id, latestPayloadRef.current) }`; keep a `latestPayloadRef` fresh each render so the flush has the current serializable payload. Catches sub-800ms edits.
+4. **UI** — replace the prominent Save button with a status indicator (`● Unsaved` / `Saving…` / `✓ Saved`); keep an explicit Save as secondary.
+
+Residual edge (edit then switch within 800ms) is covered by #3. StrictMode double-invoke makes the flush fire twice — harmless (idempotent PUT).
+
+#### Edge cases
+- Deep link `/workflows/:id` → works; sidebar highlights it.
+- Delete the open workflow → `navigate('/')`.
+- Bad id → editor's existing "not found" state + a back-to-list affordance.
+- `/` with no selection → `EmptyState` ("Pick a workflow or create one").
+
+#### Out of scope / follow-ups
+Collapsible sidebar, drag-to-reorder, per-workflow run history (the future dashboard), backend-generated ids.
+
+#### Verify
+No frontend unit tests — `npm run build` (tsc + vite) must pass. Manual: create → switch between two workflows (no hop, state resets); edit then immediately switch (auto-save persisted it); delete the open workflow (lands on `/`); reload a deep link.
+
+#### Build order
+1. `AppLayout` + nested routes + `EmptyState`; wire editor in with `key={id}`, drop standalone chrome.
+2. `WorkflowSidebar` (list + New + delete + search); delete `WorkflowList.tsx`.
+3. Auto-save + dirty indicator + unmount flush.
+4. Polish: active highlight, empty state, not-found back-link; run build + manual pass.
+
+Estimate ~1 day.
 
 ---
 
