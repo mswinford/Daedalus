@@ -209,6 +209,60 @@ def test_hil_resume_unknown_404(hil_client):
     assert resp.status_code == 404
 
 
+def test_hil_resume_empty_body_does_not_repause(hil_client):
+    """Resuming with no body ({}) must resume, not silently re-fire the interrupt.
+
+    LangGraph misreads a bare `Command(resume={})` as an empty interrupt-id map;
+    the runner now routes single-interrupt resumes through the explicit map form.
+    The downstream 'cf' node fails on the missing value — that's expected here;
+    the regression is that the run reaches a terminal state instead of pausing.
+    """
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_client, run_id)
+
+    resp = hil_client.post(f"/api/runs/{run_id}/resume")  # no body -> {}
+    assert resp.status_code == 202
+
+    body = _wait_for_run(hil_client, run_id)
+    assert body["status"] != "paused"
+    assert body["status"] in ("completed", "failed")
+
+
+def test_resume_workflow_none_input():
+    """resume_workflow must accept None without hitting langgraph's UnboundLocalError."""
+    import uuid
+
+    from app.engine.runner import resume_workflow, run_workflow_sync
+    from schema.models import Workflow
+
+    wf = Workflow.model_validate({
+        "id": "none-wf",
+        "name": "None WF",
+        "description": None,
+        "schema_version": 1,
+        "nodes": [
+            {"id": "start", "type": "start", "position": {"x": 0, "y": 0}, "config": {}},
+            {"id": "human", "type": "human_in_loop", "position": {"x": 200, "y": 0},
+             "config": {"input_fields": [], "approval_required": False,
+                        "output_fields": ["note"]}},
+            {"id": "end", "type": "end", "position": {"x": 400, "y": 0}, "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source_node_id": "start", "source_handle": "default", "target_node_id": "human"},
+            {"id": "e2", "source_node_id": "human", "source_handle": "default", "target_node_id": "end"},
+        ],
+        "tools": [],
+        "models": [],
+    })
+
+    thread_id = f"none-repro-{uuid.uuid4().hex[:8]}"
+    result = run_workflow_sync(wf, {}, thread_id=thread_id)
+    assert result["paused"] is True
+
+    out = resume_workflow(wf, thread_id, None)
+    assert not out.get("paused")
+
+
 def test_hil_ws_streams_to_human_request(hil_client):
     """WebSocket streams events until human_request, then closes."""
     run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]

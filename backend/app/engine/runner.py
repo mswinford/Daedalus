@@ -116,6 +116,16 @@ def run_workflow_sync(
     return _extract_result(builder, result)
 
 
+def _pending_interrupt_ids(graph: Any, config: dict[str, Any]) -> list[str]:
+    """Ids of all interrupts currently pending on this thread (empty if none)."""
+    snapshot = graph.get_state(config)
+    return [
+        intr.id
+        for task in snapshot.tasks
+        for intr in (task.interrupts or ())
+    ]
+
+
 def resume_workflow(
     workflow: Workflow,
     thread_id: str,
@@ -126,7 +136,7 @@ def resume_workflow(
     """Resume a paused workflow with human-provided input.
 
     Rebuilds the same graph (same node structure) and invokes it with
-    `Command(resume=human_input)` so LangGraph continues from the checkpoint.
+    `Command(resume=...)` so LangGraph continues from the checkpoint.
     Returns the same shape as `run_workflow_sync`.
     """
     import asyncio
@@ -136,10 +146,23 @@ def resume_workflow(
 
     config = {"configurable": {"thread_id": thread_id}}
 
+    # Resume through the explicit interrupt-id map form when exactly one
+    # interrupt is pending. A bare `Command(resume=value)` is unsafe for two
+    # values in langgraph 1.2.x: `{}` is misread as an empty interrupt-id map
+    # and the interrupt silently re-fires, and `None` hits an UnboundLocalError
+    # in langgraph/pregel/_loop.py (resume_is_map). The map form handles any
+    # value uniformly; with multiple pending interrupts we fall back to the
+    # bare form so LangGraph raises its clear "specify the interrupt id" error.
+    interrupt_ids = _pending_interrupt_ids(graph, config)
+    if len(interrupt_ids) == 1:
+        resume_value: Any = {interrupt_ids[0]: human_input}
+    else:
+        resume_value = human_input
+
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(
-            graph.ainvoke(Command(resume=human_input), config=config)
+            graph.ainvoke(Command(resume=resume_value), config=config)
         )
     finally:
         loop.close()
