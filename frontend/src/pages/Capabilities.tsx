@@ -158,8 +158,10 @@ function UseButton({ cap }: { cap: RowCap }) {
     queryFn: () => workflowsApi.list(),
     enabled: open && cap.kind !== 'workflow',
   })
+  // Separate key so this pre-apply fetch can't poison the editor's
+  // ['workflow', id] cache (the editor would serve stale data after import).
   const { data: targetWf } = useQuery({
-    queryKey: ['workflow', targetWfId],
+    queryKey: ['workflow-for-use', targetWfId],
     queryFn: () => workflowsApi.get(targetWfId),
     enabled: !!targetWfId,
   })
@@ -176,6 +178,7 @@ function UseButton({ cap }: { cap: RowCap }) {
     },
     onSuccess: (wf) => {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      queryClient.invalidateQueries({ queryKey: ['workflow', wf.id] })
       navigate(`/workflows/${wf.id}`)
     },
   })

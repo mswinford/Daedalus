@@ -76,8 +76,16 @@ function WorkflowEditorInner() {
     queryFn: () => workflowsApi.get(id!),
   })
 
+  const syncedIdRef = useRef<string | null>(null)
+  const syncedJsonRef = useRef('')
+
   useEffect(() => {
     if (!workflow) return
+    const json = JSON.stringify(workflow)
+    // Re-adopt server data for the same workflow (e.g. a "Use" import from
+    // the Capabilities view or another tab), unless it's unchanged or the
+    // user has unsaved local edits that would be clobbered.
+    if (syncedIdRef.current === workflow.id && (json === syncedJsonRef.current || dirtyRef.current)) return
     setNodes(nodesToRF(workflow.nodes, workflow.edges))
     setEdges(edgesToRF(workflow.edges))
     setModels(workflow.models)
@@ -85,8 +93,9 @@ function WorkflowEditorInner() {
     setSelectedId(null)
     setValidation(null)
     setDirty(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workflow?.id])
+    syncedIdRef.current = workflow.id
+    syncedJsonRef.current = json
+  }, [workflow])
 
   const validationRef = useRef<Map<string, 'error' | 'warning'>>(new Map())
 
@@ -260,11 +269,12 @@ function WorkflowEditorInner() {
       if (!payload) throw new Error('Workflow not loaded')
       return workflowsApi.update(id!, payload)
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       setDirty(false)
       setValidation(null)
       validationRef.current = new Map()
       setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: undefined } })))
+      syncedJsonRef.current = JSON.stringify(saved)
     },
   })
 
