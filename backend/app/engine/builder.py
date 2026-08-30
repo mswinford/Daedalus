@@ -369,6 +369,9 @@ class GraphBuilder:
         async def human_func(state: AgentState) -> AgentState:
             payload = {
                 "node_id": node.id,
+                # Carried so a restarted process can rebuild the run record
+                # from the checkpoint alone (see recover_paused_runs).
+                "workflow_id": self.workflow.id,
                 "message": config.approval_message or "Please provide input",
                 "fields": [f.model_dump() for f in config.input_fields],
                 "approval_required": config.approval_required,

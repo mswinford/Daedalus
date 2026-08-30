@@ -397,3 +397,42 @@ def test_hil_resume_before_timeout_cancels_timer(hil_timeout_client):
     body = hil_timeout_client.get(f"/api/runs/{run_id}").json()
     assert body["status"] == "completed"
     assert "human_timeout" not in [e["type"] for e in body["events"]]
+
+
+# ─── Restart / checkpoint recovery tests ─────────────────────────────────────
+
+
+def test_paused_run_survives_restart(hil_client):
+    """A paused run's checkpoint survives a restart; the record is rebuilt and resumable."""
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_client, run_id)
+
+    # Simulate a process restart: in-memory records are lost, and a fresh app
+    # instance (new lifespan) must rebuild the record from the SQLite checkpoint.
+    runs_module.RUNS.clear()
+    with TestClient(app) as restarted:
+        paused = restarted.get("/api/runs/paused").json()
+        assert [r["id"] for r in paused] == [run_id]
+
+        resp = restarted.post(f"/api/runs/{run_id}/resume", json={"answer": "back"})
+        assert resp.status_code == 202
+        body = _wait_for_run(restarted, run_id)
+        assert body["status"] == "completed"
+        assert body["output_data"]["node_outputs"]["cf"]["doubled"] == "back!"
+
+
+def test_recovered_run_with_expired_human_timeout_fails(hil_timeout_client):
+    """A run whose human-input deadline passed while the process was down is failed,
+    not resurrected as paused, when recovery rebuilds its record."""
+    run_id = hil_timeout_client.post("/api/workflows/hil-to-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_timeout_client, run_id)  # paused; deadline is +1s
+
+    runs_module.RUNS.clear()  # "restart" right after the pause
+    time.sleep(1.3)           # the deadline passes while "down"
+
+    with TestClient(app) as restarted:
+        body = restarted.get(f"/api/runs/{run_id}").json()
+        assert body["status"] == "failed"
+        assert "timed out" in (body["error"] or "")
+        types = [e["type"] for e in body["events"]]
+        assert types[-1] == "human_timeout"

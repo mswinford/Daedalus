@@ -11,14 +11,14 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Current Status (Phase 3 in progress)
 
-> Last updated: Phase 3 underway. Human-in-loop nodes are implemented end-to-end: LangGraph
-> `interrupt()` pauses execution, the run stores its state via `MemorySaver` checkpointer, and the
-> frontend shows a paused state with an input form + resume button. The editor is a sidebar /
-> master-detail layout with debounced auto-save; runs stream live over WebSocket. Secrets store,
-> per-agent message isolation, async execution, and the run debug panel are all shipped.
-> Next up: SQLite checkpointing (replace MemorySaver for crash recovery), timeout auto-fail,
-> "Pending Approvals" sidebar section. Use this section as the source of truth when resuming in
-> a new session — it supersedes the phase notes below.
+> Last updated: Phase 3 complete. Human-in-loop nodes are implemented end-to-end: LangGraph
+> `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
+> survive restarts and are recovered on startup), and the frontend shows a paused state with an
+> input form + resume button. The editor is a sidebar / master-detail layout with debounced
+> auto-save; runs stream live over WebSocket. Secrets store, per-agent message isolation, async
+> execution, timeout auto-fail, and the Pending Approvals sidebar are all shipped.
+> Next up: `github_*` builtin tools, test-connection endpoint. Use this section as the source of
+> truth when resuming in a new session — it supersedes the phase notes below.
 
 ### What works today (shippable)
 - **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
@@ -91,13 +91,15 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Sample workflows**: `samples/sample-grade.json` (conditional routing demo),
   `samples/sample-agent.json` (agent node with LLM call + transform), and
   `samples/sample-order-assistant.json` (agent + two sandboxed `custom_function` tools).
-- **Human-in-loop nodes**: `interrupt()` in builder pauses the graph; `MemorySaver` checkpointer
-  with `thread_id` preserves state; `POST /runs/{id}/resume` sends human input via
-  `Command(resume=...)`. Frontend: RunPanel shows paused state (purple indicator) with a dynamic
+- **Human-in-loop nodes**: `interrupt()` in builder pauses the graph; SQLite checkpointer
+  (`AsyncSqliteSaver`, one connection per run on the shared file) with `thread_id` preserves state
+  across restarts — startup recovery rebuilds paused runs from checkpoints and re-arms timeouts;
+  `POST /runs/{id}/resume` sends human input via `Command(resume=...)`. Frontend: RunPanel shows
+  paused state (purple indicator) with a dynamic
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: 111 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
+- **Tests**: 118 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -115,7 +117,6 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ### What is deferred by design
 - **Phase 2 (remaining)** — test-connection endpoint.
-- **Phase 3 (remaining)** — SQLite checkpointing (replace MemorySaver for crash recovery).
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
 
@@ -134,8 +135,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `get_secret()` in sandbox; `${NAME}` in http headers; REST API + frontend panel.
 - [x] **Per-agent message isolation** *(done 2026-08-28)* — `messages_by_node` dict in state;
   sequential agents get fresh conversations, share only `data`. Unblocks multi-repo Option B.
-- [x] **Human-in-loop nodes** *(done 2026-08-29)* — `interrupt()` + MemorySaver checkpointer,
-  pause/resume API, frontend approval form + resume. SQLite checkpointing still deferred.
+- [x] **Human-in-loop nodes** *(done 2026-08-29)* — `interrupt()` + SQLite checkpointer,
+  pause/resume API, frontend approval form + resume.
 - [x] **Human-in-loop timeout auto-fail** *(done 2026-08-29)* — optional `timeout_seconds` on the
   node; an asyncio timer fails the run at the deadline (terminal `human_timeout` event) unless
   resumed first. Interrupt payload carries `timeout_seconds` + `requested_at`; RunPanel shows a
@@ -143,7 +144,14 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **Pending Approvals sidebar** *(done 2026-08-29)* — `GET /api/runs/paused` lists paused runs
   (oldest first); the workflow sidebar shows a "Pending approvals" section with per-run countdowns,
   refreshed every 5s. Clicking an entry opens the workflow editor with that run loaded in the RunPanel
-  via `?run=<id>` (reconnects to the event stream, so the approval form works).
+   via `?run=<id>` (reconnects to the event stream, so the approval form works).
+- [x] **SQLite checkpointing** *(done 2026-08-29)* — replaced `MemorySaver` with
+  `langgraph-checkpoint-sqlite`; each run opens its own `AsyncSqliteSaver` connection on the shared
+  file (`~/.ai-forge/checkpoints.db`, WAL mode) because aiosqlite connections bind to one event loop.
+  The HIL interrupt payload now carries `workflow_id`; on startup `recover_paused_runs()` finds
+  threads whose latest checkpoint still has an `__interrupt__` write, rebuilds the record from the
+  real graph's state snapshot, and re-arms the timeout (failing immediately if the deadline passed
+  while down). Completed/resumed threads leave no pending interrupt, so they are not resurrected.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
 Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample

@@ -44,9 +44,9 @@ Frontend (React + TS + Vite, React Flow) ──REST/WS──▶ Backend (FastAPI
 |---|---|
 | Frontend | React + TypeScript + Vite, React Flow, TailwindCSS, React Query |
 | Backend | FastAPI + Python 3.11+ |
-| Workflow engine | LangGraph (in-memory `MemorySaver` checkpointer for pause/resume) |
+| Workflow engine | LangGraph (SQLite checkpointer for pause/resume; paused runs survive restarts) |
 | LLM layer | LangChain (OpenAI-compatible), abstract provider interface |
-| Persistence | One JSON file per workflow in `~/.ai-forge/workflows/`; secrets in `~/.ai-forge/secrets.json` |
+| Persistence | One JSON file per workflow in `~/.ai-forge/workflows/`; run checkpoints in `~/.ai-forge/checkpoints.db`; secrets in `~/.ai-forge/secrets.json` |
 | Sandboxing | RestrictedPython (containers planned for Phase 4) |
 
 Full design and phase plan: [PLAN.md](./PLAN.md).
@@ -276,15 +276,14 @@ Base URL: `http://127.0.0.1:3000`
 - **`llm` condition type** raises `NotImplementedError`; `json_path` and `regex` work.
 - **Anthropic provider** not implemented (OpenAI-compatible only).
 - **`error`-typed edges** are defined in the schema but not wired to failure handling — node exceptions currently fail the run (emitted as a fatal `node_error` event).
-- **Checkpointing is in-memory** (`MemorySaver`) — paused runs must be resumed within the same process; SQLite persistence is deferred.
-- **Human-in-loop timeout** (`timeout_seconds`) is metadata only; auto-fail-on-timeout is not yet enforced.
+- **Run records are in-memory** — checkpoint data survives restarts (paused runs are recovered on startup and their timeouts re-armed), but the run list itself starts empty after a restart except for recovered paused runs.
 
 ---
 
 ## Roadmap
 
 - **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
-- **Phase 3 (mostly done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, and a Pending Approvals sidebar; deferred: SQLite checkpointing.
+- **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
 
 Full detail in [PLAN.md](./PLAN.md).

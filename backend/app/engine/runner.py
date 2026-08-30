@@ -1,14 +1,28 @@
 """Execute workflows using LangGraph."""
 from typing import Any, Callable
 
-from langgraph.checkpoint.memory import MemorySaver
+import aiosqlite
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from schema.models import Workflow, StateFieldType, RunEvent
+from app.config import get_settings
 from app.engine.builder import GraphBuilder
 
-# Shared checkpointer so paused runs can be resumed within the same process.
-_CHECKPOINTER = MemorySaver()
+
+async def _open_checkpointer() -> AsyncSqliteSaver:
+    """Open a per-run checkpointer on the shared SQLite checkpoint store.
+
+    Checkpoints live in `settings.checkpoint_db` so paused runs survive process
+    restarts. Each run executes in its own event loop (worker thread) and
+    aiosqlite connections bind to the loop that created them, so we open one
+    connection per run instead of sharing a single saver. Concurrent runs are
+    safe via WAL mode plus the busy timeout on `aiosqlite.connect`.
+    """
+    settings = get_settings()
+    conn = await aiosqlite.connect(str(settings.checkpoint_db), timeout=5.0)
+    await conn.execute("PRAGMA journal_mode=WAL")
+    return AsyncSqliteSaver(conn)
 
 
 def _validate_input(workflow: Workflow, input_data: dict[str, Any]) -> None:
@@ -94,15 +108,19 @@ def run_workflow_sync(
     _validate_input(workflow, input_data)
 
     builder = GraphBuilder(workflow, trace=trace, on_event=on_event)
-    graph = builder.build(checkpointer=_CHECKPOINTER)
 
     initial_state = _build_initial_state(input_data)
     config = {"configurable": {"thread_id": thread_id or "default"}}
 
     loop = asyncio.new_event_loop()
+    checkpointer: AsyncSqliteSaver | None = None
     try:
+        checkpointer = loop.run_until_complete(_open_checkpointer())
+        graph = builder.build(checkpointer=checkpointer)
         result = loop.run_until_complete(graph.ainvoke(initial_state, config=config))
     finally:
+        if checkpointer is not None:
+            loop.run_until_complete(checkpointer.conn.close())
         loop.close()
 
     if "__interrupt__" in result:
@@ -116,9 +134,9 @@ def run_workflow_sync(
     return _extract_result(builder, result)
 
 
-def _pending_interrupt_ids(graph: Any, config: dict[str, Any]) -> list[str]:
+async def _pending_interrupt_ids(graph: Any, config: dict[str, Any]) -> list[str]:
     """Ids of all interrupts currently pending on this thread (empty if none)."""
-    snapshot = graph.get_state(config)
+    snapshot = await graph.aget_state(config)
     return [
         intr.id
         for task in snapshot.tasks
@@ -142,7 +160,6 @@ def resume_workflow(
     import asyncio
 
     builder = GraphBuilder(workflow, trace=trace, on_event=on_event)
-    graph = builder.build(checkpointer=_CHECKPOINTER)
 
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -153,18 +170,25 @@ def resume_workflow(
     # in langgraph/pregel/_loop.py (resume_is_map). The map form handles any
     # value uniformly; with multiple pending interrupts we fall back to the
     # bare form so LangGraph raises its clear "specify the interrupt id" error.
-    interrupt_ids = _pending_interrupt_ids(graph, config)
-    if len(interrupt_ids) == 1:
-        resume_value: Any = {interrupt_ids[0]: human_input}
-    else:
-        resume_value = human_input
 
     loop = asyncio.new_event_loop()
+    checkpointer: AsyncSqliteSaver | None = None
     try:
+        checkpointer = loop.run_until_complete(_open_checkpointer())
+        graph = builder.build(checkpointer=checkpointer)
+        interrupt_ids = loop.run_until_complete(
+            _pending_interrupt_ids(graph, config)
+        )
+        if len(interrupt_ids) == 1:
+            resume_value: Any = {interrupt_ids[0]: human_input}
+        else:
+            resume_value = human_input
         result = loop.run_until_complete(
             graph.ainvoke(Command(resume=resume_value), config=config)
         )
     finally:
+        if checkpointer is not None:
+            loop.run_until_complete(checkpointer.conn.close())
         loop.close()
 
     if "__interrupt__" in result:

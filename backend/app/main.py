@@ -11,6 +11,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"AI Forge starting on {settings.host}:{settings.port}")
     print(f"Data directory: {settings.data_dir}")
+    recovered = await runs.recover_paused_runs()
+    if recovered:
+        print(f"Recovered {recovered} paused run(s) from the checkpoint store")
     yield
     print("Shutting down...")
 

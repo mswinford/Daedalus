@@ -18,6 +18,11 @@ class Settings(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     def __init__(self, **data):
+        # Overridable (e.g. tests) without touching the rest of the defaults.
+        if "checkpoint_db" not in data:
+            env = os.environ.get("AI_FORGE_CHECKPOINT_DB")
+            if env:
+                data["checkpoint_db"] = env
         super().__init__(**data)
         self.workflows_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
