@@ -1,0 +1,41 @@
+{
+  "name": "acme/echo-tool",
+  "version": "1.0.0",
+  "kind": "tool",
+  "description": "A trivial built-in tool that echoes its input back. Useful as a dependency-free example and for wiring tests.",
+  "tags": ["example", "builtin", "testing"],
+  "spec": {
+    "kind": "tool",
+    "tool": {
+      "id": "echo",
+      "name": "echo",
+      "description": "Echo the provided message back unchanged. Use to verify tool-calling is wired up.",
+      "parameters": {
+        "message": {
+          "type": "string",
+          "description": "The text to echo back.",
+          "required": true
+        }
+      },
+      "implementation": {
+        "type": "builtin",
+        "config": { "function": "echo" }
+      }
+    }
+  },
+  "interface": {
+    "type": "http",
+    "input_schema": {
+      "type": "object",
+      "properties": { "message": { "type": "string" } },
+      "required": ["message"]
+    },
+    "output_schema": { "type": "string" }
+  },
+  "governance": {
+    "owner": "acme",
+    "data_classification": "public",
+    "security_status": "approved"
+  },
+  "stage": "published"
+}

@@ -105,7 +105,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: 120 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
+- **Tests**: 185 passing (`python -m pytest -q`, including Capability Registry R1). Frontend typechecks + builds clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

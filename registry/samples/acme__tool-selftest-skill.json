@@ -1,0 +1,23 @@
+{
+  "name": "acme/tool-selftest-skill",
+  "version": "1.0.0",
+  "kind": "skill",
+  "description": "A skill that teaches an agent to verify its tool wiring by round-tripping a message through the echo tool.",
+  "tags": ["example", "testing", "composite"],
+  "spec": {
+    "kind": "skill",
+    "prompt": "When asked to self-test your tools: call the `echo` tool with the exact message the user gave you, then confirm whether the echoed text matches. Report PASS or FAIL in one line.",
+    "tools": [
+      { "name": "acme/echo-tool", "version": "latest" }
+    ]
+  },
+  "dependencies": [
+    { "name": "acme/echo-tool", "version": "latest" }
+  ],
+  "governance": {
+    "owner": "acme",
+    "data_classification": "public",
+    "security_status": "approved"
+  },
+  "stage": "published"
+}

@@ -1,0 +1,1629 @@
+{
+  "$defs": {
+    "AgentNodeConfig": {
+      "description": "Configuration for an Agent node.",
+      "properties": {
+        "model_id": {
+          "description": "Reference to a ModelConfig",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "system_prompt": {
+          "description": "System prompt for the agent",
+          "title": "System Prompt",
+          "type": "string"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override model temperature",
+          "title": "Temperature"
+        },
+        "tool_ids": {
+          "description": "References to ToolDefinitions this agent can use",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tool Ids",
+          "type": "array"
+        },
+        "max_iterations": {
+          "default": 10,
+          "description": "Maximum agent iterations",
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Iterations",
+          "type": "integer"
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Retry configuration"
+        }
+      },
+      "required": [
+        "model_id",
+        "system_prompt"
+      ],
+      "title": "AgentNodeConfig",
+      "type": "object"
+    },
+    "AgentSpec": {
+      "description": "kind=agent (composite) \u2014 a single self-directed unit; NO embedded graph.\n\nAn agent or skill that needs a real multi-step graph should be published\nas a `workflow` kind instead.",
+      "properties": {
+        "kind": {
+          "const": "agent",
+          "default": "agent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "model_profile": {
+          "$ref": "#/$defs/CapabilityRef"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt"
+        },
+        "prompt_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRef"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRef"
+          },
+          "title": "Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "model_profile"
+      ],
+      "title": "AgentSpec",
+      "type": "object"
+    },
+    "CapabilityEvaluationRef": {
+      "description": "Scores computed by the runtime (lights up in R2).",
+      "properties": {
+        "suite_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suite Id"
+        },
+        "last_scored_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Scored At"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        }
+      },
+      "title": "CapabilityEvaluationRef",
+      "type": "object"
+    },
+    "CapabilityGovernance": {
+      "description": "METADATA ONLY in R1 \u2014 no enforcement (that is the R3 gateway's job).",
+      "properties": {
+        "owner": {
+          "title": "Owner",
+          "type": "string"
+        },
+        "data_classification": {
+          "$ref": "#/$defs/DataClassification",
+          "default": "internal"
+        },
+        "human_approval_required": {
+          "default": false,
+          "title": "Human Approval Required",
+          "type": "boolean"
+        },
+        "security_status": {
+          "$ref": "#/$defs/SecurityStatus",
+          "default": "unreviewed"
+        },
+        "allowed_consumers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Consumers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "owner"
+      ],
+      "title": "CapabilityGovernance",
+      "type": "object"
+    },
+    "CapabilityInterface": {
+      "description": "How the capability is invoked. Kind-aware shape (see plan \u00a74).",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/InterfaceType"
+        },
+        "input_schema": {
+          "additionalProperties": true,
+          "title": "Input Schema",
+          "type": "object"
+        },
+        "output_schema": {
+          "additionalProperties": true,
+          "title": "Output Schema",
+          "type": "object"
+        },
+        "invocation": {
+          "additionalProperties": true,
+          "description": "Protocol-specific call details",
+          "title": "Invocation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CapabilityInterface",
+      "type": "object"
+    },
+    "CapabilityKind": {
+      "enum": [
+        "tool",
+        "prompt",
+        "model_profile",
+        "skill",
+        "agent",
+        "workflow",
+        "policy",
+        "knowledge",
+        "connector",
+        "eval_suite"
+      ],
+      "title": "CapabilityKind",
+      "type": "string"
+    },
+    "CapabilityRef": {
+      "description": "Reference to another capability by name@version.",
+      "properties": {
+        "name": {
+          "description": "Capability name, 'owner/name'",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "default": "latest",
+          "description": "Semver or 'latest'",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CapabilityRef",
+      "type": "object"
+    },
+    "CapabilitySemantics": {
+      "description": "Semantic metadata for agent discovery (lights up in R3).",
+      "properties": {
+        "purpose": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
+        },
+        "use_when": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Use When",
+          "type": "array"
+        },
+        "avoid_when": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Avoid When",
+          "type": "array"
+        },
+        "related": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related",
+          "type": "array"
+        }
+      },
+      "title": "CapabilitySemantics",
+      "type": "object"
+    },
+    "ConditionConfig": {
+      "description": "Configuration for a conditional edge or Conditional node.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/ConditionType"
+        },
+        "expression": {
+          "description": "The condition expression (syntax depends on type)",
+          "title": "Expression",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "type",
+        "expression"
+      ],
+      "title": "ConditionConfig",
+      "type": "object"
+    },
+    "ConditionType": {
+      "enum": [
+        "json_path",
+        "regex",
+        "llm"
+      ],
+      "title": "ConditionType",
+      "type": "string"
+    },
+    "ConditionalNodeConfig": {
+      "description": "Configuration for a Conditional node.",
+      "properties": {
+        "conditions": {
+          "description": "Conditions that determine which branch to take",
+          "items": {
+            "$ref": "#/$defs/ConditionConfig"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "default_branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default branch name if no condition matches",
+          "title": "Default Branch"
+        }
+      },
+      "required": [
+        "conditions"
+      ],
+      "title": "ConditionalNodeConfig",
+      "type": "object"
+    },
+    "CustomFunctionNodeConfig": {
+      "description": "Configuration for a Custom Function node.",
+      "properties": {
+        "code": {
+          "description": "Python code to execute (sandboxed)",
+          "title": "Code",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "description": "Execution timeout",
+          "maximum": 300,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "input_fields": {
+          "description": "State fields the function reads",
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Fields",
+          "type": "array"
+        },
+        "output_fields": {
+          "description": "State fields the function writes",
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Fields",
+          "type": "array"
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "CustomFunctionNodeConfig",
+      "type": "object"
+    },
+    "DataClassification": {
+      "enum": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ],
+      "title": "DataClassification",
+      "type": "string"
+    },
+    "Edge": {
+      "description": "A connection between two nodes.",
+      "properties": {
+        "id": {
+          "description": "Unique edge identifier",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_node_id": {
+          "description": "Source node id",
+          "title": "Source Node Id",
+          "type": "string"
+        },
+        "source_handle": {
+          "description": "Source handle name: 'default', 'error', or branch name",
+          "title": "Source Handle",
+          "type": "string"
+        },
+        "target_node_id": {
+          "description": "Target node id",
+          "title": "Target Node Id",
+          "type": "string"
+        },
+        "type": {
+          "default": "static",
+          "description": "Edge type",
+          "enum": [
+            "static",
+            "conditional",
+            "error"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConditionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Condition for conditional edges"
+        }
+      },
+      "required": [
+        "id",
+        "source_node_id",
+        "source_handle",
+        "target_node_id"
+      ],
+      "title": "Edge",
+      "type": "object"
+    },
+    "EndNodeConfig": {
+      "description": "Configuration for the End node.",
+      "properties": {
+        "output_fields": {
+          "description": "Fields that the workflow produces as output",
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Fields",
+          "type": "array"
+        }
+      },
+      "title": "EndNodeConfig",
+      "type": "object"
+    },
+    "FieldMapping": {
+      "description": "Maps an input state field to an output field.",
+      "properties": {
+        "source": {
+          "description": "Source state field name",
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "description": "Target output field name",
+          "title": "Target",
+          "type": "string"
+        },
+        "transform": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional transform expression (template string)",
+          "title": "Transform"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "title": "FieldMapping",
+      "type": "object"
+    },
+    "HumanInLoopNodeConfig": {
+      "description": "Configuration for a Human-in-the-Loop node.",
+      "properties": {
+        "input_fields": {
+          "description": "Fields the human is asked to provide",
+          "items": {
+            "$ref": "#/$defs/HumanInputField"
+          },
+          "title": "Input Fields",
+          "type": "array"
+        },
+        "approval_required": {
+          "default": false,
+          "description": "If true, the human must approve/reject before continuing",
+          "title": "Approval Required",
+          "type": "boolean"
+        },
+        "approval_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Message shown to the human for approval",
+          "title": "Approval Message"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If set, the run auto-fails when no human input arrives within this many seconds. None = wait indefinitely.",
+          "title": "Timeout Seconds"
+        },
+        "output_fields": {
+          "description": "State fields to write with human input",
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Fields",
+          "type": "array"
+        }
+      },
+      "title": "HumanInLoopNodeConfig",
+      "type": "object"
+    },
+    "HumanInputField": {
+      "description": "A field the human is asked to provide.",
+      "properties": {
+        "name": {
+          "description": "Field name",
+          "title": "Name",
+          "type": "string"
+        },
+        "label": {
+          "description": "Human-readable label",
+          "title": "Label",
+          "type": "string"
+        },
+        "type": {
+          "description": "Input type",
+          "enum": [
+            "text",
+            "textarea",
+            "select",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For 'select' type",
+          "title": "Options"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "type"
+      ],
+      "title": "HumanInputField",
+      "type": "object"
+    },
+    "InterfaceType": {
+      "enum": [
+        "ai_forge_workflow",
+        "mcp",
+        "http"
+      ],
+      "title": "InterfaceType",
+      "type": "string"
+    },
+    "JsonSchemaParam": {
+      "description": "A parameter in a tool's JSON Schema.",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/StateFieldType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "JsonSchemaParam",
+      "type": "object"
+    },
+    "LifecycleStage": {
+      "enum": [
+        "draft",
+        "review",
+        "approved",
+        "published",
+        "deprecated",
+        "retired"
+      ],
+      "title": "LifecycleStage",
+      "type": "string"
+    },
+    "ModelConfig": {
+      "description": "A model definition that agents can reference.",
+      "properties": {
+        "id": {
+          "description": "Unique identifier for this model config",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "Human-readable name, e.g. 'Local Llama'",
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/$defs/ModelProvider",
+          "description": "Provider type"
+        },
+        "model": {
+          "description": "Model name/identifier",
+          "title": "Model",
+          "type": "string"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Base URL for the API (required for openai_compatible)",
+          "title": "Base Url"
+        },
+        "api_key_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reference to a secret key (name in secrets store)",
+          "title": "Api Key Ref"
+        },
+        "default_temperature": {
+          "default": 0.7,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Default Temperature",
+          "type": "number"
+        },
+        "track_cost": {
+          "default": false,
+          "description": "Whether to track token costs for this model",
+          "title": "Track Cost",
+          "type": "boolean"
+        },
+        "pricing": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cost per 1M tokens, e.g. {'input': 0.0, 'output': 0.0}. Local models = $0.",
+          "title": "Pricing"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "provider",
+        "model"
+      ],
+      "title": "ModelConfig",
+      "type": "object"
+    },
+    "ModelProfileSpec": {
+      "description": "kind=model_profile \u2014 wraps an existing ModelConfig.",
+      "properties": {
+        "kind": {
+          "const": "model_profile",
+          "default": "model_profile",
+          "title": "Kind",
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelConfig"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "ModelProfileSpec",
+      "type": "object"
+    },
+    "ModelProvider": {
+      "enum": [
+        "openai_compatible",
+        "anthropic"
+      ],
+      "title": "ModelProvider",
+      "type": "string"
+    },
+    "Node": {
+      "description": "A node in the workflow graph.",
+      "properties": {
+        "id": {
+          "description": "Unique node identifier",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "description": "Node type",
+          "enum": [
+            "start",
+            "end",
+            "agent",
+            "conditional",
+            "transform",
+            "human_in_loop",
+            "custom_function"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/NodePosition",
+          "description": "Position on canvas"
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/EndNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/AgentNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/ConditionalNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/TransformNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/HumanInLoopNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/CustomFunctionNodeConfig"
+            }
+          ],
+          "description": "Node-specific configuration",
+          "title": "Config"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "Node",
+      "type": "object"
+    },
+    "NodePosition": {
+      "properties": {
+        "x": {
+          "default": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "default": 0,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "title": "NodePosition",
+      "type": "object"
+    },
+    "PromptSpec": {
+      "description": "kind=prompt \u2014 a prompt template with {{var}} placeholders.",
+      "properties": {
+        "kind": {
+          "const": "prompt",
+          "default": "prompt",
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "variables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Variables",
+          "type": "array"
+        },
+        "role": {
+          "default": "system",
+          "enum": [
+            "system",
+            "user",
+            "assistant"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "PromptSpec",
+      "type": "object"
+    },
+    "RetryConfig": {
+      "description": "Retry configuration for a node.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable retries for this node",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "max_retries": {
+          "default": 3,
+          "description": "Maximum number of retry attempts",
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "backoff_base": {
+          "default": 1.0,
+          "description": "Base delay in seconds, doubled each retry",
+          "exclusiveMinimum": 0,
+          "title": "Backoff Base",
+          "type": "number"
+        },
+        "retry_on": {
+          "description": "Error types to retry on",
+          "items": {
+            "type": "string"
+          },
+          "title": "Retry On",
+          "type": "array"
+        }
+      },
+      "title": "RetryConfig",
+      "type": "object"
+    },
+    "SecurityStatus": {
+      "enum": [
+        "unreviewed",
+        "in_review",
+        "approved",
+        "flagged"
+      ],
+      "title": "SecurityStatus",
+      "type": "string"
+    },
+    "SkillSpec": {
+      "description": "kind=skill (composite) \u2014 instructions + tool refs; no model, no graph.\n\nAttached to an agent node via its `skills[]` field and folded into that\nagent's system prompt + tools at runtime.",
+      "properties": {
+        "kind": {
+          "const": "skill",
+          "default": "skill",
+          "title": "Kind",
+          "type": "string"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt"
+        },
+        "prompt_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/CapabilityRef"
+          },
+          "title": "Tools",
+          "type": "array"
+        }
+      },
+      "title": "SkillSpec",
+      "type": "object"
+    },
+    "StartNodeConfig": {
+      "description": "Configuration for the Start node.",
+      "properties": {
+        "input_fields": {
+          "description": "Fields that the workflow accepts as input",
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Fields",
+          "type": "array"
+        }
+      },
+      "title": "StartNodeConfig",
+      "type": "object"
+    },
+    "StateField": {
+      "description": "A single field in the workflow's shared state.",
+      "properties": {
+        "name": {
+          "description": "Field name, used by nodes to read/write state",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/StateFieldType",
+          "description": "JSON type of the field"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable description",
+          "title": "Description"
+        },
+        "required": {
+          "default": false,
+          "description": "Whether the field must be present",
+          "title": "Required",
+          "type": "boolean"
+        },
+        "items_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StateFieldType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If type is 'array', the type of array items"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "StateField",
+      "type": "object"
+    },
+    "StateFieldType": {
+      "enum": [
+        "string",
+        "number",
+        "boolean",
+        "array",
+        "object"
+      ],
+      "title": "StateFieldType",
+      "type": "string"
+    },
+    "StateSchema": {
+      "description": "The shared state that flows through the workflow.",
+      "properties": {
+        "fields": {
+          "description": "All fields in the shared state",
+          "items": {
+            "$ref": "#/$defs/StateField"
+          },
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "title": "StateSchema",
+      "type": "object"
+    },
+    "ToolDefinition": {
+      "description": "A tool available to agents. Defined at workflow level, selected per-agent.",
+      "properties": {
+        "id": {
+          "description": "Unique identifier",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "Tool name, shown to the LLM",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "description": "Description the LLM uses to decide when to call it",
+          "title": "Description",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonSchemaParam"
+          },
+          "description": "JSON Schema parameters for the tool",
+          "title": "Parameters",
+          "type": "object"
+        },
+        "implementation": {
+          "$ref": "#/$defs/ToolImplementation",
+          "description": "How the tool is implemented"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "implementation"
+      ],
+      "title": "ToolDefinition",
+      "type": "object"
+    },
+    "ToolImplementation": {
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/ToolImplementationType"
+        },
+        "config": {
+          "additionalProperties": true,
+          "description": "Implementation-specific config (code for custom_function, url for http, etc.)",
+          "title": "Config",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ToolImplementation",
+      "type": "object"
+    },
+    "ToolImplementationType": {
+      "enum": [
+        "builtin",
+        "custom_function",
+        "http"
+      ],
+      "title": "ToolImplementationType",
+      "type": "string"
+    },
+    "ToolSpec": {
+      "description": "kind=tool \u2014 wraps an existing ToolDefinition.",
+      "properties": {
+        "kind": {
+          "const": "tool",
+          "default": "tool",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolDefinition"
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "title": "ToolSpec",
+      "type": "object"
+    },
+    "TransformNodeConfig": {
+      "description": "Configuration for a Transform node.",
+      "properties": {
+        "mode": {
+          "description": "Transformation mode",
+          "enum": [
+            "template",
+            "mapping",
+            "custom_function"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Template string for 'template' mode, e.g. 'Hello {{name}}'",
+          "title": "Template"
+        },
+        "field_mappings": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FieldMapping"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Field mappings for 'mapping' mode",
+          "title": "Field Mappings"
+        },
+        "custom_function_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reference to a CustomFunction node for 'custom_function' mode",
+          "title": "Custom Function Id"
+        },
+        "output_field": {
+          "description": "Name of the output state field to write",
+          "title": "Output Field",
+          "type": "string"
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "mode",
+        "output_field"
+      ],
+      "title": "TransformNodeConfig",
+      "type": "object"
+    },
+    "Workflow": {
+      "description": "Top-level workflow definition.",
+      "properties": {
+        "id": {
+          "description": "Unique workflow identifier",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "Human-readable name",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Workflow description",
+          "title": "Description"
+        },
+        "schema_version": {
+          "default": 1,
+          "description": "Schema version for migrations",
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/Node"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/Edge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolDefinition"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ModelConfig"
+          },
+          "title": "Models",
+          "type": "array"
+        },
+        "state_schema": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StateSchema"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Explicit state schema (auto-inferred if not set)"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "Workflow",
+      "type": "object"
+    },
+    "WorkflowSpec": {
+      "description": "kind=workflow \u2014 the only kind that carries a graph.",
+      "properties": {
+        "kind": {
+          "const": "workflow",
+          "default": "workflow",
+          "title": "Kind",
+          "type": "string"
+        },
+        "workflow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Workflow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow Ref"
+        }
+      },
+      "title": "WorkflowSpec",
+      "type": "object"
+    }
+  },
+  "description": "The central contract: identity + kind spec + interface + governance.",
+  "properties": {
+    "name": {
+      "description": "Capability name, 'owner/name'",
+      "title": "Name",
+      "type": "string"
+    },
+    "version": {
+      "description": "Semver \u2014 versions are immutable",
+      "title": "Version",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "kind": {
+      "$ref": "#/$defs/CapabilityKind"
+    },
+    "spec": {
+      "discriminator": {
+        "mapping": {
+          "agent": "#/$defs/AgentSpec",
+          "model_profile": "#/$defs/ModelProfileSpec",
+          "prompt": "#/$defs/PromptSpec",
+          "skill": "#/$defs/SkillSpec",
+          "tool": "#/$defs/ToolSpec",
+          "workflow": "#/$defs/WorkflowSpec"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ToolSpec"
+        },
+        {
+          "$ref": "#/$defs/PromptSpec"
+        },
+        {
+          "$ref": "#/$defs/ModelProfileSpec"
+        },
+        {
+          "$ref": "#/$defs/SkillSpec"
+        },
+        {
+          "$ref": "#/$defs/AgentSpec"
+        },
+        {
+          "$ref": "#/$defs/WorkflowSpec"
+        }
+      ],
+      "title": "Spec"
+    },
+    "interface": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CapabilityInterface"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Required for tool & workflow kinds; others inherit from spec until invokable (R2)"
+    },
+    "dependencies": {
+      "items": {
+        "$ref": "#/$defs/CapabilityRef"
+      },
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "models_required": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Models Required",
+      "type": "array"
+    },
+    "secrets_required": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Secrets Required",
+      "type": "array"
+    },
+    "governance": {
+      "$ref": "#/$defs/CapabilityGovernance"
+    },
+    "stage": {
+      "$ref": "#/$defs/LifecycleStage",
+      "default": "draft"
+    },
+    "breaking_changes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Human note on what changed incompatibly (guidance only in R1)",
+      "title": "Breaking Changes"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Set by the registry at publish time if omitted",
+      "title": "Created At"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "published_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Published At"
+    },
+    "source_repo": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Repo"
+    },
+    "source_commit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Commit"
+    },
+    "semantics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CapabilitySemantics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "evaluation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CapabilityEvaluationRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "description",
+    "kind",
+    "spec",
+    "governance"
+  ],
+  "title": "CapabilityManifest",
+  "type": "object"
+}

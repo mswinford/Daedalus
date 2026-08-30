@@ -2,7 +2,7 @@
 
 A standalone web app for building **AI agent workflows** on [LangGraph](https://github.com/langchain-ai/langgraph). Workflows are directed graphs of nodes (agents, conditionals, transforms, sandboxed Python, human-in-loop gates) with file-based persistence. Author them in the visual React Flow editor or via the REST API.
 
-> **Status:** Phase 3 — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject), async execution with live WebSocket streaming, a secrets store, and per-agent message isolation are all implemented. See [Current features](#current-features) and [Known limitations](#known-limitations).
+> **Status:** Phase 3 — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject), async execution with live WebSocket streaming, a secrets store, and per-agent message isolation are all implemented. A companion **Capability Registry** (R1 of the [platform roadmap](./docs/ROADMAP.md)) adds identity, versioning, lifecycle, and search for shareable AI capabilities — see [Capability Registry](#capability-registry).
 
 ---
 
@@ -25,19 +25,30 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - **Run debug panel**: live node/LLM trace, token + cost totals, expandable outputs, and a paused-state form for human-in-loop (approve / reject).
 - Models, tools, and secrets management panels. Auto-save with an unsaved/saving/saved indicator.
 
-**Tests:** 111 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
+**Capability Registry (R1 — works now)**
+- Capability Manifest schema (`schema/capability.py`) with six core kinds: `tool`, `prompt`, `model_profile`, `skill`, `agent`, `workflow`; composites reference other capabilities by `name@version`.
+- Git-backed store + SQLite FTS5 index: immutable versions, lifecycle state machine (draft → review → approved → published → deprecated → retired).
+- Publish (git commit + index sync), search, and use APIs on a separate server (`127.0.0.1:3010`).
+- CLI: `ai-forge-registry serve | publish <files…> | seed` — publishing works offline; six sample capabilities (one per kind) ship in `registry/samples/`.
+- **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use** actions.
+
+**Tests:** 185 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
 
 ---
 
 ## Architecture
 
 ```
-Frontend (React + TS + Vite, React Flow) ──REST/WS──▶ Backend (FastAPI)
-                                                         ├─ API layer (CRUD, run, resume, validate, secrets)
-                                                         ├─ Engine (LangGraph builder + runner)
-                                                         ├─ LLM providers (OpenAI-compatible)
-                                                         ├─ Sandbox (RestrictedPython)
-                                                         └─ Persistence (JSON files in ~/.ai-forge)
+Frontend (React + TS + Vite, React Flow)
+   │  /api ────────────────▶ Backend (FastAPI, :3000)
+   │                         ├─ API layer (CRUD, run, resume, validate, secrets)
+   │                         ├─ Engine (LangGraph builder + runner)
+   │                         ├─ LLM providers (OpenAI-compatible)
+   │                         ├─ Sandbox (RestrictedPython)
+   │                         └─ Persistence (JSON files in ~/.ai-forge)
+   └─ /registry ───────────▶ Capability Registry (FastAPI, :3010)
+                             ├─ Git store (~/.ai-forge/capabilities/)
+                             └─ SQLite FTS5 index (~/.ai-forge/registry.db)
 ```
 
 | Layer | Technology |
@@ -46,6 +57,7 @@ Frontend (React + TS + Vite, React Flow) ──REST/WS──▶ Backend (FastAPI
 | Backend | FastAPI + Python 3.11+ |
 | Workflow engine | LangGraph (SQLite checkpointer for pause/resume; paused runs survive restarts) |
 | LLM layer | LangChain (OpenAI-compatible), abstract provider interface |
+| Capability registry | FastAPI + aiosqlite; manifests in a local git repo (`~/.ai-forge/capabilities/`), FTS5 index in `~/.ai-forge/registry.db` |
 | Persistence | One JSON file per workflow in `~/.ai-forge/workflows/`; run checkpoints in `~/.ai-forge/checkpoints.db`; secrets in `~/.ai-forge/secrets.json` |
 | Sandboxing | RestrictedPython (containers planned for Phase 4) |
 
@@ -90,12 +102,24 @@ npm install
 npm run dev         # Vite dev server on http://localhost:5173
 ```
 
-The dev server proxies `/api` (including WebSocket upgrades) to the backend on port `3000`, so both must be running. Open http://localhost:5173.
+The dev server proxies `/api` (including WebSocket upgrades) to the backend on port `3000`, and `/registry` to the capability registry on port `3010`. Open http://localhost:5173.
 
-### 3. Run the tests
+### 3. Capability Registry (optional)
+
+The registry is a separate server; it holds versioned, searchable capability manifests (tools, prompts, model profiles, skills, agents, workflows):
 
 ```bash
-python -m pytest -q          # backend (111 tests)
+python -m registry.cli serve        # or: ai-forge-registry serve  → 127.0.0.1:3010
+python -m registry.cli seed         # publish six sample capabilities (one per kind)
+curl http://127.0.0.1:3010/health
+```
+
+With the frontend running, the **Capabilities** view in the sidebar browses and uses them. `publish` and `seed` work offline — they validate manifests, write into the local git repo, commit once, and sync the index; no server needed. See [Capability Registry](#capability-registry).
+
+### 4. Run the tests
+
+```bash
+python -m pytest -q          # backend (185 tests)
 cd frontend && npm run lint  # frontend typecheck (tsc --noEmit)
 ```
 
@@ -215,6 +239,47 @@ The `custom_function` node runs your Python in a RestrictedPython sandbox with a
 
 ---
 
+## Capability Registry
+
+A thin **system-of-record + discovery** layer above AI Forge (R1 of the [platform roadmap](./docs/ROADMAP.md)) — it is not a runtime. It gives shareable units of AI capability (tools, prompts, model profiles, skills, agents, workflows) an identity (`owner/name`), strict semver versions, ownership/governance metadata, a lifecycle stage, and search.
+
+**How publishing works (R1):** `POST /registry/capabilities` or the CLI writes the manifest into a local git repo (`~/.ai-forge/capabilities/`), commits it, and syncs the SQLite FTS5 index. Publishing is a **direct commit to HEAD** — no remote, no branches, no PRs (single-user, localhost model). Review is tracked out-of-band through the lifecycle stage: `draft → review → approved → published → deprecated → retired`; only `published` versions surface as `latest`. Versions are immutable; git history provides provenance.
+
+**CLI** (`ai-forge-registry`, or `python -m registry.cli`):
+
+| Command | What it does |
+|---|---|
+| `serve` | Start the registry server on `127.0.0.1:3010` (default subcommand) |
+| `publish <files…>` | Validate manifest JSON files, write them into the git repo, commit once, sync the index. Idempotent; same `name@version` with different content is rejected. Works offline. |
+| `seed` | Publish the six bundled sample capabilities from `registry/samples/`. |
+
+**Sample capabilities** (seeded by `ai-forge-registry seed`; they cross-reference each other into a composition chain):
+
+| Sample | Kind | Notes |
+|---|---|---|
+| `acme/echo-tool` | tool | Builtin `echo` — self-contained, no network or LLM needed |
+| `acme/courteous-assistant-prompt` | prompt | System template with `{{role}}` / `{{audience}}` placeholders |
+| `acme/local-llama-profile` | model_profile | OpenAI-compatible profile pointing at a local Ollama endpoint |
+| `acme/tool-selftest-skill` | skill | Instructions + references `echo-tool` |
+| `acme/selftest-agent` | agent | References the model profile, echo tool, and self-test skill — the full dependency chain |
+| `acme/echo-workflow` | workflow | A complete `start → agent → end` graph using the builtin echo tool |
+
+**Registry API** (base URL `http://127.0.0.1:3010`; proxied at `/registry` by the Vite dev server):
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `GET` | `/registry/capabilities` | List capabilities (one summary per name) |
+| `GET` | `/registry/capabilities/{name}` | Detail — latest published manifest + full version history |
+| `POST` | `/registry/capabilities` | Publish a manifest (git commit + index sync; returns 201) |
+| `POST` | `/registry/capabilities/{name}/lifecycle` | Advance the stage (e.g. draft → review → published) |
+| `GET` | `/registry/search?q=&kind=` | FTS search over name/description/tags |
+| `GET` | `/registry/capabilities/{name}/use?version=latest` | Resolved artifact payload for import |
+
+Full design: [Capability Registry plan](./docs/capability-registry-plan.md).
+
+---
+
 ## REST API
 
 Base URL: `http://127.0.0.1:3000`
@@ -285,5 +350,6 @@ Base URL: `http://127.0.0.1:3000`
 - **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
 - **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
+- **Capability platform (R1 in progress):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 adds invoke nodes + dependency resolution; R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
 
 Full detail in [the AI Forge Plan](./docs/ai-forge-plan.md).

@@ -21,6 +21,10 @@ export default defineConfig({
         target: 'ws://localhost:3000',
         ws: true,
       },
+      '/registry': {
+        target: 'http://localhost:3010',
+        changeOrigin: true,
+      },
     },
   },
 })

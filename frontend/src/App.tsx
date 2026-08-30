@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom'
 import AppLayout from './components/layout/AppLayout'
+import Capabilities from './pages/Capabilities'
 import EmptyState from './pages/EmptyState'
 import WorkflowEditor from './pages/WorkflowEditor'
 
@@ -17,6 +18,7 @@ function App() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<EmptyState />} />
+          <Route path="capabilities" element={<Capabilities />} />
           <Route path="workflows/:id" element={<EditorRoute />} />
         </Route>
       </Routes>

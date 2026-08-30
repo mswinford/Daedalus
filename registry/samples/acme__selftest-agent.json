@@ -1,0 +1,30 @@
+{
+  "name": "acme/selftest-agent",
+  "version": "1.0.0",
+  "kind": "agent",
+  "description": "A single agent that runs the tool self-test skill on a local model — the smallest fully-composed capability (agent -> skill -> tool, plus a model profile).",
+  "tags": ["example", "composite", "testing"],
+  "spec": {
+    "kind": "agent",
+    "model_profile": { "name": "acme/local-llama-profile", "version": "latest" },
+    "prompt": "You are a tooling self-test agent. When the user sends a message, treat it as the self-test payload and follow your self-test skill exactly.",
+    "tools": [
+      { "name": "acme/echo-tool", "version": "latest" }
+    ],
+    "skills": [
+      { "name": "acme/tool-selftest-skill", "version": "latest" }
+    ]
+  },
+  "dependencies": [
+    { "name": "acme/local-llama-profile", "version": "latest" },
+    { "name": "acme/echo-tool", "version": "latest" },
+    { "name": "acme/tool-selftest-skill", "version": "latest" }
+  ],
+  "models_required": ["acme/local-llama-profile"],
+  "governance": {
+    "owner": "acme",
+    "data_classification": "public",
+    "security_status": "approved"
+  },
+  "stage": "published"
+}

@@ -16,6 +16,7 @@ dependencies = [
     "langchain>=0.3.0",
     "langchain-openai>=0.2.0",
     "langchain-anthropic>=0.2.0",
+    "aiosqlite>=0.20.0",
     "websockets>=13.0",
     "RestrictedPython>=7.0",
 ]
@@ -27,9 +28,10 @@ dev = [
 
 [project.scripts]
 ai-forge = "ai_forge.cli:main"
+ai-forge-registry = "registry.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend/app", "schema", "ai_forge"]
+packages = ["backend/app", "schema", "ai_forge", "registry"]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]

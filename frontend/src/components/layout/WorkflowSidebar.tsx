@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Hourglass, Plus, Search, Trash2 } from 'lucide-react'
+import { Boxes, Hourglass, Plus, Search, Trash2 } from 'lucide-react'
 
 import { workflowsApi, type PausedRunSummary, type WorkflowSummary } from '@/lib/api'
 
@@ -90,9 +90,11 @@ function SidebarRow({
 
 export default function WorkflowSidebar({ activeId }: { activeId: string | null }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [newName, setNewName] = useState('')
+  const onCapabilities = location.pathname === '/capabilities'
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['workflows'],
@@ -230,6 +232,18 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
           ))
         )}
       </nav>
+
+      <div className="border-t border-zinc-800 p-2">
+        <Link
+          to="/capabilities"
+          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+            onCapabilities ? 'bg-zinc-800 font-medium text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900'
+          }`}
+        >
+          <Boxes size={15} />
+          Capabilities
+        </Link>
+      </div>
     </aside>
   )
 }

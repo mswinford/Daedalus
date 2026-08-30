@@ -1,7 +1,7 @@
 # Capability Registry — Implementation Plan (Draft)
 
-> **Status:** Component plan — decisions settled, R1 build-ready. Part of the [platform roadmap](./ROADMAP.md); a thin layer above AI Forge.
-> **Scope:** R1 (Find & Reuse) is build-ready; R2/R3 are roadmap.
+> **Status:** Component plan — R1 in progress (build steps 1–6 shipped). Part of the [platform roadmap](./ROADMAP.md); a thin layer above AI Forge.
+> **Scope:** R1 (Find & Reuse) in progress; R2/R3 are roadmap.
 > **Companion docs:** [Roadmap](./ROADMAP.md) · [AI Forge plan](./ai-forge-plan.md) · concepts: `concepts/enterprise-foundry-overview.md`, `concepts/capabilities.md`, `concepts/capability-registry.md`.
 
 ## 1. Context & reframe
@@ -184,11 +184,12 @@ class CapabilityManifest(BaseModel):
 registry/
   config.py      # Settings: registry_db (SQLite→Postgres), capabilities_repo (git path)
   db.py          # connection + schema init (portable SQL; FTS5 now, pgvector later)
-  store.py       # immutable version rows + lifecycle transitions
+  store.py       # immutable version rows + lifecycle transitions + FTS search (vector backend later)
   indexer.py     # git → DB sync: parse manifests, upsert versions, build FTS index
-  search.py      # keyword/FTS now; pluggable vector backend later
   main.py        # FastAPI app + lifespan (open DB, sync-on-start)
+  cli.py         # serve / publish / seed (publish works offline)
   api/           # capabilities.py, search.py, publish.py, use.py
+  samples/       # six sample manifests (one per core kind) for `seed`
 ```
 DB: `capability_versions(name, version, kind, manifest_json, artifact_json, stage, security_status, source_commit, created_at, PK(name,version))` — **immutable** — plus an FTS5 table over name/description/tags.
 
@@ -218,12 +219,12 @@ GET    /registry/capabilities/{n}/{v}/artifact # download payload → "Use"
 ## 6. Phased build plan
 
 **R1 — Find & Reuse (MVP; proves the #1 KPI, reuse rate):**
-1. `schema/capability.py` manifest models + all core kind specs + extend `scripts/generate_schema.py` → `capability_schema.json`; validation tests.
-2. Registry skeleton: `config.py`, `db.py` (SQLite + schema), `main.py` + `/health`.
-3. `store.py` + `indexer.py` (git→DB, FTS5); tests against a temp git repo.
-4. API: capabilities / search / publish / use; TestClient tests.
-5. Publish mechanism (git commit + sync).
-6. Frontend Capabilities view (filter by kind) + per-kind "Use" import; `tsc --noEmit` + build.
+1. ✅ `schema/capability.py` manifest models + all core kind specs + extend `scripts/generate_schema.py` → `capability_schema.json`; validation tests.
+2. ✅ Registry skeleton: `config.py`, `db.py` (SQLite + schema), `main.py` + `/health`.
+3. ✅ `store.py` + `indexer.py` (git→DB, FTS5); tests against a temp git repo.
+4. ✅ API: capabilities / search / publish / use; TestClient tests.
+5. ✅ Publish mechanism (git commit + sync) — also exposed offline via the CLI (`ai-forge-registry publish <files…>` / `seed`); six sample manifests ship in `registry/samples/` (one per core kind, cross-referencing into a composition chain).
+6. ✅ Frontend Capabilities view (filter by kind) + per-kind "Use" actions; `tsc --noEmit` + build.
 7. AI Forge import affordances — *prompt-ref* on agents, `skills[]` on agent nodes with runtime fold-in, *agent-as-node*.
 8. Run both servers together (dev script / docker-compose); update README/PLAN.
 

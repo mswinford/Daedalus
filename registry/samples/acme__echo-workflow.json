@@ -1,0 +1,117 @@
+{
+  "name": "acme/echo-workflow",
+  "version": "1.0.0",
+  "kind": "workflow",
+  "description": "The smallest runnable workflow: start -> agent -> end, where the agent round-trips the input through the echo tool on a local model.",
+  "tags": ["example", "minimal", "composite"],
+  "spec": {
+    "kind": "workflow",
+    "workflow": {
+      "id": "echo-workflow",
+      "name": "Echo Workflow",
+      "description": "Echoes the input message back via a tool call.",
+      "schema_version": 1,
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "position": { "x": 0, "y": 0 },
+          "config": { "input_fields": ["message"] }
+        },
+        {
+          "id": "agent-1",
+          "type": "agent",
+          "position": { "x": 280, "y": 0 },
+          "config": {
+            "model_id": "local-llama",
+            "system_prompt": "You are an echo agent. Call the echo tool with the user's message exactly as given, then reply with the echoed text and nothing else.",
+            "tool_ids": ["echo"],
+            "max_iterations": 5
+          }
+        },
+        {
+          "id": "end",
+          "type": "end",
+          "position": { "x": 560, "y": 0 },
+          "config": { "output_fields": ["reply"] }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-start-agent",
+          "source_node_id": "start",
+          "source_handle": "default",
+          "target_node_id": "agent-1",
+          "type": "static"
+        },
+        {
+          "id": "e-agent-end",
+          "source_node_id": "agent-1",
+          "source_handle": "default",
+          "target_node_id": "end",
+          "type": "static"
+        }
+      ],
+      "tools": [
+        {
+          "id": "echo",
+          "name": "echo",
+          "description": "Echo the provided message back unchanged.",
+          "parameters": {
+            "message": {
+              "type": "string",
+              "description": "The text to echo back.",
+              "required": true
+            }
+          },
+          "implementation": {
+            "type": "builtin",
+            "config": { "function": "echo" }
+          }
+        }
+      ],
+      "models": [
+        {
+          "id": "local-llama",
+          "name": "Local Llama 3.2",
+          "provider": "openai_compatible",
+          "model": "llama3.2",
+          "base_url": "http://localhost:11434/v1",
+          "api_key_ref": null,
+          "default_temperature": 0.7,
+          "track_cost": false,
+          "pricing": { "input": 0.0, "output": 0.0 }
+        }
+      ],
+      "state_schema": {
+        "fields": [
+          { "name": "message", "type": "string", "description": "The message to echo.", "required": true },
+          { "name": "reply", "type": "string", "description": "The echoed reply." }
+        ]
+      }
+    }
+  },
+  "interface": {
+    "type": "ai_forge_workflow",
+    "input_schema": {
+      "type": "object",
+      "properties": { "message": { "type": "string" } },
+      "required": ["message"]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": { "reply": { "type": "string" } }
+    }
+  },
+  "dependencies": [
+    { "name": "acme/echo-tool", "version": "latest" },
+    { "name": "acme/local-llama-profile", "version": "latest" }
+  ],
+  "models_required": ["acme/local-llama-profile"],
+  "governance": {
+    "owner": "acme",
+    "data_classification": "public",
+    "security_status": "approved"
+  },
+  "stage": "published"
+}

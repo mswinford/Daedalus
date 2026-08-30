@@ -1,0 +1,282 @@
+"""Version store — immutable capability version rows + lifecycle transitions.
+
+A published name@version row is never rewritten: re-publishing the same
+identity with different content is an error (git history is the amend path).
+Lifecycle stage and security status are mutable *columns* — they track the
+governance state of a version without touching its immutable manifest bytes.
+"""
+import json
+import time
+from typing import Any, Optional
+
+from registry.db import Database
+from schema.capability import (
+    CapabilityManifest,
+    LifecycleStage,
+    ModelProfileSpec,
+    ToolSpec,
+    WorkflowSpec,
+    semver_key,
+)
+
+
+class VersionConflictError(Exception):
+    """name@version already exists with different content (versions are immutable)."""
+
+
+class InvalidTransitionError(Exception):
+    """Lifecycle transition not allowed from the current stage."""
+
+
+ALLOWED_TRANSITIONS: dict[str, frozenset] = {
+    "draft": frozenset({"review"}),
+    "review": frozenset({"draft", "approved"}),
+    "approved": frozenset({"published"}),
+    "published": frozenset({"deprecated"}),
+    "deprecated": frozenset({"retired"}),
+}
+
+
+def extract_artifact(manifest: CapabilityManifest) -> dict[str, Any]:
+    """The consumable payload of a manifest, per kind (what 'Use' returns)."""
+    spec = manifest.spec
+    if isinstance(spec, ToolSpec):
+        return spec.tool.model_dump(mode="json")
+    if isinstance(spec, ModelProfileSpec):
+        return spec.model.model_dump(mode="json")
+    if isinstance(spec, WorkflowSpec):
+        if spec.workflow is not None:
+            return spec.workflow.model_dump(mode="json")
+        return {"workflow_ref": spec.workflow_ref}
+    # prompt / skill / agent — the spec itself is the payload
+    return {k: v for k, v in spec.model_dump(mode="json").items() if k != "kind"}
+
+
+async def upsert_version(
+    db: Database,
+    manifest: CapabilityManifest,
+    source_commit: Optional[str] = None,
+) -> bool:
+    """Insert a version row + FTS entry. Returns True when a new row was added.
+
+    Re-syncing identical content is a no-op; different content under the same
+    name@version raises VersionConflictError.
+    """
+    name, version = manifest.name, manifest.version
+    rows = await db.conn.execute_fetchall(
+        "SELECT manifest_json FROM capability_versions WHERE name=? AND version=?",
+        (name, version),
+    )
+    new_manifest_json = json.dumps(manifest.model_dump(mode="json"), sort_keys=True)
+    if rows:
+        if rows[0]["manifest_json"] == new_manifest_json:
+            return False
+        raise VersionConflictError(f"{name}@{version} already exists with different content")
+
+    artifact = extract_artifact(manifest)
+    created_at = manifest.created_at if manifest.created_at is not None else time.time()
+    cur = await db.conn.execute(
+        "INSERT INTO capability_versions"
+        " (name, version, kind, manifest_json, artifact_json, stage,"
+        "  security_status, source_commit, created_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
+        (
+            name,
+            version,
+            manifest.kind.value,
+            new_manifest_json,
+            json.dumps(artifact, sort_keys=True),
+            manifest.stage.value,
+            manifest.governance.security_status.value,
+            source_commit,
+            created_at,
+        ),
+    )
+    await db.conn.execute(
+        "INSERT INTO capability_fts (rowid, name, description, tags) VALUES (?,?,?,?)",
+        (cur.lastrowid, name, manifest.description, " ".join(manifest.tags)),
+    )
+    await db.conn.commit()
+    return True
+
+
+async def get_versions(db: Database, name: str) -> list[dict[str, Any]]:
+    """All versions of a capability, newest first (semver order)."""
+    rows = await db.conn.execute_fetchall(
+        "SELECT * FROM capability_versions WHERE name=?", (name,)
+    )
+    versions = [
+        {
+            "name": r["name"],
+            "version": r["version"],
+            "kind": r["kind"],
+            "stage": r["stage"],
+            "security_status": r["security_status"],
+            "source_commit": r["source_commit"],
+            "created_at": r["created_at"],
+            "manifest": CapabilityManifest.model_validate_json(r["manifest_json"]),
+        }
+        for r in rows
+    ]
+    versions.sort(key=lambda v: semver_key(v["version"]), reverse=True)
+    return versions
+
+
+async def resolve_version(
+    db: Database, name: str, version: str = "latest"
+) -> dict[str, Any]:
+    """Resolve a version selector to a concrete version row.
+
+    'latest' = newest PUBLISHED version (semver order). Raises KeyError when
+    the capability/version is unknown, LookupError when nothing is published.
+    """
+    if version != "latest":
+        rows = await db.conn.execute_fetchall(
+            "SELECT * FROM capability_versions WHERE name=? AND version=?",
+            (name, version),
+        )
+        if not rows:
+            raise KeyError(f"{name}@{version} not found")
+        return _row_to_version(rows[0])
+
+    any_rows = await db.conn.execute_fetchall(
+        "SELECT 1 FROM capability_versions WHERE name=? LIMIT 1", (name,)
+    )
+    if not any_rows:
+        raise KeyError(f"capability {name} not found")
+    rows = await db.conn.execute_fetchall(
+        "SELECT * FROM capability_versions WHERE name=? AND stage='published'", (name,)
+    )
+    if not rows:
+        raise LookupError(f"{name} has no published version")
+    best = max(rows, key=lambda r: semver_key(r["version"]))
+    return _row_to_version(best)
+
+
+def _row_to_version(r) -> dict[str, Any]:
+    return {
+        "name": r["name"],
+        "version": r["version"],
+        "kind": r["kind"],
+        "stage": r["stage"],
+        "security_status": r["security_status"],
+        "source_commit": r["source_commit"],
+        "created_at": r["created_at"],
+        "manifest": CapabilityManifest.model_validate_json(r["manifest_json"]),
+    }
+
+
+async def get_artifact(
+    db: Database, name: str, version: str = "latest"
+) -> dict[str, Any]:
+    """The consumable payload for a resolved version (what 'Use' returns)."""
+    resolved = await resolve_version(db, name, version)
+    row = await db.conn.execute_fetchall(
+        "SELECT artifact_json FROM capability_versions WHERE name=? AND version=?",
+        (name, resolved["version"]),
+    )
+    return {
+        "name": name,
+        "version": resolved["version"],
+        "kind": resolved["kind"],
+        "stage": resolved["stage"],
+        "artifact": json.loads(row[0]["artifact_json"]),
+        "manifest": resolved["manifest"].model_dump(mode="json"),
+    }
+
+
+async def list_capabilities(db: Database) -> list[dict[str, Any]]:
+    """One summary row per capability name (all stages)."""
+    rows = await db.conn.execute_fetchall("SELECT * FROM capability_versions")
+    by_name: dict[str, list] = {}
+    for r in rows:
+        by_name.setdefault(r["name"], []).append(r)
+
+    out = []
+    for name, vers in sorted(by_name.items()):
+        newest = max(vers, key=lambda r: semver_key(r["version"]))
+        manifest = CapabilityManifest.model_validate_json(newest["manifest_json"])
+        published = [r for r in vers if r["stage"] == "published"]
+        latest_published = (
+            max(published, key=lambda r: semver_key(r["version"]))["version"]
+            if published else None
+        )
+        out.append({
+            "name": name,
+            "kind": newest["kind"],
+            "description": manifest.description,
+            "tags": manifest.tags,
+            "version_count": len(vers),
+            "newest_version": newest["version"],
+            "latest_published": latest_published,
+            "updated_at": max(r["created_at"] for r in vers),
+        })
+    return out
+
+
+async def search(
+    db: Database, query: str, kind: Optional[str] = None, limit: int = 50
+) -> list[dict[str, Any]]:
+    """FTS5 keyword search over name/description/tags, one row per capability."""
+    terms = [f'"{t}"' for t in query.split() if t]
+    if not terms:
+        return []
+    match = " ".join(terms)
+
+    sql = (
+        "SELECT cv.*, bm25(capability_fts) AS rank FROM capability_fts"
+        " JOIN capability_versions cv ON cv.rowid = capability_fts.rowid"
+        " WHERE capability_fts MATCH ?"
+    )
+    params: list[Any] = [match]
+    if kind:
+        sql += " AND cv.kind = ?"
+        params.append(kind)
+    sql += " ORDER BY rank LIMIT ?"
+    params.append(limit * 3)
+
+    rows = await db.conn.execute_fetchall(sql, params)
+    by_name: dict[str, list] = {}
+    for r in rows:
+        by_name.setdefault(r["name"], []).append(r)
+
+    out = []
+    for name, vers in by_name.items():
+        published = [r for r in vers if r["stage"] == "published"]
+        pool = published or vers
+        best = max(pool, key=lambda r: semver_key(r["version"]))
+        manifest = CapabilityManifest.model_validate_json(best["manifest_json"])
+        out.append({
+            "name": name,
+            "kind": best["kind"],
+            "description": manifest.description,
+            "tags": manifest.tags,
+            "version": best["version"],
+            "stage": best["stage"],
+            "score": -best["rank"],
+        })
+    out.sort(key=lambda r: r["score"], reverse=True)
+    return out[:limit]
+
+
+async def transition_stage(
+    db: Database, name: str, version: str, new_stage: LifecycleStage
+) -> str:
+    """Advance a version through the lifecycle state machine."""
+    rows = await db.conn.execute_fetchall(
+        "SELECT stage FROM capability_versions WHERE name=? AND version=?",
+        (name, version),
+    )
+    if not rows:
+        raise KeyError(f"{name}@{version} not found")
+    current = rows[0]["stage"]
+    if new_stage.value not in ALLOWED_TRANSITIONS[current]:
+        raise InvalidTransitionError(
+            f"cannot transition {current} -> {new_stage.value}"
+        )
+    await db.conn.execute(
+        "UPDATE capability_versions SET stage=? WHERE name=? AND version=?",
+        (new_stage.value, name, version),
+    )
+    await db.conn.commit()
+    return new_stage.value
