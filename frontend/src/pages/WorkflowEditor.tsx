@@ -14,7 +14,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu, Wrench, KeyRound, PackagePlus } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus } from 'lucide-react'
 
 import { workflowsApi, streamRunEvents, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
@@ -35,8 +35,8 @@ import {
 } from '@/lib/graphTransform'
 import FlowNode from '@/components/flow/FlowNode'
 import ConfigPanel from '@/components/flow/ConfigPanel'
-import ModelsPanel from '@/components/flow/ModelsPanel'
-import ToolsPanel from '@/components/flow/ToolsPanel'
+import ResourcesPanel from '@/components/flow/ResourcesPanel'
+import type { CapabilityKind } from '@/lib/registryApi'
 import RunPanel from '@/components/flow/RunPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
@@ -67,8 +67,8 @@ function WorkflowEditorInner() {
   const [inputError, setInputError] = useState<string | null>(null)
   const [models, setModels] = useState<ModelConfig[]>([])
   const [tools, setTools] = useState<ToolDefinition[]>([])
-  const [showModels, setShowModels] = useState(false)
-  const [showTools, setShowTools] = useState(false)
+  const [showResources, setShowResources] = useState(false)
+  const [pickerKind, setPickerKind] = useState<CapabilityKind | null>(null)
   const [showSecrets, setShowSecrets] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -442,21 +442,14 @@ function WorkflowEditorInner() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowModels(true)}
+            onClick={() => setShowResources(true)}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
           >
-            <Cpu size={14} />
-            Models
+            <Layers size={14} />
+            Resources
           </button>
           <button
-            onClick={() => setShowTools(true)}
-            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
-          >
-            <Wrench size={14} />
-            Tools
-          </button>
-          <button
-            onClick={() => setShowPicker(true)}
+            onClick={() => { setPickerKind(null); setShowPicker(true) }}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
           >
             <PackagePlus size={14} />
@@ -624,14 +617,16 @@ function WorkflowEditorInner() {
         </aside>
       </div>
 
-      {/* Models modal */}
-      {showModels && (
-        <ModelsPanel models={models} onChange={(m) => { setModels(m); setDirty(true) }} onClose={() => setShowModels(false)} />
-      )}
-
-      {/* Tools modal */}
-      {showTools && (
-        <ToolsPanel tools={tools} onChange={(t) => { setTools(t); setDirty(true) }} onClose={() => setShowTools(false)} />
+      {/* Resources panel (tools + models) */}
+      {showResources && (
+        <ResourcesPanel
+          tools={tools}
+          models={models}
+          onToolsChange={(t) => { setTools(t); setDirty(true) }}
+          onModelsChange={(m) => { setModels(m); setDirty(true) }}
+          onOpenRegistry={(kind) => { setShowResources(false); setPickerKind(kind); setShowPicker(true) }}
+          onClose={() => setShowResources(false)}
+        />
       )}
 
       {/* Secrets modal */}
@@ -643,7 +638,8 @@ function WorkflowEditorInner() {
           getWorkflow={buildPayload}
           defaultAgentId={selectedNode?.type === 'agent' ? selectedNode.id : null}
           onApply={(merged) => importMutation.mutate(merged)}
-          onClose={() => setShowPicker(false)}
+          onClose={() => { setShowPicker(false); setPickerKind(null) }}
+          kindFilter={pickerKind}
         />
       )}
 

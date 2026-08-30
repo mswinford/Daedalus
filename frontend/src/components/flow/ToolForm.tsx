@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, X, Wrench } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 
 import type {
   ToolDefinition,
@@ -8,21 +8,15 @@ import type {
   ToolParamRow,
 } from '@/lib/workflowTypes'
 
-interface Props {
-  tools: ToolDefinition[]
-  onChange: (tools: ToolDefinition[]) => void
-  onClose: () => void
+export const IMPL_LABEL: Record<ToolImplementationType, string> = {
+  builtin: 'builtin',
+  custom_function: 'custom function',
+  http: 'http',
 }
 
 const inputCls =
   'w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500'
 const labelCls = 'mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-500'
-
-const IMPL_LABEL: Record<ToolImplementationType, string> = {
-  builtin: 'builtin',
-  custom_function: 'custom function',
-  http: 'http',
-}
 
 // Convert a stored parameters record into editable rows (and back).
 function toRows(params: Record<string, JsonSchemaParam>): ToolParamRow[] {
@@ -53,7 +47,7 @@ function toHeaderRows(headers: unknown): HeaderRow[] {
   }))
 }
 
-function ToolForm({
+export default function ToolForm({
   initial,
   onSave,
   onCancel,
@@ -124,7 +118,7 @@ function ToolForm({
 
   return (
     <div className="space-y-3 rounded-md border border-zinc-700 bg-zinc-900 p-3">
-      <p className="text-sm font-medium text-zinc-200">{initial ? 'Edit tool' : 'Add tool'}</p>
+      <p className="text-sm font-medium text-zinc-200">{initial ? 'Edit tool' : 'New custom tool'}</p>
 
       <div className="grid grid-cols-1 gap-2">
         <label className="block">
@@ -319,86 +313,6 @@ function ToolForm({
         >
           {initial ? 'Save' : 'Add'}
         </button>
-      </div>
-    </div>
-  )
-}
-
-export default function ToolsPanel({ tools, onChange, onClose }: Props) {
-  const [editing, setEditing] = useState<ToolDefinition | null>(null)
-  const [adding, setAdding] = useState(false)
-
-  const handleSave = (t: ToolDefinition) => {
-    if (editing) {
-      onChange(tools.map((x) => (x.id === t.id ? t : x)))
-    } else {
-      onChange([...tools, t])
-    }
-    setEditing(null)
-    setAdding(false)
-  }
-
-  const handleDelete = (id: string) => {
-    onChange(tools.filter((t) => t.id !== id))
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="max-h-[80vh] w-[520px] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-100">
-            <Wrench size={16} /> Tools
-          </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:text-zinc-100">
-            <X size={16} />
-          </button>
-        </div>
-
-        {tools.length > 0 && (
-          <div className="mb-3 space-y-2">
-            {tools.map((t) => (
-              <div key={t.id} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-zinc-200">{t.name}</p>
-                  <p className="truncate text-[11px] text-zinc-500">
-                    {IMPL_LABEL[t.implementation.type]}
-                    {Object.keys(t.parameters).length > 0 && ` · ${Object.keys(t.parameters).length} param(s)`}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button onClick={() => { setEditing(t); setAdding(false) }} className="rounded p-1 text-zinc-400 hover:text-indigo-400">
-                    Edit
-                  </button>
-                  <button onClick={() => handleDelete(t.id)} className="rounded p-1 text-zinc-500 hover:text-red-400">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {tools.length === 0 && !adding && !editing && (
-          <p className="mb-3 text-sm text-zinc-500">No tools defined. Add one to give agents capabilities.</p>
-        )}
-
-        {(adding || editing) ? (
-          <ToolForm
-            initial={editing}
-            onSave={handleSave}
-            onCancel={() => { setAdding(false); setEditing(null) }}
-          />
-        ) : (
-          <button
-            onClick={() => { setAdding(true); setEditing(null) }}
-            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
-          >
-            <Plus size={13} /> Add tool
-          </button>
-        )}
       </div>
     </div>
   )

@@ -52,12 +52,18 @@ function isPresent(row: Row, wf: Workflow | null, agentId: string | null): boole
 
 interface Props {
   getWorkflow: () => Workflow | null
-  defaultAgentId?: string | null
-  onApply: (merged: Workflow) => void
+  defaultAgentId: string | null
+  onApply: (wf: Workflow) => void
   onClose: () => void
+  kindFilter?: CapabilityKind | null
 }
 
-export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply, onClose }: Props) {
+const KIND_TITLE: Partial<Record<CapabilityKind, string>> = {
+  tool: 'a tool',
+  model_profile: 'a model profile',
+}
+
+export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply, onClose, kindFilter = null }: Props) {
   const [q, setQ] = useState('')
   const [debounced, setDebounced] = useState('')
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null)
@@ -78,9 +84,11 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
   }, [onClose])
 
   const { data: rows, isFetching } = useQuery({
-    queryKey: ['cap-picker-search', debounced],
+    queryKey: ['cap-picker-search', debounced, kindFilter],
     queryFn: async (): Promise<Row[]> =>
-      debounced ? capabilitiesApi.search(debounced) : capabilitiesApi.list(),
+      debounced
+        ? capabilitiesApi.search(debounced, kindFilter ?? undefined)
+        : capabilitiesApi.list(kindFilter ?? undefined),
   })
 
   const wf = getWorkflow()
@@ -112,7 +120,9 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-          <h2 className="text-sm font-medium text-zinc-100">Add capability</h2>
+          <h2 className="text-sm font-medium text-zinc-100">
+            {kindFilter ? `Add ${KIND_TITLE[kindFilter] ?? 'a capability'}` : 'Add capability'}
+          </h2>
           <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
             <X size={16} />
           </button>
