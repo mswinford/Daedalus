@@ -163,6 +163,17 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
    with the aiosqlite checkpointer). After a restart, completed/failed runs are rebuilt with their
    full event log (`recover_finished_runs()`), so the RunPanel shows history for pre-restart runs and
    resumed HIL runs keep a continuous seq-numbered stream.
+- [ ] **Error branches** — per-node error edges for recovery routing (see Feature Decisions → Error
+  Handling). Design settled 2026-08-29:
+  - **Backend**: when a node raises, route to that node's single `type == "error"` edge if one
+    exists; otherwise the run fails as today. `GraphInterrupt` (HIL pause) must still re-raise — it
+    is never treated as a failure.
+  - **Frontend**: dedicated red error handle per node, **opt-in** — a toggle in the node config
+    panel (e.g. "Enable error handling") reveals the handle; nodes that don't need error handling
+    are unchanged. Connecting from the red handle creates an edge with `semanticType: 'error'`,
+    styled red dashed in React Flow.
+  - **Validation**: at most one error edge per source node.
+  - Per-node retry logic (max_retries / backoff) is a separate future increment, not part of this.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
 Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample
