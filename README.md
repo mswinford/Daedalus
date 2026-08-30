@@ -49,7 +49,7 @@ Frontend (React + TS + Vite, React Flow) ──REST/WS──▶ Backend (FastAPI
 | Persistence | One JSON file per workflow in `~/.ai-forge/workflows/`; run checkpoints in `~/.ai-forge/checkpoints.db`; secrets in `~/.ai-forge/secrets.json` |
 | Sandboxing | RestrictedPython (containers planned for Phase 4) |
 
-Full design and phase plan: [PLAN.md](./PLAN.md).
+Full design and phase plan: [AI Forge Plan](./docs/ai-forge-plan.md) · platform vision & roadmap: [Roadmap](./docs/ROADMAP.md).
 
 ---
 
@@ -286,4 +286,4 @@ Base URL: `http://127.0.0.1:3000`
 - **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
 
-Full detail in [PLAN.md](./PLAN.md).
+Full detail in [the AI Forge Plan](./docs/ai-forge-plan.md).
