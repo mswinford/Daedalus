@@ -40,7 +40,7 @@ import type { CapabilityKind } from '@/lib/registryApi'
 import RunPanel from '@/components/flow/RunPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
-import type { ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
+import type { AgentNodeConfig, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
 
@@ -157,6 +157,49 @@ function WorkflowEditorInner() {
         return { ...n, data: { ...n.data, config, branchHandles } }
       }),
     )
+  }
+
+  // Pool removals must also drop the references in agent configs, otherwise
+  // re-adding a tool/model with the same id silently re-enables it.
+  const handleToolsChange = (t: ToolDefinition[]) => {
+    setTools(t)
+    const removed = tools.filter((x) => !t.some((y) => y.id === x.id)).map((x) => x.id)
+    if (removed.length > 0) {
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.data.nodeType !== 'agent') return n
+          const c = n.data.config as AgentNodeConfig
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              config: {
+                ...c,
+                tool_ids: c.tool_ids.filter((id) => !removed.includes(id)),
+                skills: (c.skills ?? []).map((s) => ({ ...s, tool_ids: s.tool_ids.filter((id) => !removed.includes(id)) })),
+              },
+            },
+          }
+        }),
+      )
+    }
+    setDirty(true)
+  }
+
+  const handleModelsChange = (m: ModelConfig[]) => {
+    setModels(m)
+    const removed = models.filter((x) => !m.some((y) => y.id === x.id)).map((x) => x.id)
+    if (removed.length > 0) {
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.data.nodeType !== 'agent') return n
+          const c = n.data.config as AgentNodeConfig
+          if (!removed.includes(c.model_id)) return n
+          return { ...n, data: { ...n.data, config: { ...c, model_id: '' } } }
+        }),
+      )
+    }
+    setDirty(true)
   }
 
   // ─── Node creation (drag from palette) ─────────────────────────────────────
@@ -622,8 +665,8 @@ function WorkflowEditorInner() {
         <ResourcesPanel
           tools={tools}
           models={models}
-          onToolsChange={(t) => { setTools(t); setDirty(true) }}
-          onModelsChange={(m) => { setModels(m); setDirty(true) }}
+          onToolsChange={handleToolsChange}
+          onModelsChange={handleModelsChange}
           onOpenRegistry={(kind) => { setShowResources(false); setPickerKind(kind); setShowPicker(true) }}
           onClose={() => setShowResources(false)}
         />
