@@ -1,4 +1,5 @@
 """Execute workflows using LangGraph."""
+import os
 from typing import Any, Callable
 
 import aiosqlite
@@ -20,7 +21,11 @@ async def _open_checkpointer() -> AsyncSqliteSaver:
     safe via WAL mode plus the busy timeout on `aiosqlite.connect`.
     """
     settings = get_settings()
-    conn = await aiosqlite.connect(str(settings.checkpoint_db), timeout=5.0)
+    path = str(settings.checkpoint_db)
+    conn = await aiosqlite.connect(path, timeout=5.0)
+    for suffix in ("", "-wal", "-shm"):  # keep run data owner-only (like secrets.json)
+        if os.path.exists(path + suffix):
+            os.chmod(path + suffix, 0o600)
     await conn.execute("PRAGMA journal_mode=WAL")
     return AsyncSqliteSaver(conn)
 

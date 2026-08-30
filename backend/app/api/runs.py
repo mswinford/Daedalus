@@ -5,10 +5,11 @@ graph in a background task, and returns a run id immediately (HTTP 202). Clients
 subscribe over a WebSocket to receive node/llm events live; anything already
 emitted is replayed on connect so a late subscriber still sees the full trace.
 
-Run *checkpoints* persist in SQLite (~/.ai-forge/checkpoints.db), so paused
-human-in-loop runs survive process restarts: on startup `recover_paused_runs`
-rebuilds their in-memory records from the checkpoint store (the pre-restart
-event stream is not replayed, but the run can be inspected and resumed).
+Run metadata and event logs persist in SQLite (~/.ai-forge/checkpoints.db)
+alongside the graph checkpoints, so runs survive process restarts: on startup
+`recover_paused_runs` rebuilds paused human-in-loop records (with their full
+event history, ready to resume) and `recover_finished_runs` restores terminal
+records for inspection.
 
 Human-in-loop: when a run hits a human_in_loop node, it pauses (status="paused")
 and emits a `human_request` event. The client calls POST /runs/{id}/resume with
@@ -17,11 +18,17 @@ a background timer auto-fails the run (status="failed", terminal `human_timeout`
 event) when no input arrives in time; resuming before the deadline cancels it.
 """
 import asyncio
+import json
+import os
+import queue
 import sqlite3
+import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -39,6 +46,202 @@ router = APIRouter()
 
 # Bound the in-memory store so a long-lived process doesn't grow unbounded.
 MAX_RUNS = 200
+
+# Run metadata + event log persistence, in the same SQLite file as the
+# checkpoints. emit() runs on the event-loop thread while the graph executes,
+# so writes must never block it: they are queued and applied by a dedicated
+# writer thread using short-lived connections (open, write, commit, close).
+_STORE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    input_data TEXT NOT NULL DEFAULT '{}',
+    output_data TEXT,
+    error TEXT,
+    total_tokens_input INTEGER NOT NULL DEFAULT 0,
+    total_tokens_output INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
+    started_at REAL NOT NULL,
+    completed_at REAL
+);
+CREATE TABLE IF NOT EXISTS events (
+    run_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+);
+"""
+
+_write_queue: "queue.Queue[tuple]" = queue.Queue()
+_writer_thread: threading.Thread | None = None
+_writer_lock = threading.Lock()
+
+
+def _store_connect(path: str) -> sqlite3.Connection:
+    """A short-lived connection to the store DB (WAL, owner-only perms)."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    for suffix in ("", "-wal", "-shm"):  # keep run data owner-only (like secrets.json)
+        if os.path.exists(path + suffix):
+            os.chmod(path + suffix, 0o600)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript(_STORE_SCHEMA)
+    return conn
+
+
+def _write_event(path: str, run_id: str, seq: int, payload: dict[str, Any]) -> None:
+    conn = _store_connect(path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO events (run_id, seq, payload) VALUES (?, ?, ?)",
+            (run_id, seq, json.dumps(payload)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _write_summary(path: str, fields: tuple) -> None:
+    conn = _store_connect(path)
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO runs (
+                run_id, workflow_id, status, input_data, output_data, error,
+                total_tokens_input, total_tokens_output, estimated_cost_usd,
+                started_at, completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            fields,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _prune_store_sync(path: str) -> None:
+    """Evict the oldest finished runs once the store exceeds MAX_RUNS."""
+    conn = _store_connect(path)
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        if count <= MAX_RUNS:
+            return
+        rows = conn.execute(
+            "SELECT run_id FROM runs WHERE status != 'running' "
+            "ORDER BY started_at LIMIT ?",
+            (count - MAX_RUNS,),
+        ).fetchall()
+        for row in rows:
+            conn.execute("DELETE FROM events WHERE run_id = ?", (row["run_id"],))
+            conn.execute("DELETE FROM runs WHERE run_id = ?", (row["run_id"],))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _writer_loop() -> None:
+    while True:
+        item = _write_queue.get()
+        try:
+            if item is not None:  # None is the shutdown sentinel
+                kind, path = item[0], item[1]
+                if kind == "event":
+                    _write_event(path, *item[2:])
+                elif kind == "summary":
+                    _write_summary(path, item[2])
+                else:
+                    _prune_store_sync(path)
+        except Exception as e:  # best-effort persistence; keep the writer alive
+            if item is not None:
+                print(f"run store write failed ({item[0]}): {e}", file=sys.stderr)
+        finally:
+            _write_queue.task_done()
+            if item is None:
+                break
+
+
+def _enqueue_write(item: tuple) -> None:
+    """Queue a store write. Non-blocking and safe from the event-loop thread."""
+    global _writer_thread
+    _write_queue.put(item)
+    with _writer_lock:
+        if _writer_thread is None or not _writer_thread.is_alive():
+            _writer_thread = threading.Thread(
+                target=_writer_loop, name="run-store-writer", daemon=True
+            )
+            _writer_thread.start()
+
+
+def flush_store() -> None:
+    """Block until every queued write has been applied (used by tests)."""
+    _write_queue.join()
+
+
+def shutdown_store(timeout: float = 5.0) -> None:
+    """Drain pending writes and stop the writer thread (app shutdown)."""
+    global _writer_thread
+    with _writer_lock:
+        if _writer_thread is None or not _writer_thread.is_alive():
+            return
+        thread = _writer_thread
+        _writer_thread = None
+    _write_queue.put(None)
+    thread.join(timeout)
+
+
+def _persist_event(run_id: str, seq: int, payload: dict[str, Any]) -> None:
+    _enqueue_write(
+        ("event", str(get_settings().checkpoint_db), run_id, seq, payload)
+    )
+
+
+def _load_events(run_id: str) -> list[dict[str, Any]]:
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        rows = conn.execute(
+            "SELECT payload FROM events WHERE run_id = ? ORDER BY seq", (run_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [json.loads(row["payload"]) for row in rows]
+
+
+def _save_run_summary(record: RunRecord) -> None:
+    """Queue the record's metadata upsert so it survives a restart."""
+    _enqueue_write(("summary", str(get_settings().checkpoint_db), (
+        record.run_id, record.workflow_id, record.status,
+        json.dumps(record.input_data), json.dumps(record.output_data),
+        record.error, record.total_tokens_input,
+        record.total_tokens_output, record.estimated_cost_usd,
+        record.started_at, record.completed_at,
+    )))
+
+
+def _load_run_summary(run_id: str) -> sqlite3.Row | None:
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        return conn.execute(
+            "SELECT * FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def _load_finished_summaries() -> list[sqlite3.Row]:
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        return conn.execute(
+            "SELECT * FROM runs WHERE status IN ('completed', 'failed')"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def _prune_store() -> None:
+    """Queue eviction of the oldest finished runs beyond MAX_RUNS."""
+    _enqueue_write(("prune", str(get_settings().checkpoint_db)))
 
 
 def _is_terminal(event: dict[str, Any]) -> bool:
@@ -81,6 +284,7 @@ class RunRecord:
         self._seq += 1
         payload["seq"] = self._seq
         self.events.append(payload)
+        _persist_event(self.run_id, self._seq, payload)
         for queue in list(self.subscribers):
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(queue.put_nowait, payload)
@@ -124,7 +328,9 @@ def _fail_run_on_human_timeout(record: RunRecord, node_id: str, timeout_seconds:
         "timestamp": time.time(),
         "data": {"error": error, "fatal": True},
     })
+    _save_run_summary(record)
     _prune_runs()
+    _prune_store()
 
 
 async def _auto_fail_on_timeout(
@@ -267,27 +473,69 @@ async def recover_paused_runs() -> int:
             tuple_ = await saver.aget_tuple(
                 {"configurable": {"thread_id": thread_id}}
             )
+            summary = _load_run_summary(thread_id)
             record = RunRecord(
                 run_id=thread_id,
                 workflow_id=workflow_id,
-                input_data={},
+                input_data=json.loads(summary["input_data"]) if summary else {},
                 status="paused",
                 interrupt_value=payload,
-                started_at=_checkpoint_started_at(
-                    tuple_.checkpoint.get("ts") if tuple_ else None
+                started_at=(
+                    float(summary["started_at"])
+                    if summary
+                    else _checkpoint_started_at(
+                        tuple_.checkpoint.get("ts") if tuple_ else None
+                    )
                 ),
             )
+            events = _load_events(thread_id)
+            if events:
+                # Full pre-restart history; continue seq numbering after it.
+                record.events = events
+                record._seq = max(int(e.get("seq", 0)) for e in events)
             RUNS[thread_id] = record
-            record.emit({
-                "type": "human_request",
-                "node_id": payload.get("node_id"),
-                "timestamp": time.time(),
-                "data": {"payload": payload},
-            })
+            if not events:
+                # No stored history (pre-persistence run): synthesize the pause.
+                record.emit({
+                    "type": "human_request",
+                    "node_id": payload.get("node_id"),
+                    "timestamp": time.time(),
+                    "data": {"payload": payload},
+                })
             _schedule_human_timeout(record, payload)
             recovered += 1
     finally:
         await conn.close()
+    return recovered
+
+
+async def recover_finished_runs() -> int:
+    """Rebuild in-memory records for terminal runs persisted before a restart,
+    so their logs stay inspectable. Called from the app lifespan at startup."""
+    recovered = 0
+    for row in _load_finished_summaries():
+        if row["run_id"] in RUNS:
+            continue
+        events = _load_events(row["run_id"])
+        record = RunRecord(
+            run_id=row["run_id"],
+            workflow_id=row["workflow_id"],
+            input_data=json.loads(row["input_data"]),
+            status=row["status"],
+            output_data=(
+                json.loads(row["output_data"]) if row["output_data"] else None
+            ),
+            error=row["error"],
+            total_tokens_input=row["total_tokens_input"],
+            total_tokens_output=row["total_tokens_output"],
+            estimated_cost_usd=row["estimated_cost_usd"],
+            started_at=float(row["started_at"]),
+            completed_at=row["completed_at"],
+        )
+        record.events = events
+        record._seq = max((int(e.get("seq", 0)) for e in events), default=0)
+        RUNS[record.run_id] = record
+        recovered += 1
     return recovered
 
 
@@ -308,6 +556,7 @@ async def _execute(record: RunRecord, workflow: Any, input_data: dict[str, Any])
                 "timestamp": time.time(),
                 "data": {"payload": result.get("interrupt_value")},
             })
+            _save_run_summary(record)
             _schedule_human_timeout(record, result.get("interrupt_value"))
             return  # No terminal event; run is waiting for human input.
         record.status = "completed"
@@ -342,7 +591,9 @@ async def _execute(record: RunRecord, workflow: Any, input_data: dict[str, Any])
         }
     record.completed_at = time.time()
     record.emit(terminal)
+    _save_run_summary(record)
     _prune_runs()
+    _prune_store()
 
 
 async def _resume(record: RunRecord, workflow: Any, human_input: Any) -> None:
@@ -362,6 +613,7 @@ async def _resume(record: RunRecord, workflow: Any, human_input: Any) -> None:
                 "timestamp": time.time(),
                 "data": {"payload": result.get("interrupt_value")},
             })
+            _save_run_summary(record)
             _schedule_human_timeout(record, result.get("interrupt_value"))
             return
         record.status = "completed"
@@ -396,7 +648,9 @@ async def _resume(record: RunRecord, workflow: Any, human_input: Any) -> None:
         }
     record.completed_at = time.time()
     record.emit(terminal)
+    _save_run_summary(record)
     _prune_runs()
+    _prune_store()
 
 
 @router.post("/workflows/{workflow_id}/run", status_code=202)
@@ -407,6 +661,7 @@ async def run_workflow(workflow_id: str, input_data: dict[str, Any] = {}):
         run_id=uuid.uuid4().hex, workflow_id=workflow_id, input_data=input_data
     )
     RUNS[record.run_id] = record
+    _save_run_summary(record)
     asyncio.create_task(_execute(record, workflow, input_data))
     return {"run_id": record.run_id}
 
@@ -453,8 +708,8 @@ def list_paused_runs():
 def get_run(run_id: str):
     """Fetch a run's current state.
 
-    Paused runs are rebuilt from the checkpoint store on startup, but their
-    pre-restart event history is not restored.
+    Run metadata and events persist in SQLite; records for paused and finished
+    runs are rebuilt from the store on startup.
     """
     record = RUNS.get(run_id)
     if record is None:

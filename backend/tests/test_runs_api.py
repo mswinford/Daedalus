@@ -406,6 +406,7 @@ def test_paused_run_survives_restart(hil_client):
     """A paused run's checkpoint survives a restart; the record is rebuilt and resumable."""
     run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
     _wait_for_run(hil_client, run_id)
+    runs_module.flush_store()  # ensure the event log hit the store before restart
 
     # Simulate a process restart: in-memory records are lost, and a fresh app
     # instance (new lifespan) must rebuild the record from the SQLite checkpoint.
@@ -413,6 +414,11 @@ def test_paused_run_survives_restart(hil_client):
     with TestClient(app) as restarted:
         paused = restarted.get("/api/runs/paused").json()
         assert [r["id"] for r in paused] == [run_id]
+
+        # The pre-pause event log came from the store, not a synthesized stub.
+        body = restarted.get(f"/api/runs/{run_id}").json()
+        types = [e["type"] for e in body["events"]]
+        assert "human_request" in types
 
         resp = restarted.post(f"/api/runs/{run_id}/resume", json={"answer": "back"})
         assert resp.status_code == 202
@@ -436,3 +442,48 @@ def test_recovered_run_with_expired_human_timeout_fails(hil_timeout_client):
         assert "timed out" in (body["error"] or "")
         types = [e["type"] for e in body["events"]]
         assert types[-1] == "human_timeout"
+
+
+def test_paused_run_keeps_event_history_across_restart(hil_client):
+    """The pre-restart event log survives: recovery replays the stored history,
+    restores input_data, and seq numbering continues across the restart."""
+    run_id = hil_client.post(
+        "/api/workflows/hil-wf/run", json={"note": "hello"}
+    ).json()["run_id"]
+    _wait_for_run(hil_client, run_id)
+    before = hil_client.get(f"/api/runs/{run_id}").json()
+    assert before["status"] == "paused"
+    pre_types = [e["type"] for e in before["events"]]
+    assert "node_start" in pre_types and pre_types[-1] == "human_request"
+
+    runs_module.RUNS.clear()  # "restart"
+    with TestClient(app) as restarted:
+        body = restarted.get(f"/api/runs/{run_id}").json()
+        assert body["status"] == "paused"
+        assert body["input_data"] == {"note": "hello"}
+        types = [e["type"] for e in body["events"]]
+        assert types[: len(pre_types)] == pre_types  # full history intact
+
+        resp = restarted.post(f"/api/runs/{run_id}/resume", json={"answer": "back"})
+        assert resp.status_code == 202
+        final = _wait_for_run(restarted, run_id)
+        assert final["status"] == "completed"
+        seqs = [e["seq"] for e in final["events"]]
+        assert seqs == list(range(1, len(seqs) + 1))  # no gaps or collisions
+        assert [e["type"] for e in final["events"]][-1] == "run_end"
+
+
+def test_finished_run_survives_restart(client):
+    """A completed run's record and log are rebuilt from the store after a restart."""
+    run_id = client.post("/api/workflows/test-wf/run", json={}).json()["run_id"]
+    done = _wait_for_run(client, run_id)
+    assert done["status"] == "completed"
+    runs_module.flush_store()  # ensure the store caught up before the "restart"
+
+    runs_module.RUNS.clear()  # "restart"
+    with TestClient(app) as restarted:
+        body = restarted.get(f"/api/runs/{run_id}").json()
+        assert body["status"] == "completed"
+        assert body["output_data"]["node_outputs"]["cf"]["grade"] == "A"
+        types = [e["type"] for e in body["events"]]
+        assert types[-1] == "run_end"
