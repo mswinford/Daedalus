@@ -9,14 +9,15 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 3 in progress)
+## Current Status (Phase 3 complete)
 
 > Last updated: Phase 3 complete. Human-in-loop nodes are implemented end-to-end: LangGraph
 > `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
 > survive restarts and are recovered on startup), and the frontend shows a paused state with an
 > input form + resume button. The editor is a sidebar / master-detail layout with debounced
 > auto-save; runs stream live over WebSocket. Secrets store, per-agent message isolation, async
-> execution, timeout auto-fail, and the Pending Approvals sidebar are all shipped.
+> execution, timeout auto-fail, the Pending Approvals sidebar, and run-log persistence (event
+> history survives restarts) are all shipped.
 > Next up: `github_*` builtin tools, test-connection endpoint. Use this section as the source of
 > truth when resuming in a new session — it supersedes the phase notes below.
 
@@ -64,6 +65,11 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Async execution**: `POST /run` returns 202 + `run_id` immediately; the graph runs in a worker
   thread via `asyncio.to_thread`. Clients subscribe over WebSocket for live events or poll
   `GET /runs/:id`. In-memory store (max 200 runs, pruned oldest-first).
+- **Run-log persistence**: every emitted event is written through to an `events` table (plus a
+  `runs` summary table) in `checkpoints.db` via a dedicated writer thread — synchronous SQLite on
+  the event loop would deadlock with the per-run aiosqlite checkpointer. On startup, terminal runs
+  are rebuilt from the store with their full event logs; `record._seq` resumes at the max persisted
+  seq so post-restart events stay dedup-safe over WS.
 - **Sidebar / master-detail editor**: persistent left rail lists workflows; selecting one loads it in
   the main pane (no page hop). Debounced auto-save (~800ms) + unmount flush. `key={id}` ensures fresh
   state per workflow.
@@ -99,7 +105,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: 118 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
+- **Tests**: 120 passing (`python -m pytest -q`). Frontend typechecks + builds clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -151,7 +157,12 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   The HIL interrupt payload now carries `workflow_id`; on startup `recover_paused_runs()` finds
   threads whose latest checkpoint still has an `__interrupt__` write, rebuilds the record from the
   real graph's state snapshot, and re-arms the timeout (failing immediately if the deadline passed
-  while down). Completed/resumed threads leave no pending interrupt, so they are not resurrected.
+   while down). Completed/resumed threads leave no pending interrupt, so they are not resurrected.
+- [x] **Run-log persistence** *(done 2026-08-29)* — run events + a per-run summary row persist to
+   `checkpoints.db` (write-through via a writer thread; sync SQLite on the event loop self-deadlocks
+   with the aiosqlite checkpointer). After a restart, completed/failed runs are rebuilt with their
+   full event log (`recover_finished_runs()`), so the RunPanel shows history for pre-restart runs and
+   resumed HIL runs keep a continuous seq-numbered stream.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
 Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample
