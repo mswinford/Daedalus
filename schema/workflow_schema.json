@@ -55,6 +55,27 @@
           ],
           "default": null,
           "description": "Retry configuration"
+        },
+        "prompt_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reference to a workflow PromptDefinition; when set, its template is the base system prompt",
+          "title": "Prompt Ref"
+        },
+        "skills": {
+          "description": "Inlined skills folded into this agent at runtime",
+          "items": {
+            "$ref": "#/$defs/AgentSkill"
+          },
+          "title": "Skills",
+          "type": "array"
         }
       },
       "required": [
@@ -62,6 +83,42 @@
         "system_prompt"
       ],
       "title": "AgentNodeConfig",
+      "type": "object"
+    },
+    "AgentSkill": {
+      "description": "An inlined skill attached to an agent node (imported from a capability).\n\nFolded into the agent at runtime: its prompt is appended to the system\nprompt and its tools are unioned into the agent's tool set.",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Skill name (provenance)",
+          "title": "Name"
+        },
+        "prompt": {
+          "description": "Instructions folded into the agent's system prompt",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "tool_ids": {
+          "description": "References to workflow ToolDefinitions this skill uses",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tool Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "title": "AgentSkill",
       "type": "object"
     },
     "ConditionConfig": {
@@ -618,6 +675,48 @@
       "title": "NodePosition",
       "type": "object"
     },
+    "PromptDefinition": {
+      "description": "A named prompt template stored at workflow level (`prompts[]`), referenced by agent nodes.",
+      "properties": {
+        "id": {
+          "description": "Unique identifier within the workflow",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable name",
+          "title": "Name"
+        },
+        "text": {
+          "description": "Template with {{var}} placeholders resolved from state data at runtime",
+          "title": "Text",
+          "type": "string"
+        },
+        "variables": {
+          "description": "Declared {{var}} placeholders",
+          "items": {
+            "type": "string"
+          },
+          "title": "Variables",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "PromptDefinition",
+      "type": "object"
+    },
     "RetryConfig": {
       "description": "Retry configuration for a node.",
       "properties": {
@@ -950,6 +1049,14 @@
         "$ref": "#/$defs/ModelConfig"
       },
       "title": "Models",
+      "type": "array"
+    },
+    "prompts": {
+      "description": "Named prompt templates referenced by agent nodes",
+      "items": {
+        "$ref": "#/$defs/PromptDefinition"
+      },
+      "title": "Prompts",
       "type": "array"
     },
     "state_schema": {

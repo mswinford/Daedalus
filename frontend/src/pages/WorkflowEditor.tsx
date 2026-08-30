@@ -113,6 +113,7 @@ function WorkflowEditorInner() {
       edges: rfToEdges(edges),
       tools,
       models,
+      prompts: workflow.prompts ?? [],
       state_schema: workflow.state_schema ?? null,
     }
   }, [workflow, id, nodes, edges, tools, models])
@@ -584,6 +585,7 @@ function WorkflowEditorInner() {
             node={selectedNode}
             models={models}
             tools={tools}
+            prompts={workflow?.prompts ?? []}
             onConfigChange={handleConfigChange}
             onDeleteNode={handleDeleteNode}
             edges={edges}

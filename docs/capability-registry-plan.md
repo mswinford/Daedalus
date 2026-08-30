@@ -207,12 +207,13 @@ GET    /registry/capabilities/{name}/{version} # immutable
 POST   /registry/capabilities                  # publish (git commit + index)
 POST   /registry/capabilities/{name}/lifecycle # draft→review→approved→published…
 GET    /registry/search?q=&tags=&stage=&kind=  # FTS now, vector later
-GET    /registry/capabilities/{n}/{v}/artifact # download payload → "Use"
+GET    /registry/capabilities/{name}/use?version=&inline=true
+       # consumable artifact; inline=true resolves skill/agent refs (registry/inline.py)
 ```
 
 ### 5.5 AI Forge integration (minimal in R1)
 - **Frontend:** a "Capabilities" view in the existing SPA (sidebar/top-bar entry). Browse/search (filter by kind) → detail (description, owner, stage, tags, I/O schema, semantics) → **"Use capability"** → fetch payload → import per kind. Reuses React Query + components. Vite proxy gains a second entry (`/registry` → registry port, e.g. :3100).
-- **One-click "Use"** into a chosen target workflow — no bespoke per-kind editors; the user lands in the existing editor to tweak. Per-kind effect (all inline): `workflow` → save as a new workflow file (existing `POST /api/workflows`); `tool` → add to the workflow's `tools[]`; `model_profile` → add to `models[]`; `prompt` → set an agent's prompt via a *prompt-ref*; `skill` → add to an agent node's `skills[]` (folded into its prompt+tools at runtime); `agent` → import as a single agent node (no graph).
+- **One-click "Use"** into a chosen target workflow — no bespoke per-kind editors; the user lands in the existing editor to tweak. Per-kind effect (all inline, fetched via `/use?inline=true`): `workflow` → save as a new workflow file (existing `POST /api/workflows`); `tool` → add to the workflow's `tools[]`; `model_profile` → add to `models[]`; `prompt` → add to the workflow's `prompts[]`; `skill` → append to a chosen agent node's `skills[]` (folded into its prompt+tools at graph-build); `agent` → import as a single unconnected agent node (no graph). Ids are de-duped on clash (numeric suffix).
 - **Ref remapping on import (resolved once):** secrets map by exact name to the consumer's global store — a missing one is flagged for the user to supply; model refs are inlined into the target workflow's `models[]`, suffixed on id clash. Because imports inline, there's no ongoing binding to maintain.
 - **AI Forge backend:** mostly the existing workflow-create endpoint; plus small affordances — *prompt-ref* on agents, `skills[]` on agent nodes with runtime fold-in, and *agent-as-node*.
 
@@ -225,7 +226,7 @@ GET    /registry/capabilities/{n}/{v}/artifact # download payload → "Use"
 4. ✅ API: capabilities / search / publish / use; TestClient tests.
 5. ✅ Publish mechanism (git commit + sync) — also exposed offline via the CLI (`ai-forge-registry publish <files…>` / `seed`); six sample manifests ship in `registry/samples/` (one per core kind, cross-referencing into a composition chain).
 6. ✅ Frontend Capabilities view (filter by kind) + per-kind "Use" actions; `tsc --noEmit` + build.
-7. AI Forge import affordances — *prompt-ref* on agents, `skills[]` on agent nodes with runtime fold-in, *agent-as-node*.
+7. ✅ AI Forge import affordances — `prompt_ref` + `skills[]` on agent nodes (schema + builder fold-in at graph-build + validation), frontend ConfigPanel editors, registry-side ref inliner (`registry/inline.py`, `/use?inline=true`), and per-kind "Use in…" import actions in the Capabilities view.
 8. Run both servers together (dev script / docker-compose); update README/PLAN.
 
 **R2 — Govern & Compose (roadmap):** new `capability`/`invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O, stream sub-run events) · remote invocation over HTTP · declared-dependency resolution at publish + automated per-kind breaking-change detection · feed real run metrics (cost/success/latency) into `evaluation` scores · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.

@@ -15,12 +15,15 @@ import {
   type HumanInLoopNodeConfig,
   type HumanInputField,
   type FieldMapping,
+  type PromptDefinition,
+  type AgentSkill,
 } from '@/lib/workflowTypes'
 
 interface Props {
   node: WorkflowNode | null
   models: ModelConfig[]
   tools: ToolDefinition[]
+  prompts: PromptDefinition[]
   onConfigChange: (nodeId: string, config: NodeConfig) => void
   onDeleteNode: (nodeId: string) => void
   edges: Edge[]
@@ -82,11 +85,25 @@ function EndEditor({ config, set }: { config: EndNodeConfig; set: (c: EndNodeCon
   )
 }
 
-function AgentEditor({ config, set, models, tools }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[] }) {
+function AgentEditor({ config, set, models, tools, prompts }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[]; prompts: PromptDefinition[] }) {
+  const skills = config.skills ?? []
+
   const toggleTool = (id: string) => {
     const has = config.tool_ids.includes(id)
     set({ ...config, tool_ids: has ? config.tool_ids.filter((t) => t !== id) : [...config.tool_ids, id] })
   }
+
+  const updateSkill = (i: number, patch: Partial<AgentSkill>) => {
+    const next = skills.map((s, idx) => (idx === i ? { ...s, ...patch } : s))
+    set({ ...config, skills: next })
+  }
+
+  const toggleSkillTool = (i: number, id: string) => {
+    const s = skills[i]
+    const has = s.tool_ids.includes(id)
+    updateSkill(i, { tool_ids: has ? s.tool_ids.filter((t) => t !== id) : [...s.tool_ids, id] })
+  }
+
   return (
     <div className="space-y-3">
       <Field label="Model">
@@ -97,6 +114,16 @@ function AgentEditor({ config, set, models, tools }: { config: AgentNodeConfig; 
           ))}
         </select>
       </Field>
+      {prompts.length > 0 && (
+        <Field label="Prompt template">
+          <select className={inputCls} value={config.prompt_ref ?? ''} onChange={(e) => set({ ...config, prompt_ref: e.target.value || null })}>
+            <option value="">— none (use system prompt below) —</option>
+            {prompts.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
       <Field label="System prompt">
         <textarea className={`${inputCls} min-h-[90px] font-mono text-xs`} value={config.system_prompt} onChange={(e) => set({ ...config, system_prompt: e.target.value })} />
       </Field>
@@ -120,6 +147,57 @@ function AgentEditor({ config, set, models, tools }: { config: AgentNodeConfig; 
           </div>
         </Field>
       )}
+
+      <div>
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Skills</span>
+          <button
+            onClick={() => set({ ...config, skills: [...skills, { name: null, prompt: '', tool_ids: [] }] })}
+            className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300"
+          >
+            <Plus size={12} /> Add
+          </button>
+        </div>
+        <div className="space-y-2">
+          {skills.length === 0 && (
+            <p className="text-xs text-zinc-600">None — skills fold extra prompt + tools into this agent.</p>
+          )}
+          {skills.map((s, i) => (
+            <div key={i} className="space-y-1.5 rounded-md border border-zinc-800 p-2">
+              <div className="flex items-center gap-1.5">
+                <input
+                  className={inputCls}
+                  placeholder={`skill_${i + 1}`}
+                  value={s.name ?? ''}
+                  onChange={(e) => updateSkill(i, { name: e.target.value || null })}
+                />
+                <button
+                  onClick={() => set({ ...config, skills: skills.filter((_, j) => j !== i) })}
+                  className="text-red-400 hover:text-red-300"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <textarea
+                className={`${inputCls} min-h-[60px] font-mono text-xs`}
+                placeholder="Skill prompt (appended to the system prompt)"
+                value={s.prompt}
+                onChange={(e) => updateSkill(i, { prompt: e.target.value })}
+              />
+              {tools.length > 0 && (
+                <div className="space-y-1">
+                  {tools.map((t) => (
+                    <label key={t.id} className="flex items-center gap-2 text-sm text-zinc-300">
+                      <input type="checkbox" checked={s.tool_ids.includes(t.id)} onChange={() => toggleSkillTool(i, t.id)} />
+                      {t.name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -377,7 +455,7 @@ function HumanInLoopEditor({ config, set }: { config: HumanInLoopNodeConfig; set
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, onConfigChange, onDeleteNode, edges }: Props) {
+export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onDeleteNode, edges }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -395,7 +473,7 @@ export default function ConfigPanel({ node, models, tools, onConfigChange, onDel
 
       {node.type === 'start' && <StartEditor config={node.config} set={set} />}
       {node.type === 'end' && <EndEditor config={node.config} set={set} />}
-      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} />}
+      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} />}
       {node.type === 'conditional' && <ConditionalEditor config={node.config} set={set} nodeId={node.id} edges={edges} />}
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}

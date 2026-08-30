@@ -200,9 +200,21 @@ class GraphBuilder:
         if not provider:
             raise ValueError(f"Model {config.model_id} not found")
 
+        base_prompt = config.system_prompt
+        if config.prompt_ref:
+            prompt_def = next((p for p in self.workflow.prompts if p.id == config.prompt_ref), None)
+            if not prompt_def:
+                raise ValueError(f"Prompt {config.prompt_ref} not found")
+            base_prompt = prompt_def.text
+
+        skill_prompts = [s.prompt for s in config.skills]
+        tool_ids = list(dict.fromkeys(
+            list(config.tool_ids) + [tid for s in config.skills for tid in s.tool_ids]
+        ))
+
         tools_by_name: dict[str, ToolDefinition] = {}
         tool_schemas: list[dict[str, Any]] = []
-        for tid in config.tool_ids:
+        for tid in tool_ids:
             tool_def = next((t for t in self.workflow.tools if t.id == tid), None)
             if tool_def:
                 tools_by_name[tool_def.name] = tool_def
@@ -210,7 +222,9 @@ class GraphBuilder:
 
         async def agent_func(state: AgentState) -> AgentState:
             messages = list(state.get("messages_by_node", {}).get(node.id, []))
-            system_prompt = config.system_prompt
+            system_prompt = _render_template(base_prompt, state)
+            for skill_prompt in skill_prompts:
+                system_prompt += "\n\n" + _render_template(skill_prompt, state)
             llm_messages = [Message(role="system", content=system_prompt)]
             llm_messages.extend(messages)
 

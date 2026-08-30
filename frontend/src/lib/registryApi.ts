@@ -74,8 +74,8 @@ export const capabilitiesApi = {
         params: { q, ...(kind ? { kind } : {}) },
       })
       .then((r) => r.data.results),
-  use: (name: string, version = 'latest') =>
+  use: (name: string, version = 'latest', inline = false) =>
     registry
-      .get<UseResult>(`/capabilities/${name}/use`, { params: { version } })
+      .get<UseResult>(`/capabilities/${name}/use`, { params: { version, inline } })
       .then((r) => r.data),
 }

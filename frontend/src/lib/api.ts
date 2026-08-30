@@ -5,6 +5,7 @@ import {
   type WorkflowEdge,
   type ToolDefinition,
   type ModelConfig,
+  type PromptDefinition,
   type StateField,
 } from './workflowTypes'
 
@@ -27,6 +28,7 @@ export interface Workflow {
   edges: WorkflowEdge[]
   tools: ToolDefinition[]
   models: ModelConfig[]
+  prompts?: PromptDefinition[] | null
   state_schema?: { fields: StateField[] } | null
 }
 

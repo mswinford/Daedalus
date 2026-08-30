@@ -142,6 +142,7 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
 
     model_ids = {m.id for m in workflow.models}
     tool_ids = {t.id for t in workflow.tools}
+    prompt_ids = {p.id for p in workflow.prompts}
 
     # --- per-node config checks ---
     for n in nodes:
@@ -161,6 +162,21 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
                         message=f"Agent '{n.id}' references unknown tool '{tid}'",
                         node_id=n.id,
                     ))
+            if cfg.prompt_ref is not None and cfg.prompt_ref not in prompt_ids:
+                errors.append(ValidationIssue(
+                    level="error", code="E_AGENT_PROMPT_MISSING",
+                    message=f"Agent '{n.id}' references unknown prompt '{cfg.prompt_ref}'",
+                    node_id=n.id,
+                ))
+            for skill in cfg.skills:
+                for tid in skill.tool_ids:
+                    if tid not in tool_ids:
+                        errors.append(ValidationIssue(
+                            level="error", code="E_AGENT_TOOL_MISSING",
+                            message=f"Skill '{skill.name or 'unnamed'}' on agent '{n.id}' "
+                                    f"references unknown tool '{tid}'",
+                            node_id=n.id,
+                        ))
 
         elif n.type == "conditional":
             cond_edges = out_edges.get(n.id, [])

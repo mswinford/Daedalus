@@ -35,6 +35,18 @@ export interface EndNodeConfig {
   output_fields: string[]
 }
 
+export interface AgentSkill {
+  name?: string | null
+  prompt: string
+  tool_ids: string[]
+}
+
+export interface PromptDefinition {
+  id: string
+  name: string
+  text: string
+}
+
 export interface AgentNodeConfig {
   model_id: string
   system_prompt: string
@@ -42,6 +54,8 @@ export interface AgentNodeConfig {
   tool_ids: string[]
   max_iterations: number
   retry?: RetryConfig | null
+  prompt_ref?: string | null
+  skills?: AgentSkill[]
 }
 
 export interface ConditionalNodeConfig {
@@ -184,6 +198,7 @@ export interface WorkflowDoc {
   edges: WorkflowEdge[]
   tools: ToolDefinition[]
   models: ModelConfig[]
+  prompts?: PromptDefinition[] | null
   state_schema?: { fields: StateField[] } | null
 }
 
@@ -216,7 +231,7 @@ export function defaultConfig(type: NodeType): NodeConfig {
     case 'end':
       return { output_fields: [] }
     case 'agent':
-      return { model_id: '', system_prompt: '', temperature: null, tool_ids: [], max_iterations: 5 }
+      return { model_id: '', system_prompt: '', temperature: null, tool_ids: [], max_iterations: 5, prompt_ref: null, skills: [] }
     case 'conditional':
       return { conditions: [], default_branch: null }
     case 'transform':

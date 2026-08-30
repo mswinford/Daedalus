@@ -166,6 +166,47 @@ def test_agent_unknown_tool():
     assert "E_AGENT_TOOL_MISSING" in _codes(result, "error")
 
 
+def test_agent_unknown_prompt_ref():
+    wf = Workflow(
+        id="wf", name="wf",
+        nodes=[
+            Node(id="start", type="start", config={}),
+            Node(id="a1", type="agent", config={
+                "model_id": "m1", "system_prompt": "hi", "prompt_ref": "p-missing",
+            }),
+            Node(id="end1", type="end", config={}),
+        ],
+        edges=[
+            Edge(id="s", source_node_id="start", source_handle="default", target_node_id="a1"),
+            Edge(id="e", source_node_id="a1", source_handle="default", target_node_id="end1"),
+        ],
+        models=[ModelConfig(id="m1", name="m1", provider="openai_compatible", model="llama")],
+    )
+    result = validate_workflow(wf)
+    assert "E_AGENT_PROMPT_MISSING" in _codes(result, "error")
+
+
+def test_agent_skill_unknown_tool():
+    wf = Workflow(
+        id="wf", name="wf",
+        nodes=[
+            Node(id="start", type="start", config={}),
+            Node(id="a1", type="agent", config={
+                "model_id": "m1", "system_prompt": "hi",
+                "skills": [{"name": "s1", "prompt": "do things", "tool_ids": ["t-missing"]}],
+            }),
+            Node(id="end1", type="end", config={}),
+        ],
+        edges=[
+            Edge(id="s", source_node_id="start", source_handle="default", target_node_id="a1"),
+            Edge(id="e", source_node_id="a1", source_handle="default", target_node_id="end1"),
+        ],
+        models=[ModelConfig(id="m1", name="m1", provider="openai_compatible", model="llama")],
+    )
+    result = validate_workflow(wf)
+    assert "E_AGENT_TOOL_MISSING" in _codes(result, "error")
+
+
 def test_cycle_detection():
     wf = Workflow(
         id="wf", name="wf",

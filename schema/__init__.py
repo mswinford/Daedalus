@@ -21,6 +21,7 @@ from .capability import (
 )
 from .models import (
     AgentNodeConfig,
+    AgentSkill,
     ConditionConfig,
     ConditionalNodeConfig,
     ConditionType,
@@ -37,6 +38,7 @@ from .models import (
     NodeConfig,
     NodePosition,
     NodeType,
+    PromptDefinition,
     RunEvent,
     RunStatus,
     RetryConfig,
@@ -53,6 +55,7 @@ from .models import (
 )
 
 __all__ = [
+    "AgentSkill",
     "AgentSpec",
     "CapabilityEvaluationRef",
     "CapabilityGovernance",
@@ -89,6 +92,7 @@ __all__ = [
     "NodeConfig",
     "NodePosition",
     "NodeType",
+    "PromptDefinition",
     "RunEvent",
     "RunStatus",
     "RetryConfig",

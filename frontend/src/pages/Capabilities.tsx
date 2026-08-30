@@ -8,6 +8,13 @@ import {
   CAPABILITY_KINDS,
   type CapabilityKind,
 } from '@/lib/registryApi'
+import { workflowsApi, type Workflow } from '@/lib/api'
+import type {
+  AgentNode,
+  AgentNodeConfig,
+  ModelConfig,
+  ToolDefinition,
+} from '@/lib/workflowTypes'
 
 /** Common shape shared by list summaries and search hits. */
 type RowCap = {
@@ -17,7 +24,6 @@ type RowCap = {
   latest_published?: string | null
   version?: string
 }
-import { workflowsApi } from '@/lib/api'
 
 const KIND_COLORS: Record<CapabilityKind, string> = {
   tool: 'bg-sky-500/15 text-sky-400',
@@ -47,10 +53,132 @@ function useCopy(): [boolean, (text: string) => void] {
   return [copied, copy]
 }
 
+function suffixedId(taken: Set<string>, base: string): string {
+  if (!taken.has(base)) return base
+  let i = 2
+  while (taken.has(`${base}_${i}`)) i++
+  return `${base}_${i}`
+}
+
+/** Merge an inlined capability artifact into a workflow doc (returns a new object). */
+function applyCapability(
+  wf: Workflow,
+  kind: CapabilityKind,
+  artifact: Record<string, any>,
+  capName: string,
+  targetNodeId?: string,
+): Workflow {
+  const prompts = [...(wf.prompts ?? [])]
+  const next: Workflow = {
+    ...wf,
+    nodes: [...wf.nodes],
+    edges: [...wf.edges],
+    tools: [...(wf.tools ?? [])],
+    models: [...(wf.models ?? [])],
+    prompts,
+  }
+
+  const addTool = (t: ToolDefinition): string => {
+    const id = suffixedId(new Set(next.tools.map((x) => x.id)), t.id)
+    next.tools.push({ ...t, id })
+    return id
+  }
+  const addModel = (m: ModelConfig): string => {
+    const id = suffixedId(new Set(next.models.map((x) => x.id)), m.id)
+    next.models.push({ ...m, id })
+    return id
+  }
+
+  switch (kind) {
+    case 'tool':
+      addTool(artifact as ToolDefinition)
+      break
+    case 'model_profile':
+      addModel(artifact as ModelConfig)
+      break
+    case 'prompt': {
+      const base = capName.split('/').pop() ?? capName
+      const id = suffixedId(new Set(prompts.map((p) => p.id)), base)
+      prompts.push({ id, name: base, text: artifact.text })
+      break
+    }
+    case 'skill': {
+      const toolIds = (artifact.tools as ToolDefinition[]).map(addTool)
+      const idx = next.nodes.findIndex((n) => n.id === targetNodeId)
+      const node = idx >= 0 ? next.nodes[idx] : undefined
+      if (!node || node.type !== 'agent') {
+        throw new Error('Pick an agent node for the skill')
+      }
+      const cfg = { ...(node as AgentNode).config }
+      cfg.skills = [
+        ...(cfg.skills ?? []),
+        { name: artifact.name, prompt: artifact.prompt, tool_ids: toolIds },
+      ]
+      next.nodes[idx] = { ...(node as AgentNode), config: cfg }
+      break
+    }
+    case 'agent': {
+      const modelId = addModel(artifact.model as ModelConfig)
+      const ownToolIds = (artifact.tools as ToolDefinition[]).map(addTool)
+      const skills = (
+        artifact.skills as Array<{ name: string; prompt: string; tools: ToolDefinition[] }>
+      ).map((s) => ({ name: s.name, prompt: s.prompt, tool_ids: s.tools.map(addTool) }))
+      next.nodes.push({
+        id: crypto.randomUUID(),
+        type: 'agent',
+        position: { x: 80, y: 320 + (next.nodes.length % 5) * 40 },
+        config: {
+          model_id: modelId,
+          system_prompt: artifact.prompt ?? '',
+          temperature: null,
+          tool_ids: ownToolIds,
+          max_iterations: 5,
+          prompt_ref: null,
+          skills,
+        },
+      })
+      break
+    }
+    default:
+      throw new Error(`kind '${kind}' is not importable into a workflow`)
+  }
+  return next
+}
+
 function UseButton({ cap }: { cap: RowCap }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [copied, copy] = useCopy()
+  const [open, setOpen] = useState(false)
+  const [targetWfId, setTargetWfId] = useState('')
+  const [targetNodeId, setTargetNodeId] = useState('')
+
+  const { data: workflows } = useQuery({
+    queryKey: ['workflows'],
+    queryFn: () => workflowsApi.list(),
+    enabled: open && cap.kind !== 'workflow',
+  })
+  const { data: targetWf } = useQuery({
+    queryKey: ['workflow', targetWfId],
+    queryFn: () => workflowsApi.get(targetWfId),
+    enabled: !!targetWfId,
+  })
+  const agentNodes = (targetWf?.nodes ?? []).filter((n) => n.type === 'agent')
+
+  const applyUse = useMutation({
+    mutationFn: async () => {
+      if (!targetWf) throw new Error('Pick a target workflow')
+      const { artifact } = await capabilitiesApi.use(cap.name, 'latest', true)
+      return workflowsApi.update(
+        targetWf.id,
+        applyCapability(targetWf, cap.kind, artifact, cap.name, targetNodeId || undefined),
+      )
+    },
+    onSuccess: (wf) => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      navigate(`/workflows/${wf.id}`)
+    },
+  })
 
   const importWorkflow = useMutation({
     mutationFn: async () => {
@@ -99,14 +227,79 @@ function UseButton({ cap }: { cap: RowCap }) {
     )
   }
 
+  const needsAgent = cap.kind === 'skill'
+  const ready = !!targetWfId && (!needsAgent || !!targetNodeId)
+  const applyError = applyUse.isError
+    ? ((applyUse.error as any)?.response?.data?.detail ?? (applyUse.error as Error).message)
+    : null
+
   return (
-    <button
-      onClick={copyArtifact}
-      className="flex shrink-0 items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800"
-    >
-      {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-      {copied ? 'Copied' : `Copy ${cap.kind === 'prompt' ? 'text' : 'JSON'}`}
-    </button>
+    <div className="flex shrink-0 items-center gap-2">
+      {open && (
+        <>
+          <select
+            value={targetWfId}
+            onChange={(e) => {
+              setTargetWfId(e.target.value)
+              setTargetNodeId('')
+            }}
+            className="max-w-40 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-zinc-600"
+          >
+            <option value="">Workflow…</option>
+            {(workflows ?? []).map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+          {needsAgent && (
+            <select
+              value={targetNodeId}
+              onChange={(e) => setTargetNodeId(e.target.value)}
+              disabled={!targetWfId}
+              className="max-w-36 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-zinc-600 disabled:opacity-50"
+            >
+              <option value="">Agent node…</option>
+              {agentNodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {(n.config as AgentNodeConfig).system_prompt?.slice(0, 24) || n.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => applyUse.mutate()}
+            disabled={!ready || applyUse.isPending}
+            className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
+          >
+            {applyUse.isPending ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Check size={12} />
+            )}
+            Apply
+          </button>
+        </>
+      )}
+      {applyError && (
+        <span title={String(applyError)} className="max-w-44 truncate text-xs text-red-400">
+          {String(applyError)}
+        </span>
+      )}
+      <button
+        onClick={() => setOpen(!open)}
+        className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800"
+      >
+        {open ? 'Close' : 'Use in…'}
+      </button>
+      <button
+        onClick={copyArtifact}
+        className="flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800"
+      >
+        {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+        {copied ? 'Copied' : `Copy ${cap.kind === 'prompt' ? 'text' : 'JSON'}`}
+      </button>
+    </div>
   )
 }
 
@@ -120,31 +313,33 @@ function CapabilityRow({ cap }: { cap: RowCap }) {
 
   return (
     <div className="border-b border-zinc-800/60 last:border-0">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-900/50"
-      >
-        {open ? (
-          <ChevronDown size={16} className="shrink-0 text-zinc-500" />
-        ) : (
-          <ChevronRight size={16} className="shrink-0 text-zinc-500" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="truncate text-sm font-medium text-zinc-200">{cap.name}</p>
-            <KindBadge kind={cap.kind} />
-            {cap.latest_published && (
-              <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-400">
-                v{cap.latest_published}
-              </span>
+      <div className="flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-zinc-900/50">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          {open ? (
+            <ChevronDown size={16} className="shrink-0 text-zinc-500" />
+          ) : (
+            <ChevronRight size={16} className="shrink-0 text-zinc-500" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <p className="truncate text-sm font-medium text-zinc-200">{cap.name}</p>
+              <KindBadge kind={cap.kind} />
+              {cap.latest_published && (
+                <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-400">
+                  v{cap.latest_published}
+                </span>
+              )}
+            </div>
+            {cap.description && (
+              <p className="truncate text-xs text-zinc-500">{cap.description}</p>
             )}
           </div>
-          {cap.description && (
-            <p className="truncate text-xs text-zinc-500">{cap.description}</p>
-          )}
-        </div>
+        </button>
         <UseButton cap={cap} />
-      </button>
+      </div>
 
       {open && (
         <div className="space-y-2 border-t border-zinc-800/60 bg-zinc-950 px-10 py-3">

@@ -103,6 +103,18 @@ class ToolImplementation(BaseModel):
     )
 
 
+# ─── Prompt Definition ───────────────────────────────────────────────────────
+
+class PromptDefinition(BaseModel):
+    """A named prompt template stored at workflow level (`prompts[]`), referenced by agent nodes."""
+    id: str = Field(..., description="Unique identifier within the workflow")
+    name: Optional[str] = Field(None, description="Human-readable name")
+    text: str = Field(..., description="Template with {{var}} placeholders resolved from state data at runtime")
+    variables: list[str] = Field(
+        default_factory=list, description="Declared {{var}} placeholders"
+    )
+
+
 # ─── Retry Config ────────────────────────────────────────────────────────────
 
 class RetryConfig(BaseModel):
@@ -134,6 +146,19 @@ class EndNodeConfig(BaseModel):
     )
 
 
+class AgentSkill(BaseModel):
+    """An inlined skill attached to an agent node (imported from a capability).
+
+    Folded into the agent at runtime: its prompt is appended to the system
+    prompt and its tools are unioned into the agent's tool set.
+    """
+    name: Optional[str] = Field(None, description="Skill name (provenance)")
+    prompt: str = Field(..., description="Instructions folded into the agent's system prompt")
+    tool_ids: list[str] = Field(
+        default_factory=list, description="References to workflow ToolDefinitions this skill uses"
+    )
+
+
 class AgentNodeConfig(BaseModel):
     """Configuration for an Agent node."""
     model_id: str = Field(..., description="Reference to a ModelConfig")
@@ -144,6 +169,13 @@ class AgentNodeConfig(BaseModel):
     )
     max_iterations: int = Field(10, ge=1, le=100, description="Maximum agent iterations")
     retry: Optional[RetryConfig] = Field(None, description="Retry configuration")
+    prompt_ref: Optional[str] = Field(
+        None,
+        description="Reference to a workflow PromptDefinition; when set, its template is the base system prompt",
+    )
+    skills: list[AgentSkill] = Field(
+        default_factory=list, description="Inlined skills folded into this agent at runtime"
+    )
 
 
 class ConditionType(str, Enum):
@@ -305,6 +337,9 @@ class Workflow(BaseModel):
     edges: list[Edge] = Field(default_factory=list)
     tools: list[ToolDefinition] = Field(default_factory=list)
     models: list[ModelConfig] = Field(default_factory=list)
+    prompts: list[PromptDefinition] = Field(
+        default_factory=list, description="Named prompt templates referenced by agent nodes"
+    )
     state_schema: Optional[StateSchema] = Field(None, description="Explicit state schema (auto-inferred if not set)")
 
 

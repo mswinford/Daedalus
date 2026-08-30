@@ -10,7 +10,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 
 **Engine (works now)**
 - LangGraph-based execution of `start → … → end` graphs, run **asynchronously** over HTTP with live event streaming.
-- Node types: `agent` (with tool-calling loop), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), and `human_in_loop` (pause / resume / reject).
+- Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), and `human_in_loop` (pause / resume / reject).
 - Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
 - Per-agent message isolation — each agent keeps its own conversation; agents share only structured `data`.
@@ -30,9 +30,9 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - Git-backed store + SQLite FTS5 index: immutable versions, lifecycle state machine (draft → review → approved → published → deprecated → retired).
 - Publish (git commit + index sync), search, and use APIs on a separate server (`127.0.0.1:3010`).
 - CLI: `ai-forge-registry serve | publish <files…> | seed` — publishing works offline; six sample capabilities (one per kind) ship in `registry/samples/`.
-- **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use** actions.
+- **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
 
-**Tests:** 185 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
+**Tests:** 200 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
 
 ---
 
@@ -119,7 +119,7 @@ With the frontend running, the **Capabilities** view in the sidebar browses and 
 ### 4. Run the tests
 
 ```bash
-python -m pytest -q          # backend (185 tests)
+python -m pytest -q          # backend (200 tests)
 cd frontend && npm run lint  # frontend typecheck (tsc --noEmit)
 ```
 
@@ -274,7 +274,7 @@ A thin **system-of-record + discovery** layer above AI Forge (R1 of the [platfor
 | `POST` | `/registry/capabilities` | Publish a manifest (git commit + index sync; returns 201) |
 | `POST` | `/registry/capabilities/{name}/lifecycle` | Advance the stage (e.g. draft → review → published) |
 | `GET` | `/registry/search?q=&kind=` | FTS search over name/description/tags |
-| `GET` | `/registry/capabilities/{name}/use?version=latest` | Resolved artifact payload for import |
+| `GET` | `/registry/capabilities/{name}/use?version=latest&inline=true` | Resolved artifact payload for import; `inline=true` resolves skill/agent refs into a self-contained artifact |
 
 Full design: [Capability Registry plan](./docs/capability-registry-plan.md).
 
