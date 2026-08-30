@@ -26,6 +26,7 @@ export interface CapabilitySummary {
   kind: CapabilityKind
   description?: string | null
   tags: string[]
+  spec?: Record<string, any>
   latest_published: string | null
   newest_version: string
   version_count: number
@@ -47,6 +48,7 @@ export interface SearchHit {
   version: string
   kind: CapabilityKind
   description?: string | null
+  spec?: Record<string, any>
   score: number
   rank: number
 }

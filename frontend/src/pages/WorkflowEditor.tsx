@@ -14,7 +14,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu, Wrench, KeyRound } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Cpu, Wrench, KeyRound, PackagePlus } from 'lucide-react'
 
 import { workflowsApi, streamRunEvents, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
@@ -39,6 +39,7 @@ import ModelsPanel from '@/components/flow/ModelsPanel'
 import ToolsPanel from '@/components/flow/ToolsPanel'
 import RunPanel from '@/components/flow/RunPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
+import CapabilityPicker from '@/components/flow/CapabilityPicker'
 import type { ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
@@ -69,6 +70,7 @@ function WorkflowEditorInner() {
   const [showModels, setShowModels] = useState(false)
   const [showTools, setShowTools] = useState(false)
   const [showSecrets, setShowSecrets] = useState(false)
+  const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
 
   const { data: workflow, isLoading } = useQuery({
@@ -278,6 +280,18 @@ function WorkflowEditorInner() {
     },
   })
 
+  const importMutation = useMutation({
+    mutationFn: (merged: Workflow) => workflowsApi.update(id!, merged),
+    onSuccess: (saved) => {
+      setNodes(nodesToRF(saved.nodes, saved.edges))
+      setEdges(edgesToRF(saved.edges))
+      setModels(saved.models)
+      setTools(saved.tools)
+      setDirty(false)
+      syncedJsonRef.current = JSON.stringify(saved)
+    },
+  })
+
   const validateMutation = useMutation({
     mutationFn: () => {
       const payload = buildPayload()
@@ -440,6 +454,13 @@ function WorkflowEditorInner() {
           >
             <Wrench size={14} />
             Tools
+          </button>
+          <button
+            onClick={() => setShowPicker(true)}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            <PackagePlus size={14} />
+            Add capability
           </button>
           <button
             onClick={() => setShowSecrets(true)}
@@ -615,6 +636,16 @@ function WorkflowEditorInner() {
 
       {/* Secrets modal */}
       {showSecrets && <SecretsPanel onClose={() => setShowSecrets(false)} />}
+
+      {/* Capability picker */}
+      {showPicker && (
+        <CapabilityPicker
+          getWorkflow={buildPayload}
+          defaultAgentId={selectedNode?.type === 'agent' ? selectedNode.id : null}
+          onApply={(merged) => importMutation.mutate(merged)}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
 
       {/* Bottom: run log / debug panel */}
       {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} />}

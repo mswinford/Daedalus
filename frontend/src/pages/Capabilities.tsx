@@ -8,13 +8,9 @@ import {
   CAPABILITY_KINDS,
   type CapabilityKind,
 } from '@/lib/registryApi'
-import { workflowsApi, type Workflow } from '@/lib/api'
-import type {
-  AgentNode,
-  AgentNodeConfig,
-  ModelConfig,
-  ToolDefinition,
-} from '@/lib/workflowTypes'
+import { workflowsApi } from '@/lib/api'
+import { applyCapability } from '@/lib/capabilityImport'
+import type { AgentNodeConfig } from '@/lib/workflowTypes'
 
 /** Common shape shared by list summaries and search hits. */
 type RowCap = {
@@ -53,98 +49,6 @@ function useCopy(): [boolean, (text: string) => void] {
   return [copied, copy]
 }
 
-function suffixedId(taken: Set<string>, base: string): string {
-  if (!taken.has(base)) return base
-  let i = 2
-  while (taken.has(`${base}_${i}`)) i++
-  return `${base}_${i}`
-}
-
-/** Merge an inlined capability artifact into a workflow doc (returns a new object). */
-function applyCapability(
-  wf: Workflow,
-  kind: CapabilityKind,
-  artifact: Record<string, any>,
-  capName: string,
-  targetNodeId?: string,
-): Workflow {
-  const prompts = [...(wf.prompts ?? [])]
-  const next: Workflow = {
-    ...wf,
-    nodes: [...wf.nodes],
-    edges: [...wf.edges],
-    tools: [...(wf.tools ?? [])],
-    models: [...(wf.models ?? [])],
-    prompts,
-  }
-
-  const addTool = (t: ToolDefinition): string => {
-    const id = suffixedId(new Set(next.tools.map((x) => x.id)), t.id)
-    next.tools.push({ ...t, id })
-    return id
-  }
-  const addModel = (m: ModelConfig): string => {
-    const id = suffixedId(new Set(next.models.map((x) => x.id)), m.id)
-    next.models.push({ ...m, id })
-    return id
-  }
-
-  switch (kind) {
-    case 'tool':
-      addTool(artifact as ToolDefinition)
-      break
-    case 'model_profile':
-      addModel(artifact as ModelConfig)
-      break
-    case 'prompt': {
-      const base = capName.split('/').pop() ?? capName
-      const id = suffixedId(new Set(prompts.map((p) => p.id)), base)
-      prompts.push({ id, name: base, text: artifact.text })
-      break
-    }
-    case 'skill': {
-      const toolIds = (artifact.tools as ToolDefinition[]).map(addTool)
-      const idx = next.nodes.findIndex((n) => n.id === targetNodeId)
-      const node = idx >= 0 ? next.nodes[idx] : undefined
-      if (!node || node.type !== 'agent') {
-        throw new Error('Pick an agent node for the skill')
-      }
-      const cfg = { ...(node as AgentNode).config }
-      cfg.skills = [
-        ...(cfg.skills ?? []),
-        { name: artifact.name, prompt: artifact.prompt, tool_ids: toolIds },
-      ]
-      next.nodes[idx] = { ...(node as AgentNode), config: cfg }
-      break
-    }
-    case 'agent': {
-      const modelId = addModel(artifact.model as ModelConfig)
-      const ownToolIds = (artifact.tools as ToolDefinition[]).map(addTool)
-      const skills = (
-        artifact.skills as Array<{ name: string; prompt: string; tools: ToolDefinition[] }>
-      ).map((s) => ({ name: s.name, prompt: s.prompt, tool_ids: s.tools.map(addTool) }))
-      next.nodes.push({
-        id: crypto.randomUUID(),
-        type: 'agent',
-        position: { x: 80, y: 320 + (next.nodes.length % 5) * 40 },
-        config: {
-          model_id: modelId,
-          system_prompt: artifact.prompt ?? '',
-          temperature: null,
-          tool_ids: ownToolIds,
-          max_iterations: 5,
-          prompt_ref: null,
-          skills,
-        },
-      })
-      break
-    }
-    default:
-      throw new Error(`kind '${kind}' is not importable into a workflow`)
-  }
-  return next
-}
-
 function UseButton({ cap }: { cap: RowCap }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -167,16 +71,25 @@ function UseButton({ cap }: { cap: RowCap }) {
   })
   const agentNodes = (targetWf?.nodes ?? []).filter((n) => n.type === 'agent')
 
+  const [applyNotice, setApplyNotice] = useState<string | null>(null)
+
   const applyUse = useMutation({
     mutationFn: async () => {
       if (!targetWf) throw new Error('Pick a target workflow')
       const { artifact } = await capabilitiesApi.use(cap.name, 'latest', true)
-      return workflowsApi.update(
-        targetWf.id,
-        applyCapability(targetWf, cap.kind, artifact, cap.name, targetNodeId || undefined),
+      const { wf: merged, added } = applyCapability(
+        targetWf, cap.kind, artifact, cap.name, targetNodeId || undefined,
       )
+      if (!added) return null
+      return workflowsApi.update(targetWf.id, merged)
     },
     onSuccess: (wf) => {
+      if (!wf) {
+        setApplyNotice(
+          cap.kind === 'skill' ? 'Already on the selected agent' : 'Already in this workflow',
+        )
+        return
+      }
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
       queryClient.invalidateQueries({ queryKey: ['workflow', wf.id] })
       navigate(`/workflows/${wf.id}`)
@@ -271,7 +184,7 @@ function UseButton({ cap }: { cap: RowCap }) {
             </select>
           )}
           <button
-            onClick={() => applyUse.mutate()}
+            onClick={() => { setApplyNotice(null); applyUse.mutate() }}
             disabled={!ready || applyUse.isPending}
             className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
           >
@@ -288,6 +201,9 @@ function UseButton({ cap }: { cap: RowCap }) {
         <span title={String(applyError)} className="max-w-44 truncate text-xs text-red-400">
           {String(applyError)}
         </span>
+      )}
+      {applyNotice && (
+        <span className="max-w-44 truncate text-xs text-amber-400">{applyNotice}</span>
       )}
       <button
         onClick={() => setOpen(!open)}
