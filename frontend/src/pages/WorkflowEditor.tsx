@@ -26,6 +26,7 @@ import {
   type NodeConfig,
 } from '@/lib/workflowTypes'
 import {
+  ERROR_EDGE_STYLE,
   nodesToRF,
   edgesToRF,
   rfToNodes,
@@ -141,7 +142,7 @@ function WorkflowEditorInner() {
     if (!selectedId) return null
     const n = nodes.find((x) => x.id === selectedId)
     if (!n) return null
-    return { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config } as WorkflowNode
+    return { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config, error_handling: n.data.errorHandling ?? false } as WorkflowNode
   }, [nodes, selectedId])
 
   const handleConfigChange = (nodeId: string, config: NodeConfig) => {
@@ -149,12 +150,8 @@ function WorkflowEditorInner() {
     setNodes((ns) =>
       ns.map((n) => {
         if (n.id !== nodeId) return n
-        let branchHandles = n.data.branchHandles
-        if (n.data.nodeType === 'conditional') {
-          const temp = { id: n.id, type: 'conditional' as const, position: n.position, config } as WorkflowNode
-          branchHandles = sourceHandlesFor(temp, rfToEdges(edges))
-        }
-        return { ...n, data: { ...n.data, config, branchHandles } }
+        const temp = { id: n.id, type: n.data.nodeType, position: n.position, config, error_handling: n.data.errorHandling ?? false } as WorkflowNode
+        return { ...n, data: { ...n.data, config, branchHandles: sourceHandlesFor(temp, rfToEdges(edges)) } }
       }),
     )
   }
@@ -257,6 +254,7 @@ function WorkflowEditorInner() {
   const handleConnect = useCallback(
     (params: Connection) => {
       if (params.source === params.target) return
+      const isError = params.sourceHandle === 'error'
       setEdges((eds) => [
         ...eds,
         {
@@ -265,12 +263,34 @@ function WorkflowEditorInner() {
           sourceHandle: params.sourceHandle ?? 'default',
           target: params.target,
           type: 'default',
-          data: { semanticType: 'static', condition: null },
+          style: isError ? ERROR_EDGE_STYLE : undefined,
+          data: { semanticType: isError ? 'error' : 'static', condition: null },
         },
       ])
       setDirty(true)
     },
     [setEdges],
+  )
+
+  const handleErrorToggle = useCallback(
+    (nodeId: string, enabled: boolean) => {
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.id !== nodeId) return n
+          const temp = { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config, error_handling: enabled } as WorkflowNode
+          return {
+            ...n,
+            data: { ...n.data, errorHandling: enabled, branchHandles: sourceHandlesFor(temp, rfToEdges(edges)) },
+          }
+        }),
+      )
+      if (!enabled) {
+        // Drop any edge wired from the now-removed error handle.
+        setEdges((eds) => eds.filter((e) => !(e.source === nodeId && e.sourceHandle === 'error')))
+      }
+      setDirty(true)
+    },
+    [edges, setNodes, setEdges],
   )
 
   // ─── Node deletion (cascade edges) ─────────────────────────────────────────
@@ -654,6 +674,7 @@ function WorkflowEditorInner() {
             tools={tools}
             prompts={workflow?.prompts ?? []}
             onConfigChange={handleConfigChange}
+            onErrorHandlingChange={handleErrorToggle}
             onDeleteNode={handleDeleteNode}
             edges={edges}
           />

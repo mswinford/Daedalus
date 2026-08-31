@@ -950,6 +950,12 @@
           ],
           "description": "Node-specific configuration",
           "title": "Config"
+        },
+        "error_handling": {
+          "default": false,
+          "description": "Opt in to an error handle so failures can be routed via a type='error' edge",
+          "title": "Error Handling",
+          "type": "boolean"
         }
       },
       "required": [

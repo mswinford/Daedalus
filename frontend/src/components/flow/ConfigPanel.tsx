@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, AlertTriangle } from 'lucide-react'
 import type { Edge } from '@xyflow/react'
 
 import {
@@ -25,6 +25,7 @@ interface Props {
   tools: ToolDefinition[]
   prompts: PromptDefinition[]
   onConfigChange: (nodeId: string, config: NodeConfig) => void
+  onErrorHandlingChange: (nodeId: string, enabled: boolean) => void
   onDeleteNode: (nodeId: string) => void
   edges: Edge[]
 }
@@ -455,7 +456,7 @@ function HumanInLoopEditor({ config, set }: { config: HumanInLoopNodeConfig; set
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onDeleteNode, edges }: Props) {
+export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -478,6 +479,30 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}
       {node.type === 'human_in_loop' && <HumanInLoopEditor config={node.config as HumanInLoopNodeConfig} set={(c) => onConfigChange(node.id, c)} />}
+
+      {node.type !== 'start' && node.type !== 'end' && (
+        <div className="rounded-md border border-zinc-800 p-3">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={node.error_handling ?? false}
+              onChange={(e) => onErrorHandlingChange(node.id, e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-red-500"
+            />
+            <span>
+              <span className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
+                <AlertTriangle size={13} className={node.error_handling ? 'text-red-400' : 'text-zinc-500'} />
+                Error handling
+              </span>
+              <span className="mt-0.5 block text-xs text-zinc-500">
+                {node.error_handling
+                  ? 'Failures route to the red error handle instead of stopping the run.'
+                  : 'Opt in to add a red error handle for routing failures.'}
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
 
       <div className="border-t border-zinc-800 pt-3">
         <button

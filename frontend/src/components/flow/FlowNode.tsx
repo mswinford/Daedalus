@@ -3,7 +3,7 @@ import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflo
 import { Play, Flag, Bot, GitBranch, Shuffle, User, Code2, AlertTriangle } from 'lucide-react'
 
 import { NODE_META, type NodeType } from '@/lib/workflowTypes'
-import { type FlowNodeData } from '@/lib/graphTransform'
+import { ERROR_HANDLE_STYLE, type FlowNodeData } from '@/lib/graphTransform'
 
 const ICONS: Record<NodeType, typeof Play> = {
   start: Play,
@@ -93,7 +93,11 @@ export default function FlowNode({ data, selected, id }: NodeProps) {
 
       {handles.map((h, i) => {
         const top = handles.length > 1 ? `${((i + 1) / (handles.length + 1)) * 100}%` : undefined
-        return <Handle key={h} id={h} type="source" position={Position.Right} style={top ? { top } : undefined} />
+        const style: React.CSSProperties | undefined = {
+          ...(top ? { top } : {}),
+          ...(h === 'error' ? ERROR_HANDLE_STYLE : {}),
+        }
+        return <Handle key={h} id={h} type="source" position={Position.Right} style={Object.keys(style).length ? style : undefined} />
       })}
     </div>
   )

@@ -304,6 +304,9 @@ class Node(BaseModel):
     type: NodeType = Field(..., description="Node type")
     position: NodePosition = Field(default_factory=NodePosition, description="Position on canvas")
     config: NodeConfig = Field(..., description="Node-specific configuration")
+    error_handling: bool = Field(
+        False, description="Opt in to an error handle so failures can be routed via a type='error' edge"
+    )
 
 
 # ─── Edge Types ──────────────────────────────────────────────────────────────

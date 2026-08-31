@@ -13,20 +13,34 @@ export interface FlowNodeData extends Record<string, unknown> {
   nodeType: NodeType
   config: WorkflowNode['config']
   branchHandles?: string[]
+  errorHandling?: boolean
   validation?: 'error' | 'warning'
 }
 
 // A React Flow node carrying our data. Used as the generic for useNodesState / NodeProps.
 export type FlowNodeType = Node<FlowNodeData>
 
+// Styling for type='error' edges (red dashed) and their source handle.
+export const ERROR_EDGE_STYLE = { stroke: '#ef4444', strokeDasharray: '6 3' } as const
+export const ERROR_HANDLE_STYLE = { background: '#ef4444', borderColor: '#ef4444' } as const
+
 // Source handles for a node, in render order. Conditional nodes get one handle per
 // condition (positionally matched to outgoing branch edges) plus the default/fallback.
+// Nodes with error_handling opt in to an extra 'error' handle (never on start/end).
 export function sourceHandlesFor(node: WorkflowNode, edges: WorkflowEdge[]): string[] {
   if (node.type === 'end') return []
-  if (node.type !== 'conditional') return ['default']
 
+  const handles = node.type !== 'conditional' ? ['default'] : conditionalHandlesFor(node, edges)
+
+  if (node.type !== 'start' && node.error_handling && !handles.includes('error')) {
+    handles.push('error')
+  }
+  return handles
+}
+
+function conditionalHandlesFor(node: WorkflowNode, edges: WorkflowEdge[]): string[] {
   const cfg = node.config as ConditionalNodeConfig
-  const branches = edges.filter((e) => e.source_node_id === node.id && e.source_handle !== 'default')
+  const branches = edges.filter((e) => e.source_node_id === node.id && e.source_handle !== 'default' && e.type !== 'error')
   const handles: string[] = []
   const seen = new Set<string>()
   cfg.conditions.forEach((_cond, i) => {
@@ -52,6 +66,7 @@ export function nodesToRF(nodes: WorkflowNode[], edges: WorkflowEdge[]): FlowNod
       nodeType: n.type,
       config: n.config,
       branchHandles: sourceHandlesFor(n, edges),
+      errorHandling: n.error_handling ?? false,
     },
   }))
 }
@@ -63,6 +78,7 @@ export function edgesToRF(edges: WorkflowEdge[]): Edge[] {
     sourceHandle: e.source_handle,
     target: e.target_node_id,
     type: 'default',
+    style: e.type === 'error' ? ERROR_EDGE_STYLE : undefined,
     data: { semanticType: e.type, condition: e.condition ?? null },
   }))
 }
@@ -75,6 +91,7 @@ export function rfToNodes(nodes: FlowNodeType[]): WorkflowNode[] {
     type: n.data.nodeType,
     position: { x: n.position.x, y: n.position.y },
     config: n.data.config,
+    error_handling: n.data.errorHandling ?? false,
   })) as WorkflowNode[]
 }
 

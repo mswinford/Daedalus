@@ -118,6 +118,7 @@ export type NodeConfig =
 interface BaseNode {
   id: string
   position: { x: number; y: number }
+  error_handling?: boolean
 }
 
 export interface StartNode extends BaseNode { type: 'start'; config: StartNodeConfig }

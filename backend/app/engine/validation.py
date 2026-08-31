@@ -180,7 +180,7 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
 
         elif n.type == "conditional":
             cond_edges = out_edges.get(n.id, [])
-            branch_edges = [e for e in cond_edges if e.source_handle != "default"]
+            branch_edges = [e for e in cond_edges if e.source_handle != "default" and e.type != "error"]
             handles = {e.source_handle for e in cond_edges}
 
             if len(branch_edges) != len(cfg.conditions):
@@ -262,6 +262,46 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
                 level="warning", code="W_DEAD_END",
                 message=f"Node '{n.id}' has no outgoing edges; the workflow may terminate here",
                 node_id=n.id,
+            ))
+
+    # --- error edges ---
+    for e in edges:
+        if e.type != "error":
+            continue
+        src = nodes_by_id.get(e.source_node_id)
+        if src is None:
+            continue  # already reported as E_EDGE_SOURCE_MISSING
+        if src.type == "start":
+            errors.append(ValidationIssue(
+                level="error", code="E_ERROR_EDGE_FROM_START",
+                message=f"Error edge '{e.id}': the start node cannot fail",
+                edge_id=e.id,
+            ))
+        elif not src.error_handling:
+            warnings.append(ValidationIssue(
+                level="warning", code="W_ERROR_EDGE_NO_OPTIN",
+                message=f"Error edge '{e.id}' leaves '{src.id}', which has error handling "
+                        f"disabled; the edge will never be taken",
+                edge_id=e.id,
+            ))
+        if not any(o for o in out_edges.get(src.id, []) if o.type != "error"):
+            errors.append(ValidationIssue(
+                level="error", code="E_ERROR_EDGE_NO_FALLBACK",
+                message=f"Error edge '{e.id}': node '{src.id}' has no success path; "
+                        f"it also needs a default outgoing edge",
+                edge_id=e.id,
+            ))
+
+    error_edge_counts: dict = {}
+    for e in edges:
+        if e.type == "error":
+            error_edge_counts[e.source_node_id] = error_edge_counts.get(e.source_node_id, 0) + 1
+    for src_id, count in error_edge_counts.items():
+        if count > 1:
+            errors.append(ValidationIssue(
+                level="error", code="E_MULTIPLE_ERROR_EDGES",
+                message=f"Node '{src_id}' has {count} error edges; only one is allowed per node",
+                node_id=src_id,
             ))
 
     # --- reachability from entry point ---
