@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Boxes, Hourglass, Plus, Search, Trash2 } from 'lucide-react'
 
-import { workflowsApi, type PausedRunSummary, type WorkflowSummary } from '@/lib/api'
+import { apiErrorMessage, workflowsApi, type PausedRunSummary, type WorkflowSummary } from '@/lib/api'
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now())
@@ -179,6 +179,9 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
         </form>
         {createMutation.error && (
           <p className="text-xs text-red-400">Failed to create workflow</p>
+        )}
+        {deleteMutation.error && (
+          <p className="text-xs text-red-400">Failed to delete workflow: {apiErrorMessage(deleteMutation.error)}</p>
         )}
 
         <div className="relative">

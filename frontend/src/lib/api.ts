@@ -135,10 +135,20 @@ export const workflowsApi = {
     api.post<ValidationResult>(`/workflows/${id}/validate`, body ?? null).then(r => r.data),
 }
 
+/** Backoff delay (ms) before reconnect attempt N: 500, 1000, 2000, 4000, capped at 8000. */
+export function reconnectDelay(attempt: number): number {
+  return Math.min(500 * 2 ** attempt, 8000)
+}
+
+const MAX_RECONNECT_ATTEMPTS = 5
+
 /**
- * Subscribe to a run's live event stream over WebSocket. The server replays any
- * events already emitted, then streams new ones until the run finishes. Returns a
- * `close()` function; `onClose` fires when the socket closes (run done or dropped).
+ * Subscribe to a run's live event stream over WebSocket. The server replays the
+ * full event log from seq 0 on every connect, so reconnecting is safe and
+ * self-healing (the caller's seq dedupe skips replayed events). On an
+ * unexpected close the socket re-subscribes with bounded exponential backoff
+ * (reconnectDelay, up to MAX_RECONNECT_ATTEMPTS); after that `onClose` fires.
+ * Returns a `close()` function that stops reconnecting and closes the socket.
  */
 export function streamRunEvents(
   runId: string,
@@ -146,14 +156,41 @@ export function streamRunEvents(
   onClose?: () => void,
 ): () => void {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const ws = new WebSocket(`${proto}://${window.location.host}/api/runs/${runId}/events`)
-  ws.onmessage = (msg) => {
-    try {
-      onEvent(JSON.parse(msg.data) as RunEvent)
-    } catch {
-      // ignore malformed frames
+  const url = `${proto}://${window.location.host}/api/runs/${runId}/events`
+  let ws: WebSocket | null = null
+  let closed = false
+  let attempts = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const connect = () => {
+    const socket = new WebSocket(url)
+    ws = socket
+    socket.onmessage = (msg) => {
+      attempts = 0 // a live connection ends the failure episode; backoff restarts from 500ms
+      try {
+        onEvent(JSON.parse(msg.data) as RunEvent)
+      } catch {
+        // ignore malformed frames
+      }
+    }
+    // no-op: per spec, error is always followed by close, which drives the retry
+    socket.onerror = () => {}
+    socket.onclose = () => {
+      if (closed) return
+      if (attempts < MAX_RECONNECT_ATTEMPTS) {
+        timer = setTimeout(connect, reconnectDelay(attempts))
+        attempts += 1
+      } else {
+        onClose?.()
+      }
     }
   }
-  ws.onclose = () => onClose?.()
-  return () => ws.close()
+
+  connect()
+
+  return () => {
+    closed = true
+    if (timer !== undefined) clearTimeout(timer)
+    ws?.close()
+  }
 }

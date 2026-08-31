@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, X, KeyRound } from 'lucide-react'
 
-import { secretsApi, type SecretInfo } from '@/lib/api'
+import { apiErrorMessage, secretsApi, type SecretInfo } from '@/lib/api'
 
 interface Props {
   onClose: () => void
@@ -60,7 +60,7 @@ export default function SecretsPanel({ onClose }: Props) {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
 
-  const { data: secrets, isLoading } = useQuery({
+  const { data: secrets, isLoading, error } = useQuery({
     queryKey: ['secrets'],
     queryFn: secretsApi.list,
   })
@@ -104,6 +104,8 @@ export default function SecretsPanel({ onClose }: Props) {
 
         {isLoading ? (
           <p className="text-sm text-zinc-500">Loading…</p>
+        ) : error ? (
+          <p className="mb-3 text-sm text-red-400">Failed to load secrets: {apiErrorMessage(error)}</p>
         ) : secrets && secrets.length > 0 ? (
           <div className="mb-3 space-y-1.5">
             {secrets.map((s: SecretInfo) => (
