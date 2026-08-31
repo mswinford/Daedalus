@@ -75,14 +75,20 @@ async def commit_all(repo: Path, message: str) -> Optional[str]:
 async def sync_from_repo(repo: Path, db: Database) -> dict[str, Any]:
     """Walk the repo for manifest.json files and upsert each version.
 
-    Idempotent: identical content is a no-op. Returns a report:
-    {"synced": n, "skipped": [{path, error}], "conflicts": [{name, version}]}.
+    Idempotent: identical content is a no-op. When the repo has at least one
+    commit, rows whose (name, version) was not seen in this scan are pruned
+    from the index (their manifest was removed from the repo). Returns a
+    report: {"synced": n, "skipped": [{path, error}],
+             "conflicts": [{name, version}], "pruned": [{name, version}]}.
     """
-    report: dict[str, Any] = {"synced": 0, "skipped": [], "conflicts": []}
+    report: dict[str, Any] = {
+        "synced": 0, "skipped": [], "conflicts": [], "pruned": [],
+    }
     if not repo.exists():
         return report
 
     head = await git_head(repo)
+    seen: set[tuple[str, str]] = set()
     for path in sorted(repo.rglob("manifest.json")):
         rel = path.relative_to(repo)
         parts = rel.parts
@@ -103,6 +109,28 @@ async def sync_from_repo(repo: Path, db: Database) -> dict[str, Any]:
         try:
             if await upsert_version(db, manifest, source_commit=head):
                 report["synced"] += 1
+            seen.add((manifest.name, manifest.version))
         except VersionConflictError as e:
             report["conflicts"].append({"name": manifest.name, "version": manifest.version})
+            # The manifest still exists in the repo; keep the DB row (with its
+            # lifecycle state) rather than pruning it on a content mismatch.
+            seen.add((manifest.name, manifest.version))
+
+    if head is not None:
+        rows = await db.conn.execute_fetchall(
+            "SELECT rowid, name, version FROM capability_versions"
+        )
+        stale = [r for r in rows if (r["name"], r["version"]) not in seen]
+        for r in stale:
+            await db.conn.execute(
+                "DELETE FROM capability_fts WHERE rowid=?", (r["rowid"],)
+            )
+            await db.conn.execute(
+                "DELETE FROM capability_versions WHERE rowid=?", (r["rowid"],)
+            )
+        if stale:
+            await db.conn.commit()
+            report["pruned"] = [
+                {"name": r["name"], "version": r["version"]} for r in stale
+            ]
     return report

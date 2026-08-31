@@ -1,5 +1,6 @@
 """Tests for the registry version store and git indexer."""
 import asyncio
+import shutil
 
 import pytest
 
@@ -246,6 +247,79 @@ def test_sync_skips_invalid_and_mismatched(tmp_path):
         errors = " | ".join(s["error"] for s in report["skipped"])
         assert "invalid manifest" in errors
         assert "does not match" in errors
+        await db.close()
+    asyncio.run(scenario())
+
+
+def test_sync_prunes_removed_versions(tmp_path):
+    repo = tmp_path / "caps"
+
+    async def scenario():
+        await ensure_repo(repo)
+        await write_manifest_to_repo(
+            repo, _wf_manifest(version="1.0.0", desc="alpha workflow one")
+        )
+        await write_manifest_to_repo(
+            repo, _wf_manifest(version="1.1.0", desc="beta workflow two")
+        )
+        await commit_all(repo, "publish 1.0.0 and 1.1.0")
+
+        db = await Database.connect(tmp_path / "registry.db")
+        report = await sync_from_repo(repo, db)
+        assert report["synced"] == 2 and not report["pruned"]
+
+        # remove one version dir from the repo, then resync
+        shutil.rmtree(repo / "acme" / "wf" / "1.0.0")
+        report2 = await sync_from_repo(repo, db)
+        assert report2["synced"] == 0
+        assert report2["pruned"] == [{"name": "acme/wf", "version": "1.0.0"}]
+
+        rows = await db.conn.execute_fetchall(
+            "SELECT version FROM capability_versions WHERE name='acme/wf'"
+        )
+        assert [r["version"] for r in rows] == ["1.1.0"]
+        assert await search(db, "alpha") == []
+        assert [h["name"] for h in await search(db, "beta")] == ["acme/wf"]
+        await db.close()
+    asyncio.run(scenario())
+
+
+def test_sync_empty_repo_prunes_nothing(tmp_path):
+    """An initialized-but-empty repo (no commits) must not wipe the index."""
+    repo = tmp_path / "caps"
+
+    async def scenario():
+        db = await Database.connect(tmp_path / "registry.db")
+        await upsert_version(db, _wf_manifest())
+        await ensure_repo(repo)  # git init, zero commits
+
+        report = await sync_from_repo(repo, db)
+        assert report["synced"] == 0 and report["pruned"] == []
+        rows = await db.conn.execute_fetchall(
+            "SELECT COUNT(*) AS n FROM capability_versions"
+        )
+        assert rows[0]["n"] == 1
+        await db.close()
+    asyncio.run(scenario())
+
+
+def test_sync_picks_up_uncommitted_manifest(tmp_path):
+    """Sync scans working-tree files, so a new manifest dir needs no commit."""
+    repo = tmp_path / "caps"
+
+    async def scenario():
+        await ensure_repo(repo)
+        await write_manifest_to_repo(repo, _wf_manifest(version="1.0.0"))
+        await commit_all(repo, "first")
+
+        db = await Database.connect(tmp_path / "registry.db")
+        assert (await sync_from_repo(repo, db))["synced"] == 1
+
+        await write_manifest_to_repo(repo, _prompt_manifest())
+        report = await sync_from_repo(repo, db)
+        assert report["synced"] == 1 and not report["pruned"]
+        rows = await db.conn.execute_fetchall("SELECT name FROM capability_versions")
+        assert {r["name"] for r in rows} == {"acme/wf", "acme/prompts"}
         await db.close()
     asyncio.run(scenario())
 

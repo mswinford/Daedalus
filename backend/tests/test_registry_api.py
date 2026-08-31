@@ -55,6 +55,29 @@ def test_publish_then_list_and_detail(tmp_path, monkeypatch):
         assert client.get("/registry/capabilities/nope/nothing").status_code == 404
 
 
+def test_publish_git_db_agreement(tmp_path, monkeypatch):
+    """After publish, the DB row's source_commit is the repo HEAD and the
+    manifest file exists at <repo>/<name>/<version>/manifest.json."""
+    import subprocess
+
+    with _client(tmp_path, monkeypatch) as client:
+        r = _publish(client, _manifest())
+        assert r.status_code == 201, r.text
+
+        head = subprocess.run(
+            ["git", "-C", str(tmp_path / "caps"), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        r = client.get("/registry/capabilities/acme/wf")
+        assert r.status_code == 200
+        version = r.json()["versions"][0]
+        assert version["source_commit"] == head
+
+        manifest_file = tmp_path / "caps" / "acme" / "wf" / "1.0.0" / "manifest.json"
+        assert manifest_file.exists()
+
+
 def test_publish_conflicts(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         assert _publish(client, _manifest()).status_code == 201

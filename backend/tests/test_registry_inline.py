@@ -143,3 +143,23 @@ def test_inline_wrong_kind_ref_422(tmp_path, monkeypatch):
         )
         assert r.status_code == 422
         assert "expected 'tool'" in r.json()["detail"]
+
+
+def test_inline_self_ref_422(tmp_path, monkeypatch):
+    """The ref graph is structurally acyclic per schema (agent -> {skill,
+    tool, model_profile, prompt}, skill -> {tool, prompt}; leaf kinds carry no
+    refs), so no cycle guard exists by design — a self ref always fails the
+    kind check instead."""
+    with _client(tmp_path, monkeypatch) as client:
+        manifest = _skill_manifest(
+            "acme/self-ref-skill",
+            [{"name": "acme/self-ref-skill", "version": "1.0.0"}],
+        )
+        assert client.post("/registry/capabilities", json=manifest).status_code == 201
+
+        r = client.get(
+            "/registry/capabilities/acme/self-ref-skill/use",
+            params={"inline": "true", "version": "1.0.0"},
+        )
+        assert r.status_code == 422
+        assert "expected 'tool'" in r.json()["detail"]

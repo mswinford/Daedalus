@@ -14,6 +14,9 @@ router = APIRouter()
 
 @router.post("/capabilities", status_code=201)
 async def publish(request: Request, manifest: CapabilityManifest):
+    """Note: the git commit happens before the DB sync. If the sync fails the
+    response 500s but the git commit stands; the divergence self-heals on the
+    next startup or publish because sync is a full rescan of the repo."""
     db = request.app.state.db
     settings = get_settings()
 
