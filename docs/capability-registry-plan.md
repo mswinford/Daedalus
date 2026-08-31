@@ -1,7 +1,7 @@
 # Capability Registry — Implementation Plan (Draft)
 
-> **Status:** Component plan — R1 in progress (build steps 1–6 shipped). Part of the [platform roadmap](./ROADMAP.md); a thin layer above AI Forge.
-> **Scope:** R1 (Find & Reuse) in progress; R2/R3 are roadmap.
+> **Status:** Component plan — R1 complete (steps 1–8 shipped). Part of the [platform roadmap](./ROADMAP.md); a thin layer above AI Forge.
+> **Scope:** R1 (Find & Reuse) complete; R2/R3 are roadmap.
 > **Companion docs:** [Roadmap](./ROADMAP.md) · [AI Forge plan](./ai-forge-plan.md) · concepts: `concepts/enterprise-foundry-overview.md`, `concepts/capabilities.md`, `concepts/capability-registry.md`.
 
 ## 1. Context & reframe
@@ -227,7 +227,7 @@ GET    /registry/capabilities/{name}/use?version=&inline=true
 5. ✅ Publish mechanism (git commit + sync) — also exposed offline via the CLI (`ai-forge-registry publish <files…>` / `seed`); six sample manifests ship in `registry/samples/` (one per core kind, cross-referencing into a composition chain).
 6. ✅ Frontend Capabilities view (filter by kind) + per-kind "Use" actions; `tsc --noEmit` + build.
 7. ✅ AI Forge import affordances — `prompt_ref` + `skills[]` on agent nodes (schema + builder fold-in at graph-build + validation), frontend ConfigPanel editors, registry-side ref inliner (`registry/inline.py`, `/use?inline=true`), and per-kind "Use in…" import actions in the Capabilities view.
-8. Run both servers together (dev script / docker-compose); update README/PLAN.
+8. ✅ Run both servers together — `scripts/dev.sh` boots backend + registry + Vite (commit `81dd5ee`); README documents the registry (no docker-compose needed).
 
 **R2 — Govern & Compose (roadmap):** new `capability`/`invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O, stream sub-run events) · remote invocation over HTTP · declared-dependency resolution at publish + automated per-kind breaking-change detection · feed real run metrics (cost/success/latency) into `evaluation` scores · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.
 

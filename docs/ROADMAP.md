@@ -22,7 +22,7 @@ The genuinely new work is narrow — **identity, versioning, ownership, lifecycl
 | Component | What it is | Status | Plan |
 |---|---|---|---|
 | **AI Forge** | Workflow authoring + execution engine (LangGraph); tools, models, secrets, HIL, observability | Shipped (Phase 3) | [ai-forge-plan.md](./ai-forge-plan.md) |
-| **Capability Registry** | Identity · versioning · ownership · lifecycle · search · packaging. A thin layer *above* AI Forge; git (provenance) + SQLite→Postgres index | R1 in progress — core shipped (steps 1–6) | [capability-registry-plan.md](./capability-registry-plan.md) |
+| **Capability Registry** | Identity · versioning · ownership · lifecycle · search · packaging. A thin layer *above* AI Forge; git (provenance) + SQLite→Postgres index | R1 complete (steps 1–8 shipped) | [capability-registry-plan.md](./capability-registry-plan.md) |
 | **`schema` package** | Shared Pydantic models — the Capability Manifest contract + all node/tool/workflow types | Shipped; extended with the Capability Manifest (R1 step 1) | in both |
 
 ## Everything is a capability
@@ -33,12 +33,12 @@ A capability is *any* versioned, shareable, governable unit. The manifest's **`k
 
 The original seven phases consolidate into three product releases (as the source doc itself recommends). Each is scoped to what's *actually missing* given the reframe.
 
-### R1 — Find & Reuse *(MVP; in progress — steps 1–6 shipped)*
+### R1 — Find & Reuse *(MVP — complete, steps 1–8 shipped)*
 Prove the #1 value: **reuse rate** — do new AI projects consume an existing capability instead of rebuilding?
 - ✅ Capability Manifest schema + all core `kind` specs (`schema/capability.py`).
 - ✅ Registry service: git-backed store, SQLite index (FTS5), immutable versions, lifecycle state machine.
 - ✅ Publish (git commit + index) + search + use APIs; offline CLI (`publish` / `seed`) with six sample capabilities in `registry/samples/`.
-- AI Forge **Capabilities** view: browse/search → detail → one-click **Use** (inline import into a target workflow; name-based secret/model remapping). *(View + workflow-kind import shipped; per-kind inline imports land with the step-7 import affordances.)*
+- ✅ AI Forge **Capabilities** view: browse/search → detail → one-click **Use** (inline import into a target workflow; name-based secret/model remapping), plus per-kind "Use in…" import affordances on agent nodes (`prompt_ref` + `skills[]`).
 - **KPI:** % of new workflows that reuse a registered capability.
 
 ### R2 — Govern & Compose
@@ -76,6 +76,6 @@ Agents discover and compose capabilities themselves.
 ## Documentation map
 - `docs/ROADMAP.md` — this file (platform-level).
 - `docs/ai-forge-plan.md` — AI Forge application plan & status.
-- `docs/capability-registry-plan.md` — registry component plan (R1 in progress; steps 1–6 shipped).
+- `docs/capability-registry-plan.md` — registry component plan (R1 complete; steps 1–8 shipped).
 - `docs/data-flow.md` — engine data-flow reference.
 - `docs/concepts/` — original vision docs: `enterprise-foundry-overview.md`, `capabilities.md`, `capability-registry.md`.
