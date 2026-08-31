@@ -50,6 +50,7 @@ Extension points today: node type = string literal + Pydantic union variant + if
 - **Files:** `builder.py:177–194` (`_get_node_func`), edge special cases in `_build_edges` (507–545), per-type blocks in `validation.py` (148–265). Frontend: ~9 sites per new type.
 - **Approach:** a `NodeHandler` protocol in `backend/app/engine/nodes/` — one module per type exposing `build(builder, node) -> Callable` and optionally `validate(node, ctx) -> list[ValidationIssue]`; a `dict[str, NodeHandler]` replaces the if/elif and validation's per-type blocks. Extract the agent tool-loop into an `AgentExecutor` class (testable without a graph). Keep the Pydantic union as-is.
 - **Sequencing:** do after R3 (both restructure the engine).
+- **Result (2026-08-30): done.** `engine/nodes/` package: `base.py` (NodeContext/NodeHandler protocols, AgentState, `_render_template` moved here to avoid a nodes→builder import cycle), one module per type, `HANDLERS` registry in `__init__.py`. builder.py 572 → 274 lines (providers, tracing/cost, `_instrument`, routing, edges only). Agent tool-loop extracted into an `AgentExecutor` class — unit-tested with a fake provider (`test_agent_executor.py`, 3 tests); setup errors still fire at graph-build time. Dead `_start_node`/`_end_node` deleted (build() never added them to the graph). New node type = 1 module + 1 registry line. Note: per-handler `validate()` (the R13 convergence point) was NOT added — validation.py untouched, as scoped.
 
 ### R5. Frontend: generated or parity-checked types — P1, correctness
 - **Files:** `frontend/src/lib/workflowTypes.ts` vs `schema/models.py`; `scripts/generate_schema.py`.
@@ -106,7 +107,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 
 **Phase 2 — structure (sequenced)**
 - [x] R3: split `runs.py` into `app/runs/` package + dedupe `_execute`/`_resume` (→ one `_drive()` in executor.py; 230 passed)
-- [ ] R4: node handler registry + `AgentExecutor` extraction
+- [x] R4: node handler registry + `AgentExecutor` extraction (`engine/nodes/` package; builder.py 572→274 lines; 233 passed)
 - [ ] R8: shared SQLite helper · R10: unified capability presence check
 - [ ] R6: Vitest setup + pure-function tests (before R5 lands)
 
