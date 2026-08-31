@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Check, Loader2, Plus, Search, X } from 'lucide-react'
 
 import { capabilitiesApi, type CapabilityKind } from '@/lib/registryApi'
-import { applyCapability } from '@/lib/capabilityImport'
+import { applyCapability, isCapabilityPresent } from '@/lib/capabilityImport'
 import { apiErrorMessage, type Workflow } from '@/lib/api'
 
 const KIND_COLORS: Record<CapabilityKind, string> = {
@@ -33,21 +33,15 @@ type Row = {
 /** Is this capability already present in the workflow (per its attachment point)? */
 function isPresent(row: Row, wf: Workflow | null, agentId: string | null): boolean {
   if (!wf) return false
-  switch (row.kind) {
-    case 'tool':
-      return !!row.spec && (wf.tools ?? []).some((t) => t.id === row.spec!.id)
-    case 'model_profile':
-      return !!row.spec && (wf.models ?? []).some((m) => m.id === row.spec!.id)
-    case 'prompt':
-      return (wf.prompts ?? []).some((p) => p.id === (row.name.split('/').pop() ?? row.name))
-    case 'skill': {
-      const node = wf.nodes.find((n) => n.id === agentId)
-      if (!node || node.type !== 'agent' || !row.spec) return false
-      return ((node.config as any).skills ?? []).some((s: any) => s.name === row.spec!.name)
-    }
-    default:
-      return false
-  }
+  const key =
+    row.kind === 'tool' || row.kind === 'model_profile'
+      ? (row.spec?.id ?? '')
+      : row.kind === 'prompt'
+        ? row.name
+        : row.kind === 'skill'
+          ? (row.spec?.name ?? '')
+          : ''
+  return isCapabilityPresent(wf, row.kind, key, agentId)
 }
 
 interface Props {

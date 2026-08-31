@@ -9,6 +9,40 @@ export interface ApplyResult {
 }
 
 /**
+ * Is this capability already present in the workflow at its attachment point?
+ *
+ * `key` semantics per kind:
+ * - tool / model_profile: pool entry id — match `wf.tools[].id` / `wf.models[].id`
+ * - prompt: full capability name — base derived via `key.split('/').pop() ?? key`, matched against `wf.prompts[].id`
+ * - skill: skill name — the node at `targetNodeId` must exist and be an agent; match `(config.skills ?? []).some(s => s.name === key)`
+ * - anything else (agent, workflow): false
+ */
+export function isCapabilityPresent(
+  wf: Workflow,
+  kind: CapabilityKind,
+  key: string,
+  targetNodeId?: string | null,
+): boolean {
+  switch (kind) {
+    case 'tool':
+      return (wf.tools ?? []).some((t) => t.id === key)
+    case 'model_profile':
+      return (wf.models ?? []).some((m) => m.id === key)
+    case 'prompt': {
+      const base = key.split('/').pop() ?? key
+      return (wf.prompts ?? []).some((p) => p.id === base)
+    }
+    case 'skill': {
+      const node = (wf.nodes ?? []).find((n) => n.id === targetNodeId)
+      if (!node || node.type !== 'agent') return false
+      return ((node as AgentNode).config.skills ?? []).some((s) => s.name === key)
+    }
+    default:
+      return false
+  }
+}
+
+/**
  * Merge an inlined capability artifact into a workflow doc (returns a new object).
  *
  * Presence rules — "once per (capability, attachment point)":
@@ -46,19 +80,19 @@ export function applyCapability(
   switch (kind) {
     case 'tool': {
       const t = artifact as ToolDefinition
-      if (next.tools.some((x) => x.id === t.id)) return { wf, added: false }
+      if (isCapabilityPresent(wf, 'tool', t.id)) return { wf, added: false }
       addTool(t)
       break
     }
     case 'model_profile': {
       const m = artifact as ModelConfig
-      if (next.models.some((x) => x.id === m.id)) return { wf, added: false }
+      if (isCapabilityPresent(wf, 'model_profile', m.id)) return { wf, added: false }
       addModel(m)
       break
     }
     case 'prompt': {
       const base = capName.split('/').pop() ?? capName
-      if (prompts.some((p) => p.id === base)) return { wf, added: false }
+      if (isCapabilityPresent(wf, 'prompt', capName)) return { wf, added: false }
       prompts.push({ id: base, name: base, text: artifact.text })
       break
     }
@@ -68,10 +102,10 @@ export function applyCapability(
       if (!node || node.type !== 'agent') {
         throw new Error('Pick an agent node for the skill')
       }
-      const cfg = { ...(node as AgentNode).config }
-      if ((cfg.skills ?? []).some((s) => s.name === artifact.name)) {
+      if (isCapabilityPresent(wf, 'skill', artifact.name, targetNodeId)) {
         return { wf, added: false }
       }
+      const cfg = { ...(node as AgentNode).config }
       const toolIds = (artifact.tools as ToolDefinition[]).map(addTool)
       cfg.skills = [
         ...(cfg.skills ?? []),

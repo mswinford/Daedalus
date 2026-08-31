@@ -77,6 +77,7 @@ Extension points today: node type = string literal + Pydantic union variant + if
 ### R10. Unify capability "already applied" logic — P2, duplication
 - **Files:** `frontend/src/lib/capabilityImport.ts` (`applyCapability` presence checks) vs `CapabilityPicker.tsx:34–51` (`isPresent` for the Applied badge) — same rules, two code paths.
 - **Approach:** export one `isCapabilityPresent(wf, capability, target?)` from `capabilityImport.ts`; picker and merge both call it.
+- **Result (2026-08-31): done.** `isCapabilityPresent(wf, kind, key, targetNodeId?)` in `capabilityImport.ts`; `key` = pool id (tool/model), full name (prompt — base split moved inside), skill name (skill). All four inline checks in `applyCapability` call it (skill throw kept before the check); picker's local `isPresent` is now a 3-line key-extraction adapter. Presence rules live in one place; the presence matrix gets real tests with R6.
 
 ### R11. Schema hygiene: `schema_version` — P2
 - **File:** `schema/models.py:338` (declared, never read).
@@ -110,7 +111,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 - [x] R3: split `runs.py` into `app/runs/` package + dedupe `_execute`/`_resume` (→ one `_drive()` in executor.py; 230 passed)
 - [x] R4: node handler registry + `AgentExecutor` extraction (`engine/nodes/` package; builder.py 572→274 lines; 233 passed)
 - [x] R8: shared SQLite helper (`app/sqlite_util.py::secure_owner_only`; scoped down from "3× copy-paste" to the chmod loop — see §R8)
-- [ ] R10: unified capability presence check
+- [x] R10: unified capability presence check (`isCapabilityPresent` in capabilityImport.ts; picker delegates — see §R10)
 - [ ] R6: Vitest setup + pure-function tests (before R5 lands)
 
 **Phase 3 — consistency & extension surface**
