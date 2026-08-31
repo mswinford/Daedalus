@@ -6,6 +6,7 @@ import uuid
 from schema.models import Workflow
 from app.config import get_settings
 from app.engine.validation import validate_workflow
+from app.persistence.workflows import CURRENT_SCHEMA_VERSION, load_workflow
 
 router = APIRouter()
 settings = get_settings()
@@ -16,12 +17,14 @@ def _load_workflow(workflow_id: str) -> Workflow:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
     data = json.loads(path.read_text())
-    return Workflow.model_validate(data)
+    return load_workflow(data)
 
 
 def _save_workflow(workflow: Workflow) -> None:
     path = settings.workflows_dir / f"{workflow.id}.json"
-    path.write_text(workflow.model_dump_json(indent=2))
+    data = workflow.model_dump(mode="json")
+    data["schema_version"] = CURRENT_SCHEMA_VERSION
+    path.write_text(json.dumps(data, indent=2))
 
 
 @router.get("/workflows")
