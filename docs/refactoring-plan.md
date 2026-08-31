@@ -1,156 +1,42 @@
-# AI Forge — Refactoring Plan
+# AI Forge — Refactoring Plan (complete)
 
-Date: 2026-08-30 · Status: **Complete** — all items done: R1, R2, R3, R4, R5, R6, R7 (partial 5ae87e7 + rest 5c11d69), R8, R9, R10, R11, R12
-Convention: check off items (`- [x]`) in this doc at commit time; keep the phase status line current.
+Date: 2026-08-30 → 2026-08-31 · Status: **Complete** — all 12 items landed (`fa72a7d`…`5c11d69`). This doc is now a completion record; the "Do NOT refactor" section and residuals below remain active guidance.
 
-## 1. Current architecture
+## Results
 
-Three deployables, one shared schema package:
-
-| Piece | Stack | Role |
+| Item | Result | Commit |
 |---|---|---|
-| `backend/app` (:3000) | FastAPI + LangGraph | Workflow CRUD, run execution, HIL pause/resume, secrets, WS event streaming |
-| `registry/` (:3010) | FastAPI + git repo + SQLite FTS5 | Capability manifests: publish / search / inline-use |
-| `frontend/src` (:5173) | React 18 + Vite + TS strict + React Flow | Editor canvas, config panels, run panel, capability browser |
-| `schema/` (repo root) | Pydantic | Single source of truth for workflow/capability/run JSON; TS types **generated** into `frontend/src/lib/workflowTypes.generated.ts` (hand layer keeps only React Flow wrappers + frontend-only fields) |
+| R1 — P0 bug: model `api_key_ref` never resolved from secrets store | `_build_providers` resolves via `get_secret()`; missing secret falls back to the raw string (frontend ModelForm pastes literal keys, so no fail-fast); 5 tests in `test_provider_secrets.py` | `fa72a7d` |
+| R2 — P0 security: empirically verify sandbox | Verified clean under RestrictedPython 8.5 — 15 escape probes, zero escapes; probes kept as guard tests. (Scope correction: the restricted compiler was already in place; what was missing was proof.) | `de76258` |
+| R3 — decompose god module `runs.py` (773 lines) | Split into `app/runs/` package (`store`, `record`, `recovery`, `timeouts`, `executor`); `_execute`/`_resume` merged into one `_drive()`; routes stay thin in `api/runs.py` | `4c3f9e1` |
+| R4 — node-type handler registry | `engine/nodes/` package: `base.py` (protocols), one module per type, `HANDLERS` registry; agent tool-loop extracted into unit-testable `AgentExecutor`; builder.py 572→274 lines. New node type = 1 module + 1 registry line | `d347f4e` |
+| R5 — frontend types drift from backend by construction | TS codegen: quicktype-core (`npm run generate:types`) reads both JSON schemas → `workflowTypes.generated.ts`; thin hand layers in `workflowTypes.ts`/`api.ts`. Drift audit fixed a stale `PromptDefinition` mirror. After editing `schema/models.py`: run `scripts/generate_schema.py` **and** `npm run generate:types` | `48d3daf` |
+| R6 — zero frontend tests | Vitest 3 (`^3` pinned — v4 needs Vite 6+), no jsdom; 29 tests over `graphTransform`, `capabilityImport`, countdown logic | `56938ae` |
+| R7 — frontend error states + WS robustness | Partial: workflow-load error rendered + shared `apiErrorMessage`. Rest: `streamRunEvents` bounded reconnect (exponential backoff 500ms→8s, 5 attempts per failure episode, resets on message receipt; server replay from seq 0 makes re-subscribe safe); SecretsPanel query-error branch; sidebar delete-mutation error. 32 frontend tests | `5ae87e7` + `5c11d69` |
+| R8 — shared SQLite helper | Scoped down after re-reading: real duplication was only the chmod loop. Backend-local `app/sqlite_util.py::secure_owner_only(path)`; no new import root, registry untouched (see residual below) | `fa39917` |
+| R9 — registry git+DB consistency | Re-scoped: single-writer invariant already held (both write paths go git-commit → full `sync_from_repo`). Real gap was **no deletion propagation** — `sync_from_repo` now prunes rows absent from the repo (guarded by ≥1 commit; conflict rows kept); publish non-atomicity documented (self-heals on next rescan). +5 tests | `008cd09` |
+| R10 — duplicated capability "already applied" logic | One exported `isCapabilityPresent(wf, kind, key, targetNodeId?)`; `applyCapability` and the picker both delegate | `54fb5e2` |
+| R11 — `schema_version` declared but never read | `load_workflow()` dispatches an ascending `MIGRATIONS` chain (empty at v1), loud error on invalid/future versions; wired into both load sites. Both save paths stamp `CURRENT_SCHEMA_VERSION` so a bump can't write new-shape files stamped old. 11 tests | `2951ad6` |
+| R12 — provider client rebuilt per chat call | `AsyncOpenAI` client created once in `__init__`, reused by chat + chat_stream | `8ec289e` |
 
-Control flow for a run: `POST /workflows/{id}/run` → validate + build `GraphBuilder` → LangGraph `StateGraph` executed in a worker thread with a per-run `AsyncSqliteSaver` (WAL, `~/.ai-forge/checkpoints.db`) → events fanned out via `RunRecord.emit()` to WS subscribers **and** queued to a dedicated writer thread persisting `runs`/`events` tables → HIL nodes raise `GraphInterrupt`, run marked `paused`, recovered from raw checkpoint SQL on restart.
+## Residuals & watch items
 
-Extension points today: node type = string literal + Pydantic union variant + if/elif in `builder._get_node_func` + per-type block in `validation.py` + ~9 hand-touched frontend sites. Provider = enum value + class + factory branch in `llm.create_provider`. Tool implementation = enum + branch in `execute_tool`.
+- **Registry DB not chmodded** (`registry/db.py`): never sets owner-only on its SQLite file, unlike backend run data. Left as-is per R8 scope; fix = call `secure_owner_only` equivalent in `Database.connect`.
+- **Sandbox: `class` statements in user code always error** (`NameError: '__metaclass__'`) — functional bug in custom_function code paths, untracked. Also watch: `default_guarded_getitem` is literally unrestricted (safe today only because no reachable object supports dunder-string subscripting). Guardrail: never add `getattr`/`type` to the sandbox's `_EXTRA_BUILTINS` — that re-opens the aliased-reference bypass.
+- **Sandbox timeout = daemon thread + `join(timeout)`**: a timed-out execution keeps running unkillable. Container/subprocess isolation deferred (would be "Phase 4").
+- **R13 watch item — validation/builder rule duplication**: `validation.py` deliberately mirrors builder structural rules (error-edge rules exist in both). Not force-shared; R4's per-handler `validate()` registration is the natural convergence point. Suggested guard test (build+validate every workflow in `samples/`) was **not added** — only registry samples are tested today.
+- **RetryConfig**: intentionally deferred; schema surface stays, implement as its own increment.
 
-## 2. Top findings
-
-1. **Bug — model API keys are never resolved from the secrets store.** `backend/app/engine/builder.py:174` passes `model_config.api_key_ref` (a *name*, e.g. `"OPENAI_KEY"`) straight into the provider; `llm.py:53` uses it verbatim as the Bearer token. HTTP tools do it correctly (`tools.py:27` calls `get_secret`). Any workflow using a named secret for a model is silently broken (or sends the literal name to the API).
-2. **Security — sandbox needs empirical verification (scope corrected 2026-08-30).** `backend/app/sandbox/runner.py` already uses RestrictedPython 8.5 (`compile_restricted_exec` + `safer_getattr` + guarded getitem/getiter), but nothing proves the configuration holds against bypasses — notably aliased builtins (`g = getattr; g(x, '__subclasses__')`) which skip the compile-time `_getattr_` rewrite. Probe tests required (R2).
-3. **`backend/app/api/runs.py` (773 lines) is a god module** mixing the FastAPI router, in-memory store, SQLite persistence layer (writer thread/queue), restart-recovery logic, HIL timeout scheduling, and WS streaming. `_execute` (542–596) and `_resume` (599–653) are ~90% copy-paste.
-4. **Frontend types drift from the backend by construction.** `frontend/src/lib/workflowTypes.ts` is a hand mirror of `schema/models.py`; drift already exists (`PromptDefinition.variables` missing, `name` non-optional). Generated JSON schemas have no sync check. Event-type literals duplicated again in `lib/api.ts:27–36`.
-5. **Zero frontend tests**, and several pure functions (`graphTransform`, `capabilityImport.applyCapability`, countdown logic) are trivially testable.
-6. **Dead schema surface:** `RetryConfig` + `retry` fields on 3 node configs + `RunEvent.type="retry"` exist but nothing implements retry (known deferred increment); `Workflow.schema_version` is declared and never read — no migration path exists.
-
-## 3. Improvement opportunities
-
-### R1. Resolve `api_key_ref` through the secrets store — P0, bug
-- **Files:** `backend/app/engine/builder.py:174`, `backend/app/engine/llm.py:53`.
-- **Approach:** in `_build_providers`, pass `get_secret(model_config.api_key_ref)` when set; let `llm.py` keep its `or "not-needed"` fallback. Add a test asserting the provider receives the *value*, not the name (and one for unset ref → `"not-needed"`).
-- **Effort/risk:** tiny / near-zero (mirror the already-tested HTTP-tool path).
-
-### R2. Empirically verify the sandbox — P0, security (scope corrected 2026-08-30)
-- **Correction:** `backend/app/sandbox/runner.py` ALREADY uses RestrictedPython 8.5 (`compile_restricted_exec`, `safer_getattr`, guarded getitem/getiter, `safe_builtins`) — the original "plain compile() + blocklist" premise was wrong. The restricted compiler is in place; what's missing is *proof* it holds.
-- **Files:** `backend/app/sandbox/runner.py`, `backend/tests/test_sandbox.py` (8 existing tests, all passing).
-- **Approach:** (a) write escape-probe tests through the real runner: dunder subclass chains, and especially **aliased-builtin bypasses** (`g = getattr; g(x, '__subclasses__')` — RestrictedPython rewrites literal `getattr(...)` calls at compile time, but an aliased reference is a plain call and skips `_getattr_`); (b) if a probe escapes: close the specific hole (e.g. strip dangerous builtins from the namespace, custom `_getattr_` policy) and keep the probe as a regression test; (c) if nothing escapes: probes stay as green guard tests and R2 is done.
-- **Known remaining weakness (documented in runner.py docstring):** timeout = daemon thread + `join(timeout)`; a timed-out execution keeps running unkillable — container/subprocess isolation deferred ("Phase 4"). Out of scope for R2 unless an escape is found.
-- **Result (2026-08-30): verified clean.** 15 probes in `backend/tests/test_sandbox_escape_probes.py` — zero escapes. RP 8.5's `safe_builtins` has no `getattr`/`type`/`vars`/`dir`/`open`; dunders and `_`-names are rejected at compile time (transformer), with the runtime guards as a second layer. Residuals: (a) `default_guarded_getitem` is literally unrestricted — safe today only because no reachable object supports dunder-string subscripting; (b) **class statements in user code always error** (`NameError: '__metaclass__'`) — functional bug, track separately. Guardrail: never add `getattr`/`type` to `_EXTRA_BUILTINS` — that would re-open the aliased-reference bypass.
-
-### R3. Decompose `runs.py` — P1, maintainability
-- **Files:** `backend/app/api/runs.py` — persistence helpers (54–244), `RunRecord` (256–295), recovery (389–539), timeout scheduling (310–381), `_execute`/`_resume` (542–653), routes (656–773).
-- **Approach:** split into `backend/app/runs/` package: `store.py` (SQLite schema + writer thread + flush/shutdown), `record.py` (`RunRecord` + emit + prune), `recovery.py` (`recover_paused_runs`, `recover_finished_runs`, raw-SQL helpers), `timeouts.py` (HIL scheduling); keep `api/runs.py` as thin routes. While splitting, dedupe `_execute`/`_resume` into one `_apply_result(record, result)` + shared terminal/failure emission (~60 lines deleted).
-- **Caveats:** keep `flush_store`/`shutdown_store` semantics intact (the shutdown sentinel must call `task_done()` or `flush_store()` hangs after a TestClient restart cycle). Pure move + extract; all run/HIL/recovery tests must stay green.
-
-### R4. Node-type extension: handler registry — P1, extensibility
-- **Files:** `builder.py:177–194` (`_get_node_func`), edge special cases in `_build_edges` (507–545), per-type blocks in `validation.py` (148–265). Frontend: ~9 sites per new type.
-- **Approach:** a `NodeHandler` protocol in `backend/app/engine/nodes/` — one module per type exposing `build(builder, node) -> Callable` and optionally `validate(node, ctx) -> list[ValidationIssue]`; a `dict[str, NodeHandler]` replaces the if/elif and validation's per-type blocks. Extract the agent tool-loop into an `AgentExecutor` class (testable without a graph). Keep the Pydantic union as-is.
-- **Sequencing:** do after R3 (both restructure the engine).
-- **Result (2026-08-30): done.** `engine/nodes/` package: `base.py` (NodeContext/NodeHandler protocols, AgentState, `_render_template` moved here to avoid a nodes→builder import cycle), one module per type, `HANDLERS` registry in `__init__.py`. builder.py 572 → 274 lines (providers, tracing/cost, `_instrument`, routing, edges only). Agent tool-loop extracted into an `AgentExecutor` class — unit-tested with a fake provider (`test_agent_executor.py`, 3 tests); setup errors still fire at graph-build time. Dead `_start_node`/`_end_node` deleted (build() never added them to the graph). New node type = 1 module + 1 registry line. Note: per-handler `validate()` (the R13 convergence point) was NOT added — validation.py untouched, as scoped.
-
-### R5. Frontend: generated or parity-checked types — P1, correctness
-- **Files:** `frontend/src/lib/workflowTypes.ts` vs `schema/models.py`; `scripts/generate_schema.py`.
-- **Approach (recommended):** extend `generate_schema.py` to also emit TS types from the Pydantic JSON schemas into `frontend/src/lib/generated/`; hand-written file keeps only React Flow-specific wrappers. Cheaper alternative: a parity test asserting generated schema fields against checked-in expectations.
-- **Note:** do R6 first so the generated types are covered by tests immediately.
-
-### R6. Frontend: test the pure core — P1, testability
-- **Approach:** add Vitest (no DOM needed), ~15–20 tests: `graphTransform` round-trips incl. conditional-handle derivation, `applyCapability` dedup rules per kind ("once per attachment point" matrix), countdown label edges.
-- **Result (2026-08-31): done.** vitest 3.2.7 (`^3` pinned — v4 needs Vite 6+), minimal `vitest.config.ts` reusing the `@` alias, no jsdom/globals, tsconfig untouched. 29 tests: graphTransform (handles + round-trips incl. error edges), capabilityImport presence/dedupe matrix (per-workflow pool kinds, skill once-per-agent, agent always adds, nested pool reuse), RunPanel `remainingSeconds` boundaries (extracted from the inline countdown math).
-
-### R7. Frontend: error states + WS robustness — P2, reliability
-- **Problems:** `WorkflowEditor.tsx` load failure sets `error` state but never renders it (UI spins forever on "Loading workflow…"); `SecretsPanel` has no query error branch; sidebar delete-mutation errors swallowed; `streamRunEvents` (`api.ts:91–126`) has no `onerror`, no reconnect, silently drops malformed frames.
-- **Approach:** render the existing `error` state (worst one first); shared `apiErrorMessage(e)` helper replacing the 4× repeated `e?.response?.data?.detail ?? e?.message`; WS `onerror` + bounded reconnect with seq-based replay (backend already replays on connect, so re-subscribe is safe).
-
-### R8. Shared SQLite helper — P2, duplication
-- **Files:** chmod-0600 + WAL open snippet copy-pasted in `runs.py:81–91`, `runner.py:24–30`, `registry/db.py`.
-- **Approach:** one `open_secure_sqlite(path)` helper. Backend and registry are separate packages — either a small shared `common/` import root or accept the duplication knowingly with a comment (see open questions).
-- **Result (2026-08-30): done, scoped down.** Re-reading the three sites showed the real duplication was only the 4-line chmod loop (2×) + one WAL pragma line (3×); sync/async call sites can't share the connect/execute part. Decision (user-approved): backend-local `app/sqlite_util.py::secure_owner_only(path)` used by `store.py` and `runner.py`; no new import root, registry untouched. Known residual: `registry/db.py` never chmods its DB owner-only — left as-is per scope.
-
-### R9. Registry: git+DB consistency as an invariant — P2
-- **Files:** `registry/store.py` (`upsert_version` writes SQLite only), `registry/indexer.py` (hand-maintained FTS column list parallel to schema).
-- **Why:** git/DB stay in sync only because the API path happens to call both; a future direct `upsert_version` call silently diverges.
-- **Approach:** fold index update into the store write path (single writer), or add a startup `verify_index()` diffing git tree vs FTS rows and re-syncing. Add tests: direct-upsert consistency, deleted-manifest resync, circular skill-ref in `inline.py` (guard exists, untested).
-- **Result (2026-08-31): done, re-scoped.** Re-reading the code showed the single-writer invariant already held — both write paths (publish, CLI seed) go git-commit → full `sync_from_repo` rescan, so no folding was needed. The "cycle guard" doesn't exist and isn't needed: the ref graph is structurally acyclic per schema (agent→{skill,tool,model,prompt}, skill→{tool,prompt}; terminal kinds carry no refs). The real gap was **no deletion propagation** — `sync_from_repo` now prunes rows absent from the repo (guarded by ≥1 commit; conflict rows kept with their lifecycle state), and publish's git-commit-before-sync non-atomicity is documented (self-heals on next rescan). +5 tests: prune, empty-repo safety, uncommitted-manifest pickup, publish git/DB agreement, self-ref 422.
-
-### R10. Unify capability "already applied" logic — P2, duplication
-- **Files:** `frontend/src/lib/capabilityImport.ts` (`applyCapability` presence checks) vs `CapabilityPicker.tsx:34–51` (`isPresent` for the Applied badge) — same rules, two code paths.
-- **Approach:** export one `isCapabilityPresent(wf, capability, target?)` from `capabilityImport.ts`; picker and merge both call it.
-- **Result (2026-08-31): done.** `isCapabilityPresent(wf, kind, key, targetNodeId?)` in `capabilityImport.ts`; `key` = pool id (tool/model), full name (prompt — base split moved inside), skill name (skill). All four inline checks in `applyCapability` call it (skill throw kept before the check); picker's local `isPresent` is now a 3-line key-extraction adapter. Presence rules live in one place; the presence matrix gets real tests with R6.
-
-### R11. Schema hygiene: `schema_version` — P2 ✅ (commit 2951ad6)
-- **File:** `schema/models.py:338` (declared, never read).
-- **Approach:** implement the minimal loader hook (`Workflow.model_validate` wrapper dispatching on `schema_version`) now while there are zero migrations to write, or delete the field.
-- **Result:** loader hook implemented — `load_workflow()` in `app/persistence/workflows.py` (MIGRATIONS chain, empty at v1; loud error on unknown/future versions) wired into both load sites (`WorkflowStore.get`, api `_load_workflow`). Both save paths stamp `CURRENT_SCHEMA_VERSION` so a future bump can't write v2-shaped files stamped v1. 11 tests in `test_workflow_schema_version.py`; 251 passed.
-
-### R12. Provider client caching — P3, perf
-- **File:** `llm.py:64,109` — a new `AsyncOpenAI` (and its httpx pool) is constructed per chat call inside an agent loop that may call 10×.
-- **Approach:** create the client once in `__init__`.
-
-### R13. Validation/builder rule duplication — P3, watch item
-- `validation.py` deliberately mirrors builder structural rules (error-edge rules exist in both). Don't force-share now; R4's per-handler `validate()` registration is the natural convergence point. Until then, keep a test that builds+validates every sample workflow so divergence surfaces.
-
-## 4. Extension-point audit (cost of adding a new node type today)
-
-**Backend (4 files):** `schema/models.py` (Literal + union variant + config model) → `builder._get_node_func` elif + often edge-routing special cases → `validation.py` per-type block → JSON schema regen (`PYTHONPATH=. python scripts/generate_schema.py`).
-**Frontend (9 sites):** `NodeType`, config interface, `NodeConfig` union, node interface, `NODE_META`, `ALL_NODE_TYPES`, `defaultConfig()`, `FlowNode.ICONS`, `subtitle()` switch, + a 60–120-line form in `ConfigPanel.renderConfig`.
-
-Mitigating factor: TS strict + exhaustive switches make every site a compile error — costly but not silently broken. R4 fixes the backend half; R5's codegen removes 3 of the 9 frontend sites automatically.
-
-Adding a **provider** is already fine (enum + class + one factory branch). Adding a **tool implementation** is the weakest spot: `execute_tool`'s if/elif over `ToolImplementationType` with untyped `config: dict[str, Any]` — when a 4th implementation type lands, give each implementation its own config model and a small dispatch table.
-
-## 5. Roadmap
-
-**Phase 1 — bugs & security (days, no structural risk)** ✅ done 2026-08-30
-- [x] R1: secret resolution for `api_key_ref` + test — `fa72a7d`. `_build_providers` resolves via `get_secret()`; missing secret falls back to the raw string (frontend ModelForm pastes literal keys, so no fail-fast); 5 tests in `test_provider_secrets.py`.
-- [x] R2: sandbox escape probe — verified clean, 15 guard tests added (scope correction: RestrictedPython was already in use) — `de76258`. Residuals documented in §R2: unrestricted `default_guarded_getitem` (watch item) + class statements broken in user code (`__metaclass__` NameError — functional bug, untracked).
-- [x] R7 (partial): render WorkflowEditor load error; shared `apiErrorMessage` in lib/api.ts (replaced 2 call sites — the only occurrences repo-wide) — `5ae87e7`.
-- [x] R12: cache the OpenAI client (both chat + chat_stream now reuse the `__init__` client) — `8ec289e`.
-
-**Phase 2 — structure (sequenced)**
-- [x] R3: split `runs.py` into `app/runs/` package + dedupe `_execute`/`_resume` (→ one `_drive()` in executor.py; 230 passed)
-- [x] R4: node handler registry + `AgentExecutor` extraction (`engine/nodes/` package; builder.py 572→274 lines; 233 passed)
-- [x] R8: shared SQLite helper (`app/sqlite_util.py::secure_owner_only`; scoped down from "3× copy-paste" to the chmod loop — see §R8)
-- [x] R10: unified capability presence check (`isCapabilityPresent` in capabilityImport.ts; picker delegates — see §R10)
-- [x] R6: Vitest setup + pure-function tests — 29 tests green; `remainingSeconds` extracted (see §R6)
-
-**Phase 3 — consistency & extension surface**
-- [x] R5: TS type codegen from Pydantic schemas (48d3daf — quicktype-core `npm run generate:types` → `workflowTypes.generated.ts`; thin re-export layers in workflowTypes.ts/api.ts; drift audit fixed stale PromptDefinition mirror)
-- [x] R9: registry git+DB consistency (008cd09 — premise re-scoped: single-writer invariant already held; real gap was no deletion propagation. `sync_from_repo` now prunes rows absent from the repo, conflict rows kept; publish non-atomicity documented; +5 tests)
-- [x] R11: `schema_version` loader hook + save stamping (2951ad6 — `load_workflow()` dispatches on version, loud error on unknown/future; both load sites wired; both save paths stamp `CURRENT_SCHEMA_VERSION`; 11 tests)
-- [x] R7 (rest): WS bounded reconnect + error states (5c11d69 — `streamRunEvents` re-subscribes with exponential backoff 500ms→8s, 5 attempts per failure episode (resets on message receipt); server replay from seq 0 + caller dedupe make it safe. SecretsPanel query-error branch; sidebar delete-mutation error via `apiErrorMessage`. 32 frontend tests.)
-
-## 6. Concrete steps for the two P0 items
-
-**R1 (secret resolution):** in `builder.py._build_providers`, replace `"api_key": model_config.api_key_ref` with a lookup: `get_secret(ref)` if `ref` is set, else `None`; let `llm.py` keep its `or "not-needed"` fallback. Tests: seed a secret via the existing secrets test utilities, build a workflow whose model references it by name, assert the constructed provider's `api_key` equals the secret *value*; second test for unset ref → `"not-needed"`.
-
-**R2 (sandbox):** write probe tests through the real `run_sandboxed`: (1) direct dunder subclass chain — expect blocked by `safer_getattr`; (2) aliased-builtin bypass (`g = getattr; g(x, '__subclasses__')`) — the suspected real hole; (3) any other reachability probes found while reading the guards. Escaping probes get `xfail(strict=True)` (suite stays green, fails loudly if fixed); blocked ones are plain passing tests. If a hole is found: close it in `runner.py` (namespace/policy fix), convert the probe to a green regression test. The unkillable-timeout-thread weakness stays documented, out of scope.
-
-## 7. Testing plan
-
-- **Per refactor:** `python -m pytest -q` after every phase step; R3/R4 must land with zero behavior change (all run/HIL/recovery/error-branch tests green before and after).
-- **New backend tests:** secret→provider resolution (R1); sandbox escape probe (R2); runs-store unit tests once `store.py` is isolated (flush/shutdown, prune boundary at MAX_RUNS); registry: direct-upsert git/DB consistency, deleted-manifest resync, circular skill ref; schema-sync test asserting `generate_schema.py` output matches committed JSON.
-- **New frontend tests:** Vitest for `graphTransform` round-trips, `applyCapability` dedup matrix, countdown labels (R6).
-- **Manual smoke after Phase 2:** full dev stack (`./scripts/dev.sh`) — create workflow with HIL + timeout, pause, restart backend mid-pause, verify recovery; run a tool-calling agent against a local model.
-
-## 8. Do NOT refactor
+## Do NOT refactor
 
 - The per-run event loop + per-run `AsyncSqliteSaver` in `runner.py` — deliberate workaround for aiosqlite's loop-binding; "cleaner" shared-saver designs are dead ends.
 - Raw SQL over the `writes` table in recovery — brittle-looking but the only way to see pending interrupts without the real graph; keep, with a comment pinning the LangGraph version assumption.
-- The writer-thread persistence design in runs.py — synchronous SQLite on the loop self-deadlocks; the queue/thread is correct, only its *location* should move (R3).
+- The writer-thread persistence design in `app/runs/store.py` — synchronous SQLite on the loop self-deadlocks; the queue/thread is correct.
 - `Command(resume={id: value})` map-form workaround in `resume_workflow` — LangGraph 1.2.x bug workaround; don't "simplify" it.
-- The two-app split (backend vs registry) and the git+SQLite registry design — architecturally sound; only tighten the write path (R9).
+- The two-app split (backend vs registry) and the git+SQLite registry design — architecturally sound.
 - Introducing a DI framework, an ORM, or microservices — no current pain justifies them.
-- `RetryConfig` — intentionally deferred; leave the schema surface, implement as its own increment.
 
-## 9. Open questions
+## Open questions
 
-1. **Sandbox threat model:** is custom_function code ever written by someone other than the workflow owner? Decides R2's scope (RestrictedPython policy vs subprocess/container vs documented "trusted only").
-2. **`api_key_ref` semantics when the named secret doesn't exist:** fail fast at build time, or fall back to treating the string as a literal key (current accidental behavior)? Leaning fail-fast with a clear validation error.
-3. **TS codegen (R5) vs parity test:** codegen is the durable fix but adds a build step — acceptable?
-4. **Shared `common/` package** for the SQLite helper (R8): fine to add another import root, or keep backend/registry independent and accept the duplication?
-5. **Is Anthropic-provider support near-term?** If yes, R4 should land first so the provider factory gets a second real consumer; if no, the current factory is adequate.
-6. **Multi-process deployment ever planned?** The module-level `RUNS` dict + single writer thread assume one process; if horizontal scaling is on the horizon, Phase 2's store extraction should target a swappable backend from day one.
+1. **Sandbox threat model:** is custom_function code ever written by someone other than the workflow owner? R2 proved the RestrictedPython policy holds against escape probes; if untrusted authors are possible, subprocess/container isolation (see residuals) is still warranted.
+2. **Multi-process deployment ever planned?** The module-level `RUNS` dict + single writer thread assume one process; if horizontal scaling is on the horizon, the store should target a swappable backend.
