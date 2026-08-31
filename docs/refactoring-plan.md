@@ -1,6 +1,6 @@
 # AI Forge — Refactoring Plan
 
-Date: 2026-08-30 · Status: **Phase 3 in progress** — done: R1, R2, R3, R4, R5, R6, R7-partial, R8, R9, R10, R12; remaining: R11, R7 (rest)
+Date: 2026-08-30 · Status: **Phase 3 in progress** — done: R1, R2, R3, R4, R5, R6, R7-partial, R8, R9, R10, R11, R12; remaining: R7 (rest)
 Convention: check off items (`- [x]`) in this doc at commit time; keep the phase status line current.
 
 ## 1. Current architecture
@@ -81,9 +81,10 @@ Extension points today: node type = string literal + Pydantic union variant + if
 - **Approach:** export one `isCapabilityPresent(wf, capability, target?)` from `capabilityImport.ts`; picker and merge both call it.
 - **Result (2026-08-31): done.** `isCapabilityPresent(wf, kind, key, targetNodeId?)` in `capabilityImport.ts`; `key` = pool id (tool/model), full name (prompt — base split moved inside), skill name (skill). All four inline checks in `applyCapability` call it (skill throw kept before the check); picker's local `isPresent` is now a 3-line key-extraction adapter. Presence rules live in one place; the presence matrix gets real tests with R6.
 
-### R11. Schema hygiene: `schema_version` — P2
+### R11. Schema hygiene: `schema_version` — P2 ✅ (commit 2951ad6)
 - **File:** `schema/models.py:338` (declared, never read).
 - **Approach:** implement the minimal loader hook (`Workflow.model_validate` wrapper dispatching on `schema_version`) now while there are zero migrations to write, or delete the field.
+- **Result:** loader hook implemented — `load_workflow()` in `app/persistence/workflows.py` (MIGRATIONS chain, empty at v1; loud error on unknown/future versions) wired into both load sites (`WorkflowStore.get`, api `_load_workflow`). Both save paths stamp `CURRENT_SCHEMA_VERSION` so a future bump can't write v2-shaped files stamped v1. 11 tests in `test_workflow_schema_version.py`; 251 passed.
 
 ### R12. Provider client caching — P3, perf
 - **File:** `llm.py:64,109` — a new `AsyncOpenAI` (and its httpx pool) is constructed per chat call inside an agent loop that may call 10×.
@@ -119,7 +120,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 **Phase 3 — consistency & extension surface**
 - [x] R5: TS type codegen from Pydantic schemas (48d3daf — quicktype-core `npm run generate:types` → `workflowTypes.generated.ts`; thin re-export layers in workflowTypes.ts/api.ts; drift audit fixed stale PromptDefinition mirror)
 - [x] R9: registry git+DB consistency (008cd09 — premise re-scoped: single-writer invariant already held; real gap was no deletion propagation. `sync_from_repo` now prunes rows absent from the repo, conflict rows kept; publish non-atomicity documented; +5 tests)
-- [ ] R11: `schema_version` migration hook (or removal)
+- [x] R11: `schema_version` loader hook + save stamping (2951ad6 — `load_workflow()` dispatches on version, loud error on unknown/future; both load sites wired; both save paths stamp `CURRENT_SCHEMA_VERSION`; 11 tests)
 - [ ] R7 (rest): WS reconnect with seq replay; remaining error states
 
 ## 6. Concrete steps for the two P0 items
