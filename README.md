@@ -12,6 +12,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - LangGraph-based execution of `start → … → end` graphs, run **asynchronously** over HTTP with live event streaming.
 - Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), and `human_in_loop` (pause / resume / reject).
 - Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
+- **Error branches** — opt-in per-node error handle (config panel toggle); when a node fails, the run routes down its red-dashed `error` edge if one exists, otherwise the run fails. Human-in-loop pauses are never treated as failures.
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
 - Per-agent message isolation — each agent keeps its own conversation; agents share only structured `data`.
 - Run input validated against the workflow's `state_schema` (if defined) before execution.

@@ -27,19 +27,20 @@ GET /api/runs/{id}        poll for status + result   ·   WS /api/runs/{id}/even
 POST /api/runs/{id}/resume  resume a paused run with Command(resume=human_input)
 ```
 
-Runs are **asynchronous**: `POST .../run` returns `202` + `run_id` and the graph executes in a worker thread (`asyncio.to_thread`). Events stream over WebSocket; the finished `WorkflowRun` is retrievable by polling. A human-in-loop node pauses the run (LangGraph `interrupt()`); it is resumed later via `POST /api/runs/{id}/resume`, which calls `runner.resume_workflow` with a `Command(resume=...)` against the shared in-memory `MemorySaver` checkpointer.
+Runs are **asynchronous**: `POST .../run` returns `202` + `run_id` and the graph executes in a worker thread (`asyncio.to_thread`). Events stream over WebSocket; the finished `WorkflowRun` is retrievable by polling. A human-in-loop node pauses the run (LangGraph `interrupt()`); it is resumed later via `POST /api/runs/{id}/resume`, which calls `runner.resume_workflow` with a `Command(resume=...)` against the SQLite checkpointer (`~/.ai-forge/checkpoints.db`, one connection per run).
 
-The workflow JSON is translated into a LangGraph `StateGraph` once per run (`builder.py`). Every node is an async function that receives the shared state and returns the parts of the state it changed. Each node is wrapped by `_instrument`, which emits `node_start` / `node_end` (with duration + summarized output) events, re-raises LangGraph's `GraphInterrupt` untouched, and turns any other exception into a fatal `node_error` event.
+The workflow JSON is translated into a LangGraph `StateGraph` once per run (`builder.py`). Every node is an async function that receives the shared state and returns the parts of the state it changed. Each node is wrapped by `_instrument`, which emits `node_start` / `node_end` (with duration + summarized output) events and re-raises LangGraph's `GraphInterrupt` untouched. Any other exception becomes a fatal `node_error` event — **unless** the node owns an error edge (`error_handling` opt-in), in which case the exception is converted into the `_error_info` state marker instead so the router can take the error path (see §4).
 
 ## 2. The shared state
 
-Every node reads and writes one state object with five channels (built in `runner._build_initial_state`):
+Every node reads and writes one state object with six channels (built in `runner._build_initial_state`):
 
 | Channel | Type | Purpose |
 |---|---|---|
 | `messages_by_node` | dict | Chat history **per agent node**, keyed by node id. Each agent appends only to its own slice (`state["messages_by_node"][node_id]`); a different agent does **not** see it. |
 | `output` | str | The most recent node's primary output string. Overwritten by each node. This is what regex conditions match against and what `{{output}}` templates render. |
-| `error` | str | Reserved. Currently no node writes it; failures raise exceptions instead and surface as a failed run. |
+| `error` | str | Reserved. Currently no node writes it; failures use the `_error_info` marker below or fail the run. |
+| `_error_info` | dict | Transient failure marker: `{node_id, error}` while a node's exception is being routed to its error edge; cleared (set to `{}`) by the next successful node. Not addressable by conditions. |
 | `data` | dict | The general-purpose data bag. Run inputs land here; nodes add fields here for downstream use. Addressable as `$.data.<field>` in conditions/templates. **This is the only thing agents share with each other.** |
 | `_node_outputs` | dict | Per-node results, keyed by node id. In the HTTP response this is returned as `node_outputs`. Not addressable by conditions (use `data`), but useful for debugging and templates (`{{_node_outputs.grade.label}}`). |
 
@@ -117,7 +118,7 @@ After execution:
 - Only keys listed in `config.output_fields` are copied from `result` into `data`. Undeclared keys remain visible only via `_node_outputs`.
 - `output` = `str(result)` (Python repr of the whole result dict).
 - `_node_outputs[id]` = full `result` dict.
-- Any compile/runtime error or timeout fails the run (`RuntimeError`).
+- Any compile/runtime error or timeout raises `RuntimeError` — routed to the node's error edge if it has one, otherwise the run fails.
 
 Available builtins are restricted to safe ones (`safe_builtins` + list/dict/set/min/max/sum/any/all/map/filter/enumerate/reversed). No imports, no filesystem, no network. Custom functions can also call `get_secret(name)` to read a value from the secrets store.
 
@@ -144,7 +145,7 @@ Edge shape: `{id, source_node_id, source_handle, target_node_id, type: "static"|
 - For **conditional nodes**, conditions come from `config.conditions` (see above).
 - The router returns a `source_handle`; the path map translates each handle to its target node id (or `END`).
 
-The `"error"` edge type is not wired to failure handling — node exceptions fail the whole run (emitted as a fatal `node_error` event). An `error`-typed edge on a non-conditional node is currently added like any other static edge.
+**Error edges.** A node that opted in to error handling (`Node.error_handling`) may own one outgoing edge with `type == "error"` (source handle `"error"`, red dashed in the UI). When that node raises, `_instrument` stores the exception in `_error_info` instead of failing the run, and the router checks the marker **before** normal routing: if it is set, the run follows the error edge; otherwise routing proceeds as usual and a successful node clears the marker. A HIL pause (`GraphInterrupt`) is never treated as a failure — it always re-raises and pauses the run. Error edges are excluded from conditional branch matching, so a conditional node can carry both condition branches and an error handle. Validation: at most one error edge per source, none from `start`, and the source must also have a non-error fallback path.
 
 ## 5. Condition expressions (`backend/app/engine/conditions.py`)
 

@@ -163,17 +163,23 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
    with the aiosqlite checkpointer). After a restart, completed/failed runs are rebuilt with their
    full event log (`recover_finished_runs()`), so the RunPanel shows history for pre-restart runs and
    resumed HIL runs keep a continuous seq-numbered stream.
-- [ ] **Error branches** — per-node error edges for recovery routing (see Feature Decisions → Error
-  Handling). Design settled 2026-08-29:
-  - **Backend**: when a node raises, route to that node's single `type == "error"` edge if one
-    exists; otherwise the run fails as today. `GraphInterrupt` (HIL pause) must still re-raise — it
-    is never treated as a failure.
-  - **Frontend**: dedicated red error handle per node, **opt-in** — a toggle in the node config
-    panel (e.g. "Enable error handling") reveals the handle; nodes that don't need error handling
-    are unchanged. Connecting from the red handle creates an edge with `semanticType: 'error'`,
-    styled red dashed in React Flow.
-  - **Validation**: at most one error edge per source node.
-  - Per-node retry logic (max_retries / backoff) is a separate future increment, not part of this.
+- [x] **Error branches** *(done 2026-08-30)* — per-node error edges for recovery routing.
+  Design settled 2026-08-29; implemented as designed:
+  - **Backend**: `Node.error_handling` (opt-in) marks a node as owning an error handle. When an
+    instrumented node raises, the exception is converted into an `_error_info` state marker
+    (cleared on success) and the node's router routes the run down its single `type == "error"`
+    edge before normal routing; with no error edge the run fails as before. `GraphInterrupt`
+    (HIL pause) always re-raises — it is never treated as a failure. Error edges are excluded
+    from conditional branch matching, so a node can carry both condition branches and an error
+    handle.
+  - **Frontend**: red error handle on opted-in nodes (config-panel "Enable error handling"
+    toggle); connecting from it creates an edge with `semanticType: 'error'`, styled red dashed;
+    disabling the toggle drops any wired error edge.
+  - **Validation**: `E_MULTIPLE_ERROR_EDGES` (max one per source), `E_ERROR_EDGE_FROM_START`,
+    `E_ERROR_EDGE_NO_FALLBACK` (a success path must exist to fall through to), and
+    `W_ERROR_EDGE_NO_OPTIN` (warning).
+  - Tests: `backend/tests/test_error_branches.py` (routing, interrupt passthrough, all validation
+    rules). Per-node retry logic (max_retries / backoff) remains a separate future increment.
 
 ### Deferred experiment: GitHub "user story → PR" agent sample
 Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample
@@ -415,10 +421,11 @@ Estimate ~1 day.
 - LangGraph stays as the orchestrator
 
 ### Error Handling
-- **Retry logic** — Configurable per node (max retries, backoff strategy)
-- **Error branches** — Optional error output edge per node for recovery logic
+- **Error branches** *(implemented)* — Opt-in error output edge per node for recovery logic; a
+  node failure routes down its `type == "error"` edge if present, otherwise the run fails.
+  Error edges styled as red dashed lines in the UI.
+- **Retry logic** — Configurable per node (max retries, backoff strategy) *(future increment)*
 - If retry exhausted AND no error edge, workflow fails
-- Error edges styled as red dashed lines in the UI
 
 ### Debugging UX
 - **Run log** — Timestamped events per run
