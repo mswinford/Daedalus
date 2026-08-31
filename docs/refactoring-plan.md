@@ -1,6 +1,6 @@
 # AI Forge — Refactoring Plan
 
-Date: 2026-08-30 · Status: **Phases 1–2 complete** (R1, R2, R3, R4, R6, R7-partial, R8, R10, R12) — next: Phase 3
+Date: 2026-08-30 · Status: **Phase 3 in progress** — done: R1, R2, R3, R4, R5, R6, R7-partial, R8, R9, R10, R12; remaining: R11, R7 (rest)
 Convention: check off items (`- [x]`) in this doc at commit time; keep the phase status line current.
 
 ## 1. Current architecture
@@ -74,6 +74,7 @@ Extension points today: node type = string literal + Pydantic union variant + if
 - **Files:** `registry/store.py` (`upsert_version` writes SQLite only), `registry/indexer.py` (hand-maintained FTS column list parallel to schema).
 - **Why:** git/DB stay in sync only because the API path happens to call both; a future direct `upsert_version` call silently diverges.
 - **Approach:** fold index update into the store write path (single writer), or add a startup `verify_index()` diffing git tree vs FTS rows and re-syncing. Add tests: direct-upsert consistency, deleted-manifest resync, circular skill-ref in `inline.py` (guard exists, untested).
+- **Result (2026-08-31): done, re-scoped.** Re-reading the code showed the single-writer invariant already held — both write paths (publish, CLI seed) go git-commit → full `sync_from_repo` rescan, so no folding was needed. The "cycle guard" doesn't exist and isn't needed: the ref graph is structurally acyclic per schema (agent→{skill,tool,model,prompt}, skill→{tool,prompt}; terminal kinds carry no refs). The real gap was **no deletion propagation** — `sync_from_repo` now prunes rows absent from the repo (guarded by ≥1 commit; conflict rows kept with their lifecycle state), and publish's git-commit-before-sync non-atomicity is documented (self-heals on next rescan). +5 tests: prune, empty-repo safety, uncommitted-manifest pickup, publish git/DB agreement, self-ref 422.
 
 ### R10. Unify capability "already applied" logic — P2, duplication
 - **Files:** `frontend/src/lib/capabilityImport.ts` (`applyCapability` presence checks) vs `CapabilityPicker.tsx:34–51` (`isPresent` for the Applied badge) — same rules, two code paths.
@@ -117,7 +118,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 
 **Phase 3 — consistency & extension surface**
 - [x] R5: TS type codegen from Pydantic schemas (48d3daf — quicktype-core `npm run generate:types` → `workflowTypes.generated.ts`; thin re-export layers in workflowTypes.ts/api.ts; drift audit fixed stale PromptDefinition mirror)
-- [ ] R9: registry single-writer invariant + missing tests
+- [x] R9: registry git+DB consistency (008cd09 — premise re-scoped: single-writer invariant already held; real gap was no deletion propagation. `sync_from_repo` now prunes rows absent from the repo, conflict rows kept; publish non-atomicity documented; +5 tests)
 - [ ] R11: `schema_version` migration hook (or removal)
 - [ ] R7 (rest): WS reconnect with seq replay; remaining error states
 
