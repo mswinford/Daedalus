@@ -1,5 +1,4 @@
 """Execute workflows using LangGraph."""
-import os
 from typing import Any, Callable
 
 import aiosqlite
@@ -9,6 +8,7 @@ from langgraph.types import Command
 from schema.models import Workflow, StateFieldType, RunEvent
 from app.config import get_settings
 from app.engine.builder import GraphBuilder
+from app.sqlite_util import secure_owner_only
 
 
 async def _open_checkpointer() -> AsyncSqliteSaver:
@@ -23,9 +23,7 @@ async def _open_checkpointer() -> AsyncSqliteSaver:
     settings = get_settings()
     path = str(settings.checkpoint_db)
     conn = await aiosqlite.connect(path, timeout=5.0)
-    for suffix in ("", "-wal", "-shm"):  # keep run data owner-only (like secrets.json)
-        if os.path.exists(path + suffix):
-            os.chmod(path + suffix, 0o600)
+    secure_owner_only(path)
     await conn.execute("PRAGMA journal_mode=WAL")
     return AsyncSqliteSaver(conn)
 

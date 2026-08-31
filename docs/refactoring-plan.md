@@ -67,6 +67,7 @@ Extension points today: node type = string literal + Pydantic union variant + if
 ### R8. Shared SQLite helper — P2, duplication
 - **Files:** chmod-0600 + WAL open snippet copy-pasted in `runs.py:81–91`, `runner.py:24–30`, `registry/db.py`.
 - **Approach:** one `open_secure_sqlite(path)` helper. Backend and registry are separate packages — either a small shared `common/` import root or accept the duplication knowingly with a comment (see open questions).
+- **Result (2026-08-30): done, scoped down.** Re-reading the three sites showed the real duplication was only the 4-line chmod loop (2×) + one WAL pragma line (3×); sync/async call sites can't share the connect/execute part. Decision (user-approved): backend-local `app/sqlite_util.py::secure_owner_only(path)` used by `store.py` and `runner.py`; no new import root, registry untouched. Known residual: `registry/db.py` never chmods its DB owner-only — left as-is per scope.
 
 ### R9. Registry: git+DB consistency as an invariant — P2
 - **Files:** `registry/store.py` (`upsert_version` writes SQLite only), `registry/indexer.py` (hand-maintained FTS column list parallel to schema).
@@ -108,7 +109,8 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 **Phase 2 — structure (sequenced)**
 - [x] R3: split `runs.py` into `app/runs/` package + dedupe `_execute`/`_resume` (→ one `_drive()` in executor.py; 230 passed)
 - [x] R4: node handler registry + `AgentExecutor` extraction (`engine/nodes/` package; builder.py 572→274 lines; 233 passed)
-- [ ] R8: shared SQLite helper · R10: unified capability presence check
+- [x] R8: shared SQLite helper (`app/sqlite_util.py::secure_owner_only`; scoped down from "3× copy-paste" to the chmod loop — see §R8)
+- [ ] R10: unified capability presence check
 - [ ] R6: Vitest setup + pure-function tests (before R5 lands)
 
 **Phase 3 — consistency & extension surface**

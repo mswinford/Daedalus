@@ -7,7 +7,6 @@ it: they are queued and applied by a dedicated writer thread using short-lived
 connections (open, write, commit, close).
 """
 import json
-import os
 import queue
 import sqlite3
 import sys
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
+from app.sqlite_util import secure_owner_only
 
 # Bound the in-memory store so a long-lived process doesn't grow unbounded.
 MAX_RUNS = 200
@@ -52,9 +52,7 @@ def _store_connect(path: str) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
-    for suffix in ("", "-wal", "-shm"):  # keep run data owner-only (like secrets.json)
-        if os.path.exists(path + suffix):
-            os.chmod(path + suffix, 0o600)
+    secure_owner_only(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_STORE_SCHEMA)
     return conn
