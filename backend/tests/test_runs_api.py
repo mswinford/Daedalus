@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.api import workflows as wf_module
-from app.api import runs as runs_module
+from app import runs as runs_module
 
 
 @pytest.fixture(autouse=True)

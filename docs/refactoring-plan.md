@@ -105,7 +105,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 - [x] R12: cache the OpenAI client (both chat + chat_stream now reuse the `__init__` client) — `8ec289e`.
 
 **Phase 2 — structure (sequenced)**
-- [ ] R3: split `runs.py` into `app/runs/` package + dedupe `_execute`/`_resume`
+- [x] R3: split `runs.py` into `app/runs/` package + dedupe `_execute`/`_resume` (→ one `_drive()` in executor.py; 230 passed)
 - [ ] R4: node handler registry + `AgentExecutor` extraction
 - [ ] R8: shared SQLite helper · R10: unified capability presence check
 - [ ] R6: Vitest setup + pure-function tests (before R5 lands)
