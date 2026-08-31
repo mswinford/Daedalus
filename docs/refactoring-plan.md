@@ -1,6 +1,6 @@
 # AI Forge — Refactoring Plan
 
-Date: 2026-08-30 · Status: **Phase 1 complete** (R1, R2, R7-partial, R12) — next: Phase 2
+Date: 2026-08-30 · Status: **Phases 1–2 complete** (R1, R2, R3, R4, R6, R7-partial, R8, R10, R12) — next: Phase 3
 Convention: check off items (`- [x]`) in this doc at commit time; keep the phase status line current.
 
 ## 1. Current architecture
@@ -12,7 +12,7 @@ Three deployables, one shared schema package:
 | `backend/app` (:3000) | FastAPI + LangGraph | Workflow CRUD, run execution, HIL pause/resume, secrets, WS event streaming |
 | `registry/` (:3010) | FastAPI + git repo + SQLite FTS5 | Capability manifests: publish / search / inline-use |
 | `frontend/src` (:5173) | React 18 + Vite + TS strict + React Flow | Editor canvas, config panels, run panel, capability browser |
-| `schema/` (repo root) | Pydantic | Single source of truth for workflow/capability/run JSON; mirrored **by hand** in `frontend/src/lib/workflowTypes.ts` |
+| `schema/` (repo root) | Pydantic | Single source of truth for workflow/capability/run JSON; TS types **generated** into `frontend/src/lib/workflowTypes.generated.ts` (hand layer keeps only React Flow wrappers + frontend-only fields) |
 
 Control flow for a run: `POST /workflows/{id}/run` → validate + build `GraphBuilder` → LangGraph `StateGraph` executed in a worker thread with a per-run `AsyncSqliteSaver` (WAL, `~/.ai-forge/checkpoints.db`) → events fanned out via `RunRecord.emit()` to WS subscribers **and** queued to a dedicated writer thread persisting `runs`/`events` tables → HIL nodes raise `GraphInterrupt`, run marked `paused`, recovered from raw checkpoint SQL on restart.
 
@@ -116,7 +116,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 - [x] R6: Vitest setup + pure-function tests — 29 tests green; `remainingSeconds` extracted (see §R6)
 
 **Phase 3 — consistency & extension surface**
-- [ ] R5: TS type codegen from Pydantic schemas (+ delete hand-mirrored types)
+- [x] R5: TS type codegen from Pydantic schemas (48d3daf — quicktype-core `npm run generate:types` → `workflowTypes.generated.ts`; thin re-export layers in workflowTypes.ts/api.ts; drift audit fixed stale PromptDefinition mirror)
 - [ ] R9: registry single-writer invariant + missing tests
 - [ ] R11: `schema_version` migration hook (or removal)
 - [ ] R7 (rest): WS reconnect with seq replay; remaining error states
