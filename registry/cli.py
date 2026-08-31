@@ -50,6 +50,7 @@ async def _publish_async(paths: list[Path]) -> int:
         sync_from_repo,
         write_manifest_to_repo,
     )
+    from registry.publish_checks import check_publish
     from schema.capability import CapabilityManifest
 
     settings = get_settings()
@@ -90,7 +91,22 @@ async def _publish_async(paths: list[Path]) -> int:
             else:
                 to_write.append(m)
 
-        # 3) Write the new ones, commit once, sync the index.
+        # 3) Governance checks (dependency resolution, kind stability,
+        #    breaking changes) — fail before touching the repo. Batch-aware:
+        #    refs may be satisfied by siblings in this same call.
+        if to_write:
+            failed = False
+            for m in to_write:
+                errors = await check_publish(db, m, batch=to_write)
+                if errors:
+                    failed = True
+                    print(f"error  {m.name}@{m.version}:", file=sys.stderr)
+                    for e in errors:
+                        print(f"       - {e}", file=sys.stderr)
+            if failed:
+                return 1
+
+        # 4) Write the new ones, commit once, sync the index.
         if to_write:
             for m in to_write:
                 await write_manifest_to_repo(settings.capabilities_repo, m)

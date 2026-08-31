@@ -27,6 +27,39 @@ def _skill_manifest(name, tools):
     }
 
 
+def _inject_via_git(tmp_path, monkeypatch, manifest):
+    """Commit a manifest straight to the capabilities repo and sync the
+    index, bypassing the publish gate — simulates an operator pushing bad
+    content directly to git (sync_from_repo is a repair path on purpose)."""
+    import asyncio
+
+    from registry.config import get_settings
+    from registry.db import Database
+    from registry.indexer import (
+        commit_all,
+        ensure_repo,
+        sync_from_repo,
+        write_manifest_to_repo,
+    )
+    from schema.capability import CapabilityManifest
+
+    async def _run():
+        settings = get_settings()
+        db = await Database.connect(settings.registry_db)
+        try:
+            await ensure_repo(settings.capabilities_repo)
+            await write_manifest_to_repo(
+                settings.capabilities_repo,
+                CapabilityManifest.model_validate(manifest),
+            )
+            await commit_all(settings.capabilities_repo, "inject test manifest")
+            await sync_from_repo(settings.capabilities_repo, db)
+        finally:
+            await db.close()
+
+    asyncio.run(_run())
+
+
 def test_inline_agent_resolves_full_chain(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         _seed_samples()
@@ -112,13 +145,18 @@ def test_raw_use_still_returns_refs(tmp_path, monkeypatch):
 
 
 def test_inline_unknown_ref_422(tmp_path, monkeypatch):
+    """Unknown refs are rejected at publish; the inliner still guards against
+    bad content committed directly to git."""
     with _client(tmp_path, monkeypatch) as client:
         manifest = _skill_manifest(
             "acme/broken-skill",
             [{"name": "acme/does-not-exist", "version": "latest"}],
         )
-        assert client.post("/registry/capabilities", json=manifest).status_code == 201
+        r = client.post("/registry/capabilities", json=manifest)
+        assert r.status_code == 422
+        assert "does-not-exist" in " ".join(r.json()["detail"])
 
+        _inject_via_git(tmp_path, monkeypatch, manifest)
         r = client.get(
             "/registry/capabilities/acme/broken-skill/use",
             params={"inline": "true", "version": "1.0.0"},
@@ -128,15 +166,20 @@ def test_inline_unknown_ref_422(tmp_path, monkeypatch):
 
 
 def test_inline_wrong_kind_ref_422(tmp_path, monkeypatch):
-    """A skill whose tools[] points at a prompt capability is a bad ref."""
+    """A skill whose tools[] points at a prompt capability is a bad ref —
+    rejected at publish, and still guarded by the inliner for content that
+    reaches git out-of-band."""
     with _client(tmp_path, monkeypatch) as client:
         _seed_samples()
         manifest = _skill_manifest(
             "acme/kind-mismatch-skill",
             [{"name": "acme/courteous-assistant-prompt", "version": "latest"}],
         )
-        assert client.post("/registry/capabilities", json=manifest).status_code == 201
+        r = client.post("/registry/capabilities", json=manifest)
+        assert r.status_code == 422
+        assert "expected 'tool'" in " ".join(r.json()["detail"])
 
+        _inject_via_git(tmp_path, monkeypatch, manifest)
         r = client.get(
             "/registry/capabilities/acme/kind-mismatch-skill/use",
             params={"inline": "true", "version": "1.0.0"},
@@ -148,15 +191,17 @@ def test_inline_wrong_kind_ref_422(tmp_path, monkeypatch):
 def test_inline_self_ref_422(tmp_path, monkeypatch):
     """The ref graph is structurally acyclic per schema (agent -> {skill,
     tool, model_profile, prompt}, skill -> {tool, prompt}; leaf kinds carry no
-    refs), so no cycle guard exists by design — a self ref always fails the
-    kind check instead."""
+    refs), so no cycle guard exists by design — a self ref fails resolution
+    at publish and the kind check in the inliner."""
     with _client(tmp_path, monkeypatch) as client:
         manifest = _skill_manifest(
             "acme/self-ref-skill",
             [{"name": "acme/self-ref-skill", "version": "1.0.0"}],
         )
-        assert client.post("/registry/capabilities", json=manifest).status_code == 201
+        r = client.post("/registry/capabilities", json=manifest)
+        assert r.status_code == 422
 
+        _inject_via_git(tmp_path, monkeypatch, manifest)
         r = client.get(
             "/registry/capabilities/acme/self-ref-skill/use",
             params={"inline": "true", "version": "1.0.0"},

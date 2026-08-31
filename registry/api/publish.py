@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from registry.config import get_settings
 from registry.indexer import commit_all, ensure_repo, sync_from_repo, write_manifest_to_repo
+from registry.publish_checks import check_publish
 from registry.store import VersionConflictError
 from schema.capability import CapabilityManifest
 
@@ -29,6 +30,10 @@ async def publish(request: Request, manifest: CapabilityManifest):
         status = "already published" if existing[0]["manifest_json"] == new_manifest_json \
             else "version exists with different content; publish a new version"
         raise HTTPException(status_code=409, detail=status)
+
+    errors = await check_publish(db, manifest)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
 
     await ensure_repo(settings.capabilities_repo)
     try:

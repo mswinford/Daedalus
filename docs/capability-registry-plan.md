@@ -1,7 +1,7 @@
 # Capability Registry — Implementation Plan (Draft)
 
 > **Status:** Component plan — R1 complete (steps 1–8 shipped). Part of the [platform roadmap](./ROADMAP.md); a thin layer above AI Forge.
-> **Scope:** R1 (Find & Reuse) complete; R2/R3 are roadmap.
+> **Scope:** R1 (Find & Reuse) complete; R2 in progress (publish-time governance checks shipped); R3 is roadmap.
 > **Companion docs:** [Roadmap](./ROADMAP.md) · [AI Forge plan](./ai-forge-plan.md) · concepts: `concepts/enterprise-foundry-overview.md`, `concepts/capabilities.md`, `concepts/capability-registry.md`.
 
 ## 1. Context & reframe
@@ -229,7 +229,7 @@ GET    /registry/capabilities/{name}/use?version=&inline=true
 7. ✅ AI Forge import affordances — `prompt_ref` + `skills[]` on agent nodes (schema + builder fold-in at graph-build + validation), frontend ConfigPanel editors, registry-side ref inliner (`registry/inline.py`, `/use?inline=true`), and per-kind "Use in…" import actions in the Capabilities view.
 8. ✅ Run both servers together — `scripts/dev.sh` boots backend + registry + Vite (commit `81dd5ee`); README documents the registry (no docker-compose needed).
 
-**R2 — Govern & Compose (roadmap):** new `capability`/`invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O, stream sub-run events) · remote invocation over HTTP · declared-dependency resolution at publish + automated per-kind breaking-change detection · feed real run metrics (cost/success/latency) into `evaluation` scores · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.
+**R2 — Govern & Compose (in progress):** ✅ declared-dependency resolution at publish + automated per-kind breaking-change detection (`registry/publish_checks.py` — every ref must resolve with import-time semantics, wrong-kind refs and cross-version kind changes are rejected, detected breaking changes require a major semver bump; enforced on both the API and CLI publish paths before anything reaches git) · new `capability`/`invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O, stream sub-run events) · remote invocation over HTTP · feed real run metrics (cost/success/latency) into `evaluation` scores · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.
 
 **R3 — Agent-native (roadmap):** semantic/intent search · agent discovery API (`search`/`describe`/`resolve`) · MCP adapter (expose capabilities as MCP servers + an MCP node in AI Forge) · enforcement gateway (ACL/credential-brokerage/audit) built on the recorded metadata.
 
@@ -239,12 +239,12 @@ GET    /registry/capabilities/{name}/use?version=&inline=true
 - **Interface required only for `tool` & `workflow`;** other kinds inherit their contract from `spec` until they become invokable (R2).
 - **One-click inline import** into a target workflow; name-based secret mapping + model inlining (no namespacing system, no ongoing binding).
 - **Imports are snapshots** — re-import to upgrade (`latest` = newest PUBLISHED).
-- **Versioning = strict semver + `stage`;** per-kind breaking rules are documented guidance (+ optional `breaking_changes` note), enforced by the R2 resolver.
+- **Versioning = strict semver + `stage`;** per-kind breaking rules are documented guidance (+ optional `breaking_changes` note); machine-checked at publish since R2 (`registry/publish_checks.py`).
 - **Packaging:** `registry` ships as a 4th package in the existing wheel + an `ai-forge-registry` console script (same pattern as `ai_forge`/`app`/`schema`).
 
 **Deferred to R2/R3 (direction only, no R1 code):**
 - **Search ranking:** FTS5 keyword now; hybrid FTS+vector + embedding-model choice in R3.
 - **Topology/auth:** one registry : one AI Forge on localhost for R1; shared central registry + inter-service auth later.
 - **Evaluation:** `evaluation` stays optional metadata (unpopulated); suite format defined when the `eval_suite` kind lands.
-- **Compatibility checker:** automated per-kind breaking-change detection, alongside the dependency resolver (R2).
+- ✅ **Compatibility checker:** automated per-kind breaking-change detection shipped alongside the dependency resolver in R2 (`registry/publish_checks.py`).
 - **Live refs & upgrade automation:** runtime-resolved references + re-pointing existing imports to newer versions (R2).
