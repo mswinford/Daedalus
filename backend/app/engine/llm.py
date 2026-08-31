@@ -48,9 +48,15 @@ class OpenAICompatibleProvider(LLMProvider):
     """Provider for OpenAI-compatible APIs (OpenAI, llama.cpp, Ollama, etc.)."""
 
     def __init__(self, model: str, base_url: str, api_key: Optional[str] = None):
+        from openai import AsyncOpenAI
+
         self.model = model
         self.base_url = base_url
         self.api_key = api_key or "not-needed"
+        self._client = AsyncOpenAI(
+            base_url=self.base_url,
+            api_key=self.api_key,
+        )
 
     async def chat(
         self,
@@ -59,12 +65,7 @@ class OpenAICompatibleProvider(LLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> LLMResult:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(
-            base_url=self.base_url,
-            api_key=self.api_key,
-        )
+        client = self._client
 
         openai_messages = []
         for m in messages:
@@ -104,12 +105,7 @@ class OpenAICompatibleProvider(LLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> AsyncIterator[str]:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(
-            base_url=self.base_url,
-            api_key=self.api_key,
-        )
+        client = self._client
 
         openai_messages = [
             {"role": m.role, "content": m.content} for m in messages
