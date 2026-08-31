@@ -4,7 +4,7 @@ import { Check, Loader2, Plus, Search, X } from 'lucide-react'
 
 import { capabilitiesApi, type CapabilityKind } from '@/lib/registryApi'
 import { applyCapability } from '@/lib/capabilityImport'
-import type { Workflow } from '@/lib/api'
+import { apiErrorMessage, type Workflow } from '@/lib/api'
 
 const KIND_COLORS: Record<CapabilityKind, string> = {
   tool: 'bg-sky-500/15 text-sky-400',
@@ -103,8 +103,8 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
       const res = await capabilitiesApi.use(row.name, 'latest', true)
       const { wf: merged, added } = applyCapability(wf, row.kind, res.artifact, row.name, agentId ?? undefined)
       if (added) onApply(merged)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e?.message ?? 'Failed to add capability')
+    } catch (e) {
+      setError(apiErrorMessage(e))
     } finally {
       setPending(null)
     }

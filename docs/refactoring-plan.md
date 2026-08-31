@@ -101,7 +101,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 **Phase 1 — bugs & security (days, no structural risk)**
 - [ ] R1: secret resolution for `api_key_ref` + test
 - [x] R2: sandbox escape probe — verified clean, 15 guard tests added (scope correction: RestrictedPython was already in use)
-- [ ] R7 (partial): render WorkflowEditor load error; shared `apiErrorMessage`
+- [x] R7 (partial): render WorkflowEditor load error; shared `apiErrorMessage` in lib/api.ts (replaced 2 call sites — the only occurrences repo-wide)
 - [ ] R12: cache the OpenAI client
 
 **Phase 2 — structure (sequenced)**

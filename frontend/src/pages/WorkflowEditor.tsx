@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   ReactFlow,
@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react'
 import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus } from 'lucide-react'
 
-import { workflowsApi, streamRunEvents, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
+import { workflowsApi, streamRunEvents, apiErrorMessage, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
   ALL_NODE_TYPES,
   NODE_META,
@@ -74,10 +74,11 @@ function WorkflowEditorInner() {
   const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
 
-  const { data: workflow, isLoading } = useQuery({
+  const { data: workflow, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['workflow', id],
     queryFn: () => workflowsApi.get(id!),
   })
+  const navigate = useNavigate()
 
   const syncedIdRef = useRef<string | null>(null)
   const syncedJsonRef = useRef('')
@@ -494,7 +495,29 @@ function WorkflowEditorInner() {
   }, [id])
 
   if (isLoading) return <div className="p-6 text-zinc-500">Loading...</div>
-  if (!workflow) return <div className="p-6 text-zinc-500">Workflow not found</div>
+  if (isError || !workflow)
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950 p-6 text-center">
+        <AlertTriangle size={20} className="text-red-400" />
+        <p className="text-sm text-zinc-300">{isError ? apiErrorMessage(error) : 'Workflow not found'}</p>
+        <div className="flex gap-2">
+          {isError && (
+            <button
+              onClick={() => refetch()}
+              className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+            >
+              Retry
+            </button>
+          )}
+          <button
+            onClick={() => navigate('/')}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            Back to workflows
+          </button>
+        </div>
+      </div>
+    )
 
   return (
     <div className="flex h-full flex-col bg-zinc-950">

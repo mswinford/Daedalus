@@ -13,6 +13,23 @@ const api = axios.create({
   baseURL: '/api',
 })
 
+/** Extract a human-readable message from an API error (axios or plain). */
+export function apiErrorMessage(e: unknown): string {
+  if (axios.isAxiosError(e)) {
+    const detail = e.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((d: any) => (typeof d === 'string' ? d : d?.msg))
+        .filter((m): m is string => typeof m === 'string' && m.length > 0)
+      if (msgs.length > 0) return msgs.join('; ')
+    }
+    return e.message
+  }
+  if (e instanceof Error && e.message) return e.message
+  return 'Something went wrong'
+}
+
 export interface WorkflowSummary {
   id: string
   name: string

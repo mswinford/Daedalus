@@ -8,7 +8,7 @@ import {
   CAPABILITY_KINDS,
   type CapabilityKind,
 } from '@/lib/registryApi'
-import { workflowsApi } from '@/lib/api'
+import { workflowsApi, apiErrorMessage } from '@/lib/api'
 import { applyCapability } from '@/lib/capabilityImport'
 import type { AgentNodeConfig } from '@/lib/workflowTypes'
 
@@ -145,9 +145,7 @@ function UseButton({ cap }: { cap: RowCap }) {
 
   const needsAgent = cap.kind === 'skill'
   const ready = !!targetWfId && (!needsAgent || !!targetNodeId)
-  const applyError = applyUse.isError
-    ? ((applyUse.error as any)?.response?.data?.detail ?? (applyUse.error as Error).message)
-    : null
+  const applyError = applyUse.isError ? apiErrorMessage(applyUse.error) : null
 
   return (
     <div className="flex shrink-0 items-center gap-2">
