@@ -1,6 +1,6 @@
 # AI Forge — Refactoring Plan
 
-Date: 2026-08-30 · Status: **Phase 3 in progress** — done: R1, R2, R3, R4, R5, R6, R7-partial, R8, R9, R10, R11, R12; remaining: R7 (rest)
+Date: 2026-08-30 · Status: **Complete** — all items done: R1, R2, R3, R4, R5, R6, R7 (partial 5ae87e7 + rest 5c11d69), R8, R9, R10, R11, R12
 Convention: check off items (`- [x]`) in this doc at commit time; keep the phase status line current.
 
 ## 1. Current architecture
@@ -121,7 +121,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 - [x] R5: TS type codegen from Pydantic schemas (48d3daf — quicktype-core `npm run generate:types` → `workflowTypes.generated.ts`; thin re-export layers in workflowTypes.ts/api.ts; drift audit fixed stale PromptDefinition mirror)
 - [x] R9: registry git+DB consistency (008cd09 — premise re-scoped: single-writer invariant already held; real gap was no deletion propagation. `sync_from_repo` now prunes rows absent from the repo, conflict rows kept; publish non-atomicity documented; +5 tests)
 - [x] R11: `schema_version` loader hook + save stamping (2951ad6 — `load_workflow()` dispatches on version, loud error on unknown/future; both load sites wired; both save paths stamp `CURRENT_SCHEMA_VERSION`; 11 tests)
-- [ ] R7 (rest): WS reconnect with seq replay; remaining error states
+- [x] R7 (rest): WS bounded reconnect + error states (5c11d69 — `streamRunEvents` re-subscribes with exponential backoff 500ms→8s, 5 attempts per failure episode (resets on message receipt); server replay from seq 0 + caller dedupe make it safe. SecretsPanel query-error branch; sidebar delete-mutation error via `apiErrorMessage`. 32 frontend tests.)
 
 ## 6. Concrete steps for the two P0 items
 
