@@ -11,6 +11,7 @@
 | Full dev stack (one command) | `./scripts/dev.sh` — backend :3000 + registry :3010 + Vite :5173; Ctrl-C stops all, logs in `.dev/` |
 | Backend dev server | `python backend/cli.py` (uvicorn on 127.0.0.1:3000, auto-reload) |
 | Frontend dev server | `cd frontend && npm run dev` (:5173, proxies /api → :3000) |
+| After editing `schema/models.py` | `PYTHONPATH=. python scripts/generate_schema.py` (repo root) **and** `cd frontend && npm run generate:types` — the first rewrites `schema/*.json`, the second rewrites `frontend/src/lib/workflowTypes.generated.ts` (DO-NOT-EDIT; hand layer in `workflowTypes.ts` keeps only React Flow wrappers + frontend-only fields) |
 
 No dedicated linter or formatter (eslint/ruff) is configured. The frontend `npm run lint` script just runs `tsc --noEmit`; TypeScript strict mode (`noUnusedLocals`, `noUnusedParameters`) is the only real check.
 

@@ -1,13 +1,10 @@
 import axios from 'axios'
 
 import {
-  type WorkflowNode,
-  type WorkflowEdge,
-  type ToolDefinition,
-  type ModelConfig,
-  type PromptDefinition,
-  type StateField,
-} from './workflowTypes'
+  type RunEvent as GenRunEvent,
+  type WorkflowRun as GenWorkflowRun,
+} from './workflowTypes.generated'
+import type { WorkflowDoc as Workflow } from './workflowTypes'
 
 const api = axios.create({
   baseURL: '/api',
@@ -36,47 +33,24 @@ export interface WorkflowSummary {
   description?: string
 }
 
-export interface Workflow {
-  id: string
-  name: string
-  description?: string | null
-  schema_version: number
-  nodes: WorkflowNode[]
-  edges: WorkflowEdge[]
-  tools: ToolDefinition[]
-  models: ModelConfig[]
-  prompts?: PromptDefinition[] | null
-  state_schema?: { fields: StateField[] } | null
-}
+// Workflow doc as persisted by the backend (generated types, collections re-tightened to required).
+export type { WorkflowDoc as Workflow } from './workflowTypes'
 
-export type RunEventType =
-  | 'run_start'
-  | 'run_end'
-  | 'node_start'
-  | 'node_end'
-  | 'node_error'
-  | 'llm_call'
-  | 'llm_token'
-  | 'tool_call'
-  | 'tool_result'
-  | 'human_request'
-  | 'human_respond'
-  | 'human_timeout'
-  | 'retry'
+export type { EventType as RunEventType } from './workflowTypes.generated'
 
-export interface RunEvent {
-  timestamp: number
-  type: RunEventType
-  node_id?: string | null
-  data: Record<string, any>
+// Generated run event + frontend-only fields: `seq` is added by the streaming
+// backend, and `data` is read without null-checks in the run panel.
+export type RunEvent = GenRunEvent & {
   /** Monotonic per-run sequence number (added by the streaming backend). */
   seq?: number
+  data: Record<string, any>
 }
 
 export interface RunStartResponse {
   run_id: string
 }
 
+// Not in the Pydantic schemas — runtime-only shapes returned by /runs endpoints.
 export interface HumanInterruptField {
   name: string
   label: string
@@ -96,16 +70,12 @@ export interface HumanInterruptValue {
   requested_at?: number
 }
 
-export interface WorkflowRun {
-  id: string
-  workflow_id: string
-  status: string
+// Generated run record + runtime-only `interrupt_value`, and fields the UI reads
+// without null-checks (required in every response the backend actually sends).
+export type WorkflowRun = GenWorkflowRun & {
+  interrupt_value?: HumanInterruptValue
   input_data: Record<string, any>
   output_data?: Record<string, any>
-  error?: string
-  interrupt_value?: HumanInterruptValue
-  started_at?: number
-  completed_at?: number
   events: RunEvent[]
   total_tokens_input: number
   total_tokens_output: number
