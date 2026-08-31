@@ -84,8 +84,12 @@ function useNow(active: boolean): number {
   return now
 }
 
+export function remainingSeconds(deadlineMs: number, now: number): number {
+  return Math.max(0, Math.ceil((deadlineMs - now) / 1000))
+}
+
 function TimeoutCountdown({ deadlineMs, now }: { deadlineMs: number; now: number }) {
-  const remaining = Math.max(0, Math.ceil((deadlineMs - now) / 1000))
+  const remaining = remainingSeconds(deadlineMs, now)
   if (remaining === 0) {
     return (
       <p className="mb-2 flex items-center gap-1 text-xs text-red-400">

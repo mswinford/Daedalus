@@ -59,6 +59,7 @@ Extension points today: node type = string literal + Pydantic union variant + if
 
 ### R6. Frontend: test the pure core — P1, testability
 - **Approach:** add Vitest (no DOM needed), ~15–20 tests: `graphTransform` round-trips incl. conditional-handle derivation, `applyCapability` dedup rules per kind ("once per attachment point" matrix), countdown label edges.
+- **Result (2026-08-31): done.** vitest 3.2.7 (`^3` pinned — v4 needs Vite 6+), minimal `vitest.config.ts` reusing the `@` alias, no jsdom/globals, tsconfig untouched. 29 tests: graphTransform (handles + round-trips incl. error edges), capabilityImport presence/dedupe matrix (per-workflow pool kinds, skill once-per-agent, agent always adds, nested pool reuse), RunPanel `remainingSeconds` boundaries (extracted from the inline countdown math).
 
 ### R7. Frontend: error states + WS robustness — P2, reliability
 - **Problems:** `WorkflowEditor.tsx` load failure sets `error` state but never renders it (UI spins forever on "Loading workflow…"); `SecretsPanel` has no query error branch; sidebar delete-mutation errors swallowed; `streamRunEvents` (`api.ts:91–126`) has no `onerror`, no reconnect, silently drops malformed frames.
@@ -112,7 +113,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 - [x] R4: node handler registry + `AgentExecutor` extraction (`engine/nodes/` package; builder.py 572→274 lines; 233 passed)
 - [x] R8: shared SQLite helper (`app/sqlite_util.py::secure_owner_only`; scoped down from "3× copy-paste" to the chmod loop — see §R8)
 - [x] R10: unified capability presence check (`isCapabilityPresent` in capabilityImport.ts; picker delegates — see §R10)
-- [ ] R6: Vitest setup + pure-function tests (before R5 lands)
+- [x] R6: Vitest setup + pure-function tests — 29 tests green; `remainingSeconds` extracted (see §R6)
 
 **Phase 3 — consistency & extension surface**
 - [ ] R5: TS type codegen from Pydantic schemas (+ delete hand-mirrored types)
