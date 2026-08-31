@@ -19,6 +19,7 @@ from app.engine.llm import create_provider, LLMProvider, Message
 from app.engine.conditions import evaluate_condition, ConditionError, _resolve_path
 from app.engine.tools import build_tool_schema, execute_tool
 from app.sandbox.runner import run_sandboxed
+from app.secrets import get_secret
 
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -167,11 +168,16 @@ class GraphBuilder:
     def _build_providers(self):
         """Create LLM providers from workflow model configs."""
         for model_config in self.workflow.models:
+            api_key = model_config.api_key_ref
+            if api_key:
+                resolved = get_secret(api_key)
+                if resolved is not None:
+                    api_key = resolved
             self.providers[model_config.id] = create_provider({
                 "provider": model_config.provider.value,
                 "model": model_config.model,
                 "base_url": model_config.base_url,
-                "api_key": model_config.api_key_ref,
+                "api_key": api_key,
             })
 
     def _get_node_func(self, node: Node) -> Callable:
