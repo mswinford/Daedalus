@@ -21,7 +21,7 @@ Extension points today: node type = string literal + Pydantic union variant + if
 ## 2. Top findings
 
 1. **Bug — model API keys are never resolved from the secrets store.** `backend/app/engine/builder.py:174` passes `model_config.api_key_ref` (a *name*, e.g. `"OPENAI_KEY"`) straight into the provider; `llm.py:53` uses it verbatim as the Bearer token. HTTP tools do it correctly (`tools.py:27` calls `get_secret`). Any workflow using a named secret for a model is silently broken (or sends the literal name to the API).
-2. **Security — the "sandbox" is a namespace jail, not RestrictedPython.** `backend/app/sandbox/runner.py` compiles user code with plain `compile()` and blocks only top-level `import`/`open()` via an AST pre-pass. Dunder-chain escapes (`().__class__.__bases__[0].__subclasses__()`) need no builtin names and are very likely reachable. If custom_function code is ever untrusted, this is an RCE.
+2. **Security — sandbox needs empirical verification (scope corrected 2026-08-30).** `backend/app/sandbox/runner.py` already uses RestrictedPython 8.5 (`compile_restricted_exec` + `safer_getattr` + guarded getitem/getiter), but nothing proves the configuration holds against bypasses — notably aliased builtins (`g = getattr; g(x, '__subclasses__')`) which skip the compile-time `_getattr_` rewrite. Probe tests required (R2).
 3. **`backend/app/api/runs.py` (773 lines) is a god module** mixing the FastAPI router, in-memory store, SQLite persistence layer (writer thread/queue), restart-recovery logic, HIL timeout scheduling, and WS streaming. `_execute` (542–596) and `_resume` (599–653) are ~90% copy-paste.
 4. **Frontend types drift from the backend by construction.** `frontend/src/lib/workflowTypes.ts` is a hand mirror of `schema/models.py`; drift already exists (`PromptDefinition.variables` missing, `name` non-optional). Generated JSON schemas have no sync check. Event-type literals duplicated again in `lib/api.ts:27–36`.
 5. **Zero frontend tests**, and several pure functions (`graphTransform`, `capabilityImport.applyCapability`, countdown logic) are trivially testable.
@@ -34,10 +34,12 @@ Extension points today: node type = string literal + Pydantic union variant + if
 - **Approach:** in `_build_providers`, pass `get_secret(model_config.api_key_ref)` when set; let `llm.py` keep its `or "not-needed"` fallback. Add a test asserting the provider receives the *value*, not the name (and one for unset ref → `"not-needed"`).
 - **Effort/risk:** tiny / near-zero (mirror the already-tested HTTP-tool path).
 
-### R2. Verify and harden the sandbox — P0, security
-- **Files:** `backend/app/sandbox/runner.py` (AST guard 24–56, plain `compile()` at ~63), `backend/tests/test_sandbox.py`.
-- **Approach:** (a) write an escape-probe test (dunder subclass chain → `os.system`/file write) to confirm exploitability; (b) depending on the threat model: switch to RestrictedPython's actual restricted compiler (`compile_restricted_exec` + policy), or move execution to a disposable subprocess (which also fixes the "abandoned thread can't be killed" timeout weakness), or explicitly document "dev-only, trusted code".
-- **Effort/risk:** medium / low if scoped. Do not silently ship "sandboxed" on a jail.
+### R2. Empirically verify the sandbox — P0, security (scope corrected 2026-08-30)
+- **Correction:** `backend/app/sandbox/runner.py` ALREADY uses RestrictedPython 8.5 (`compile_restricted_exec`, `safer_getattr`, guarded getitem/getiter, `safe_builtins`) — the original "plain compile() + blocklist" premise was wrong. The restricted compiler is in place; what's missing is *proof* it holds.
+- **Files:** `backend/app/sandbox/runner.py`, `backend/tests/test_sandbox.py` (8 existing tests, all passing).
+- **Approach:** (a) write escape-probe tests through the real runner: dunder subclass chains, and especially **aliased-builtin bypasses** (`g = getattr; g(x, '__subclasses__')` — RestrictedPython rewrites literal `getattr(...)` calls at compile time, but an aliased reference is a plain call and skips `_getattr_`); (b) if a probe escapes: close the specific hole (e.g. strip dangerous builtins from the namespace, custom `_getattr_` policy) and keep the probe as a regression test; (c) if nothing escapes: probes stay as green guard tests and R2 is done.
+- **Known remaining weakness (documented in runner.py docstring):** timeout = daemon thread + `join(timeout)`; a timed-out execution keeps running unkillable — container/subprocess isolation deferred ("Phase 4"). Out of scope for R2 unless an escape is found.
+- **Result (2026-08-30): verified clean.** 15 probes in `backend/tests/test_sandbox_escape_probes.py` — zero escapes. RP 8.5's `safe_builtins` has no `getattr`/`type`/`vars`/`dir`/`open`; dunders and `_`-names are rejected at compile time (transformer), with the runtime guards as a second layer. Residuals: (a) `default_guarded_getitem` is literally unrestricted — safe today only because no reachable object supports dunder-string subscripting; (b) **class statements in user code always error** (`NameError: '__metaclass__'`) — functional bug, track separately. Guardrail: never add `getattr`/`type` to `_EXTRA_BUILTINS` — that would re-open the aliased-reference bypass.
 
 ### R3. Decompose `runs.py` — P1, maintainability
 - **Files:** `backend/app/api/runs.py` — persistence helpers (54–244), `RunRecord` (256–295), recovery (389–539), timeout scheduling (310–381), `_execute`/`_resume` (542–653), routes (656–773).
@@ -98,7 +100,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 
 **Phase 1 — bugs & security (days, no structural risk)**
 - [ ] R1: secret resolution for `api_key_ref` + test
-- [ ] R2: sandbox escape probe → hardening decision
+- [x] R2: sandbox escape probe — verified clean, 15 guard tests added (scope correction: RestrictedPython was already in use)
 - [ ] R7 (partial): render WorkflowEditor load error; shared `apiErrorMessage`
 - [ ] R12: cache the OpenAI client
 
@@ -118,7 +120,7 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 
 **R1 (secret resolution):** in `builder.py._build_providers`, replace `"api_key": model_config.api_key_ref` with a lookup: `get_secret(ref)` if `ref` is set, else `None`; let `llm.py` keep its `or "not-needed"` fallback. Tests: seed a secret via the existing secrets test utilities, build a workflow whose model references it by name, assert the constructed provider's `api_key` equals the secret *value*; second test for unset ref → `"not-needed"`.
 
-**R2 (sandbox):** first a red test — run `(object.__subclasses__())` and attempt `os` recovery through the current jail; if exploitable, implement RestrictedPython's restricted compiler with a policy that also forbids dunder attribute access. Subprocess alternative: `multiprocessing` with a result pipe + hard kill on timeout (also fixes the unkillable-thread weakness).
+**R2 (sandbox):** write probe tests through the real `run_sandboxed`: (1) direct dunder subclass chain — expect blocked by `safer_getattr`; (2) aliased-builtin bypass (`g = getattr; g(x, '__subclasses__')`) — the suspected real hole; (3) any other reachability probes found while reading the guards. Escaping probes get `xfail(strict=True)` (suite stays green, fails loudly if fixed); blocked ones are plain passing tests. If a hole is found: close it in `runner.py` (namespace/policy fix), convert the probe to a green regression test. The unkillable-timeout-thread weakness stays documented, out of scope.
 
 ## 7. Testing plan
 
