@@ -1,6 +1,6 @@
 # AI Forge — Refactoring Plan
 
-Date: 2026-08-30 · Status: **Phase 1 not started**
+Date: 2026-08-30 · Status: **Phase 1 complete** (R1, R2, R7-partial, R12) — next: Phase 2
 Convention: check off items (`- [x]`) in this doc at commit time; keep the phase status line current.
 
 ## 1. Current architecture
@@ -98,11 +98,11 @@ Adding a **provider** is already fine (enum + class + one factory branch). Addin
 
 ## 5. Roadmap
 
-**Phase 1 — bugs & security (days, no structural risk)**
-- [ ] R1: secret resolution for `api_key_ref` + test
-- [x] R2: sandbox escape probe — verified clean, 15 guard tests added (scope correction: RestrictedPython was already in use)
-- [x] R7 (partial): render WorkflowEditor load error; shared `apiErrorMessage` in lib/api.ts (replaced 2 call sites — the only occurrences repo-wide)
-- [ ] R12: cache the OpenAI client
+**Phase 1 — bugs & security (days, no structural risk)** ✅ done 2026-08-30
+- [x] R1: secret resolution for `api_key_ref` + test — `fa72a7d`. `_build_providers` resolves via `get_secret()`; missing secret falls back to the raw string (frontend ModelForm pastes literal keys, so no fail-fast); 5 tests in `test_provider_secrets.py`.
+- [x] R2: sandbox escape probe — verified clean, 15 guard tests added (scope correction: RestrictedPython was already in use) — `de76258`. Residuals documented in §R2: unrestricted `default_guarded_getitem` (watch item) + class statements broken in user code (`__metaclass__` NameError — functional bug, untracked).
+- [x] R7 (partial): render WorkflowEditor load error; shared `apiErrorMessage` in lib/api.ts (replaced 2 call sites — the only occurrences repo-wide) — `5ae87e7`.
+- [x] R12: cache the OpenAI client (both chat + chat_stream now reuse the `__init__` client) — `8ec289e`.
 
 **Phase 2 — structure (sequenced)**
 - [ ] R3: split `runs.py` into `app/runs/` package + dedupe `_execute`/`_resume`
