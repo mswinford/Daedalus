@@ -8,6 +8,7 @@
 | Single test file | `python -m pytest backend/tests/test_tools.py -q` |
 | Frontend typecheck | `cd frontend && npx tsc --noEmit` |
 | Frontend build | `cd frontend && npm run build` |
+| Full dev stack (one command) | `./scripts/dev.sh` — backend :3000 + registry :3010 + Vite :5173; Ctrl-C stops all, logs in `.dev/` |
 | Backend dev server | `python backend/cli.py` (uvicorn on 127.0.0.1:3000, auto-reload) |
 | Frontend dev server | `cd frontend && npm run dev` (:5173, proxies /api → :3000) |
 

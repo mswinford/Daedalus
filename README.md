@@ -71,6 +71,16 @@ Full design and phase plan: [AI Forge Plan](./docs/ai-forge-plan.md) · platform
 - Python **3.11+**
 - Node.js **18+** (for the frontend)
 
+### Run everything at once
+
+```bash
+./scripts/dev.sh
+```
+
+Boots the backend (`:3000`), the capability registry (`:3010`), and the Vite
+dev server (`:5173`) in one terminal. Ctrl-C stops all three; if any service
+crashes, the rest are stopped too. Per-service logs land in `.dev/<name>.log`.
+
 ### 1. Backend
 
 ```bash
