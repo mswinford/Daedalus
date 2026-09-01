@@ -3,8 +3,11 @@ import asyncio
 import json
 
 from app.engine.builder import GraphBuilder
-from app.engine.llm import LLMResult
+from app.engine.llm import LLMResult, Message
 from app.engine.nodes.agent import AgentExecutor
+from app.runs.executor import _dump_messages
+from app.runs.record import RunRecord
+from app.runs.store import _load_run_summary, _save_run_summary, flush_store
 from schema.models import (
     Workflow, Node, Edge, ModelConfig, AgentNodeConfig,
 )
@@ -97,3 +100,42 @@ def test_missing_prompt_ref_raises_at_construction():
         assert "ghost" in str(e)
     else:
         raise AssertionError("expected ValueError for missing prompt_ref")
+
+
+# ─── output_data serialization (regression: Message objects broke json.dumps) ──
+
+
+def test_dump_messages_converts_to_dicts():
+    """_dump_messages turns LLM Message objects into plain dicts and passes
+    through non-model entries untouched, so output_data is JSON-serializable."""
+    msgs = {
+        "n1": [Message(role="assistant", content="hi"), {"role": "user", "content": "raw"}],
+        "n2": [],
+    }
+    out = _dump_messages(msgs)
+    assert out["n1"][0] == {"role": "assistant", "content": "hi",
+                            "tool_call_id": None, "tool_calls": None}
+    assert out["n1"][1] == {"role": "user", "content": "raw"}  # passthrough
+    assert out["n2"] == []
+    assert _dump_messages(None) == {}
+
+
+def test_save_run_summary_persists_message_objects():
+    """Defense-in-depth: even if raw Message objects reach the summary writer,
+    persistence must not raise (json.dumps default handler degrades them to dicts)."""
+    record = RunRecord(run_id="r-msg", workflow_id="w", input_data={"q": "hi"})
+    record.status = "completed"
+    record.completed_at = 1.0
+    record.output_data = {
+        "output": "done",
+        "messages_by_node": {"n1": [Message(role="assistant", content="hello")]},
+        "data": {},
+        "node_outputs": {},
+    }
+    _save_run_summary(record)   # must not raise
+    flush_store()
+
+    row = _load_run_summary("r-msg")
+    assert row is not None
+    persisted = json.loads(row["output_data"])
+    assert persisted["messages_by_node"]["n1"][0]["content"] == "hello"

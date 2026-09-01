@@ -9,6 +9,16 @@ from app.runs.store import _prune_store, _save_run_summary
 from app.runs.timeouts import _schedule_human_timeout
 
 
+def _dump_messages(messages_by_node: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Convert per-node LLM Message objects to plain dicts so the run's output_data
+    is JSON-serializable (for persistence and the API). Non-model entries pass
+    through untouched."""
+    return {
+        node_id: [m.model_dump() if hasattr(m, "model_dump") else m for m in msgs]
+        for node_id, msgs in (messages_by_node or {}).items()
+    }
+
+
 async def _drive(record, workflow, *, input_data=None, human_input=None, invocations=None):
     """Run (or resume) the graph in a worker thread (streaming events), then emit
     a terminal. `workflow` is already invoke-expanded when the run has pins;
@@ -41,7 +51,7 @@ async def _drive(record, workflow, *, input_data=None, human_input=None, invocat
         record.status = "completed"
         record.output_data = {
             "output": result.get("output", ""),
-            "messages_by_node": result.get("messages_by_node", {}),
+            "messages_by_node": _dump_messages(result.get("messages_by_node", {})),
             "data": result.get("data", {}),
             "node_outputs": result.get("node_outputs", {}),
         }

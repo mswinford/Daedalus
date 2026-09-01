@@ -164,6 +164,17 @@ def shutdown_store(timeout: float = 5.0) -> None:
     thread.join(timeout)
 
 
+def _json_default(obj: Any) -> Any:
+    """Fallback for json.dumps of run payloads: Pydantic models (e.g. an LLM
+    Message) become dicts; anything else degrades to its str() rather than
+    crashing the run's completion path."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    return str(obj)
+
+
 def _persist_event(run_id: str, seq: int, payload: dict[str, Any]) -> None:
     _enqueue_write(
         ("event", str(get_settings().checkpoint_db), run_id, seq, payload)
@@ -185,10 +196,11 @@ def _save_run_summary(record: "RunRecord") -> None:
     """Queue the record's metadata upsert so it survives a restart."""
     _enqueue_write(("summary", str(get_settings().checkpoint_db), (
         record.run_id, record.workflow_id, record.status,
-        json.dumps(record.input_data), json.dumps(record.output_data),
+        json.dumps(record.input_data, default=_json_default),
+        json.dumps(record.output_data, default=_json_default),
         record.error, record.total_tokens_input,
         record.total_tokens_output, record.estimated_cost_usd,
-        json.dumps(record.invoke_pins) if record.invoke_pins else None,
+        json.dumps(record.invoke_pins, default=_json_default) if record.invoke_pins else None,
         record.started_at, record.completed_at,
     )))
 
