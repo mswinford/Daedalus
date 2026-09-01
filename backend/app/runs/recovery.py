@@ -152,7 +152,14 @@ async def recover_paused_runs() -> int:
                         continue
                     except Exception:
                         continue  # Registry unreachable; retried on next startup.
-                graph = GraphBuilder(workflow, invocations=invocations).build(checkpointer=saver)
+                try:
+                    graph = GraphBuilder(workflow, invocations=invocations).build(checkpointer=saver)
+                except Exception as exc:
+                    # The graph can't be rebuilt — e.g. a model's secret is no
+                    # longer set, or the workflow is malformed. Fail this run
+                    # loudly so it stays inspectable instead of crashing startup.
+                    _fail_unrecoverable_run(thread_id, workflow_id, summary, str(exc))
+                    continue
                 graphs[workflow_id] = graph
             snapshot = await graph.aget_state(
                 {"configurable": {"thread_id": thread_id}}

@@ -141,13 +141,24 @@ class GraphBuilder:
         return wrapped
 
     def _build_providers(self):
-        """Create LLM providers from workflow model configs."""
+        """Create LLM providers from workflow model configs.
+
+        ``api_key_ref`` holds a *secret name*, never a key value: the value is
+        resolved from the secrets store (env var first, then file). A set ref
+        that does not resolve fails loudly at build time rather than silently
+        treating the name as a literal key.
+        """
         for model_config in self.workflow.models:
-            api_key = model_config.api_key_ref
-            if api_key:
-                resolved = get_secret(api_key)
-                if resolved is not None:
-                    api_key = resolved
+            ref = model_config.api_key_ref
+            api_key = None
+            if ref:
+                api_key = get_secret(ref)
+                if api_key is None:
+                    raise ValueError(
+                        f"Model '{model_config.name}' references secret "
+                        f"'{ref}', but it is not set. Add it in the Secrets "
+                        f"panel or export it as an environment variable."
+                    )
             self.providers[model_config.id] = create_provider({
                 "provider": model_config.provider.value,
                 "model": model_config.model,

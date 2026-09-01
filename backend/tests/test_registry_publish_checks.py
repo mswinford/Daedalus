@@ -7,9 +7,9 @@ import json
 from fastapi.testclient import TestClient
 
 from registry.cli import _publish as cli_publish
-from registry.publish_checks import detect_breaking_changes
+from registry.publish_checks import _secret_hygiene, detect_breaking_changes
 from schema.capability import CapabilityManifest
-from schema.models import Workflow
+from schema.models import ModelConfig, Workflow
 
 
 # ─── Manifest builders ───────────────────────────────────────────────────────
@@ -59,14 +59,17 @@ def _prompt_manifest(name="acme/p", version="1.0.0", text="Hello {{a}}",
 
 
 def _profile_manifest(name="acme/mp", version="1.0.0", model="llama-3.2-1b",
-                      temperature=0.7, **kw):
+                      temperature=0.7, api_key_ref=None, **kw):
+    model_spec = {
+        "id": "local", "name": "Local Llama",
+        "provider": "openai_compatible", "model": model,
+        "base_url": "http://localhost:8080/v1",
+        "default_temperature": temperature,
+    }
+    if api_key_ref is not None:
+        model_spec["api_key_ref"] = api_key_ref
     return _manifest("model_profile", name, version,
-                     spec={"model": {
-                         "id": "local", "name": "Local Llama",
-                         "provider": "openai_compatible", "model": model,
-                         "base_url": "http://localhost:8080/v1",
-                         "default_temperature": temperature,
-                     }}, **kw)
+                     spec={"model": model_spec}, **kw)
 
 
 def _skill_manifest(name="acme/s", version="1.0.0", tools=None, prompt="do it",
@@ -179,6 +182,29 @@ def test_publish_rejects_kind_change_across_versions(tmp_path, monkeypatch):
         r = _publish(client, _prompt_manifest(name="acme/k", version="2.0.0"))
         assert r.status_code == 422
         assert "publish under a new name" in _detail(r)
+
+
+# ── Secret hygiene ──
+
+def test_publish_rejects_embedded_api_key_value(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        r = _publish(client, _profile_manifest(api_key_ref="sk-abc123"))
+        assert r.status_code == 422
+        assert "embedded API key value" in _detail(r)
+
+
+def test_publish_rejects_undeclared_secret_ref(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        r = _publish(client, _profile_manifest(api_key_ref="OPENAI_API_KEY"))
+        assert r.status_code == 422
+        assert "must be declared in secrets_required" in _detail(r)
+
+
+def test_publish_accepts_declared_secret_ref(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        r = _publish(client, _profile_manifest(
+            api_key_ref="OPENAI_API_KEY", secrets_required=["OPENAI_API_KEY"]))
+        assert r.status_code == 201, r.text
 
 
 # ── Breaking changes: tool ──
@@ -392,3 +418,34 @@ def test_detect_identical_is_compatible():
     old = _m(_tool_manifest(params={"x": {"type": "string"}}))
     new = _m(_tool_manifest(version="1.1.0", params={"x": {"type": "string"}}))
     assert detect_breaking_changes(old, new) == []
+
+
+# ─── Secret hygiene unit tests ───────────────────────────────────────────────
+
+def test_secret_hygiene_rejects_embedded_key_value():
+    m = _m(_profile_manifest(api_key_ref="sk-abc123"))
+    assert any("embedded API key value" in e for e in _secret_hygiene(m))
+
+
+def test_secret_hygiene_requires_declaration():
+    m = _m(_profile_manifest(api_key_ref="OPENAI_API_KEY"))
+    assert any("must be declared in secrets_required" in e for e in _secret_hygiene(m))
+
+
+def test_secret_hygiene_ok_when_declared():
+    m = _m(_profile_manifest(
+        api_key_ref="OPENAI_API_KEY", secrets_required=["OPENAI_API_KEY"]))
+    assert _secret_hygiene(m) == []
+
+
+def test_secret_hygiene_null_ref_is_fine():
+    assert _secret_hygiene(_m(_profile_manifest())) == []
+
+
+def test_secret_hygiene_workflow_embedded_model():
+    wf = Workflow(id="w", name="w", models=[ModelConfig(
+        id="m", name="M", provider="openai_compatible", model="x",
+        api_key_ref="sk-leak")])
+    m = _m(_workflow_manifest(wf=wf))
+    assert any("spec.workflow.models[0]" in e and "embedded API key value" in e
+               for e in _secret_hygiene(m))

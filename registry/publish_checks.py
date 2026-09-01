@@ -5,7 +5,7 @@ committed to the capabilities repo. It deliberately does NOT run inside
 sync_from_repo — that is a repair path (startup rescan, git-driven), and
 governance failures there would be noise, not gatekeeping.
 
-Three checks:
+Four checks:
 
 1. Dependency resolution — every capability ref in the manifest must resolve
    against the store with the same semantics import-time uses: an explicit
@@ -16,10 +16,15 @@ Three checks:
 2. Kind stability — a capability name cannot change kind across versions;
    per the settled design that is a new capability under a new name.
 
-3. Breaking-change detection — per-kind rules compare the new manifest
+3. Secret hygiene — a model's api_key_ref must be a secret *name* (never an
+   embedded key value) and, when set, must be declared in secrets_required.
+   Stops a literal API key from leaking into a published artifact.
+
+4. Breaking-change detection — per-kind rules compare the new manifest
    against the highest existing lower version. Detected breaking changes
    require a major semver bump; otherwise the publish is rejected.
 """
+import re
 from typing import Any, Optional
 
 from registry.db import Database
@@ -29,6 +34,7 @@ from schema.capability import (
     CapabilityManifest,
     CapabilityRef,
     LifecycleStage,
+    ModelProfileSpec,
     PromptSpec,
     SkillSpec,
     ToolSpec,
@@ -344,6 +350,47 @@ def detect_breaking_changes(
     return check(old, new)
 
 
+# ─── Secret hygiene ──────────────────────────────────────────────────────────
+
+_SECRET_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _iter_api_key_refs(manifest: CapabilityManifest) -> list[tuple[str, Optional[str]]]:
+    """Every (slot, api_key_ref) pair across the model configs a manifest carries.
+
+    Slots are human-readable paths: 'spec.model' for a model_profile, and
+    'spec.workflow.models[i]' for each model embedded in a workflow.
+    """
+    out: list[tuple[str, Optional[str]]] = []
+    spec = manifest.spec
+    if isinstance(spec, ModelProfileSpec):
+        out.append(("spec.model", spec.model.api_key_ref))
+    elif isinstance(spec, WorkflowSpec) and spec.workflow is not None:
+        for i, m in enumerate(spec.workflow.models):
+            out.append((f"spec.workflow.models[{i}]", m.api_key_ref))
+    return out
+
+
+def _secret_hygiene(manifest: CapabilityManifest) -> list[str]:
+    """A model api_key_ref must be a secret *name*, never an embedded key value,
+    and any set ref must be declared in secrets_required (referenced-by-name
+    contract). Closes the leak of a literal key into a published artifact."""
+    errors: list[str] = []
+    for slot, ref in _iter_api_key_refs(manifest):
+        if not ref:
+            continue  # null / local — no secret needed
+        if not _SECRET_NAME_RE.match(ref):
+            errors.append(
+                f"{slot}.api_key_ref looks like an embedded API key value; "
+                "store the key in your own secrets and reference it by name"
+            )
+        elif ref not in manifest.secrets_required:
+            errors.append(
+                f"{slot}.api_key_ref '{ref}' must be declared in secrets_required"
+            )
+    return errors
+
+
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
 async def check_publish(
@@ -379,7 +426,10 @@ async def check_publish(
     # 2. Dependency resolution (same semantics as import time).
     errors += await _check_dependencies(db, manifest, batch)
 
-    # 3. Breaking changes vs the highest existing lower version.
+    # 3. Secret hygiene — api_key_ref is a name, never an embedded key value.
+    errors += _secret_hygiene(manifest)
+
+    # 4. Breaking changes vs the highest existing lower version.
     new_key = semver_key(manifest.version)
     lowers = [c for c in candidates if semver_key(c.version) < new_key]
     if lowers:

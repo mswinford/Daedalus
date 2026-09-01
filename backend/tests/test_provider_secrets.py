@@ -53,6 +53,8 @@ def test_empty_api_key_ref_uses_fallback(secret_file):
     assert provider.api_key == "not-needed"
 
 
-def test_missing_secret_falls_back_to_raw_string(secret_file):
-    provider = _provider(_wf("sk-pasted-raw-key"))
-    assert provider.api_key == "sk-pasted-raw-key"
+def test_unset_secret_ref_fails_loudly(secret_file):
+    # api_key_ref is a secret *name*, never a literal key: an unresolvable ref
+    # must raise at build time instead of being used as-is.
+    with pytest.raises(ValueError, match="references secret 'sk-pasted-raw-key'"):
+        _provider(_wf("sk-pasted-raw-key"))

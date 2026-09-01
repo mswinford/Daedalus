@@ -427,6 +427,33 @@ def test_paused_run_survives_restart(hil_client):
         assert body["output_data"]["node_outputs"]["cf"]["doubled"] == "back!"
 
 
+def test_recovery_does_not_crash_when_workflow_secret_unset(hil_client):
+    """A paused run whose workflow references an unresolvable model secret must
+    not crash startup recovery — the run is failed loudly instead. Regression:
+    a literal api_key_ref used to be tolerated at build time; strict name-only
+    resolution now raises, which must not take down the whole app at boot."""
+    run_id = hil_client.post("/api/workflows/hil-wf/run", json={}).json()["run_id"]
+    _wait_for_run(hil_client, run_id)  # paused at HIL; checkpoint written
+
+    # Simulate the workflow now referencing a secret that is not set (e.g. a
+    # pasted literal key that strict resolution refuses). Rewrite it on disk so
+    # recovery's graph rebuild hits the unset ref.
+    path = wf_module.settings.workflows_dir / "hil-wf.json"
+    wf = json.loads(path.read_text())
+    wf["models"] = [{
+        "id": "m1", "name": "Default Model", "provider": "openai_compatible",
+        "model": "x", "api_key_ref": "sk-unsloth-not-a-real-secret",
+    }]
+    path.write_text(json.dumps(wf))
+
+    runs_module.flush_store()
+    runs_module.RUNS.clear()  # "restart"
+    with TestClient(app) as restarted:  # must NOT raise in the lifespan
+        body = restarted.get(f"/api/runs/{run_id}").json()
+        assert body["status"] == "failed"
+        assert "references secret" in (body["error"] or "")
+
+
 def test_recovered_run_with_expired_human_timeout_fails(hil_timeout_client):
     """A run whose human-input deadline passed while the process was down is failed,
     not resurrected as paused, when recovery rebuilds its record."""
