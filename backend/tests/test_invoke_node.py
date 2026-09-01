@@ -300,6 +300,152 @@ def test_hil_in_region_pauses_and_resumes():
     assert out["data"]["x"] == 1  # parent frame restored intact
 
 
+# ─── parent-side sub-error catch (Phase 4) ───────────────────────────────────
+
+def _failing_sub() -> Workflow:
+    wf = _sub_wf(required=True)
+    for n in wf.nodes:
+        if n.id == "cf":
+            n.config = {"code": 'raise ValueError("boom")', "output_fields": ["y"]}
+    return wf
+
+
+def _bare_parent(output_field: str = "sub") -> Workflow:
+    """start → inv → end (no trailing transform)."""
+    return Workflow(
+        id="wf-parent", name="parent",
+        nodes=[
+            Node(id="start", type="start", config={}),
+            Node(id="inv", type="invoke", config=InvokeNodeConfig(
+                capability="acme/sub", version="latest",
+                input_mapping=[FieldMapping(source="data.x", target="x")],
+                output_field=output_field,
+            )),
+            Node(id="end", type="end", config={}),
+        ],
+        edges=[
+            Edge(id="s", source_node_id="start", source_handle="default", target_node_id="inv"),
+            Edge(id="e", source_node_id="inv", source_handle="default", target_node_id="end"),
+        ],
+    )
+
+
+def _parent_wf_catch(mapping=None) -> Workflow:
+    """_parent_wf plus a catch node wired to the invoke's error handle."""
+    wf = _parent_wf(mapping=mapping)
+    wf.nodes[1].error_handling = True
+    wf.nodes.append(Node(id="catch", type="custom_function",
+                         config={"code": 'result["caught"] = True', "output_fields": ["caught"]}))
+    wf.edges.append(Edge(id="ie", source_node_id="inv", source_handle="error",
+                         target_node_id="catch", type="error"))
+    wf.edges.append(Edge(id="c", source_node_id="catch", source_handle="default",
+                         target_node_id="end"))
+    return wf
+
+
+def test_inner_failure_routes_to_parent_catch():
+    result = expand_workflow(_parent_wf_catch(), _resolve(sub=_failing_sub()))
+    out = run_workflow_sync(result.workflow, {"x": 5}, invocations=result.invocations)
+    assert out["data"]["caught"] is True          # parent's error handler ran
+    assert out["data"]["x"] == 5                  # parent frame restored intact
+    assert "sub" not in out["data"]               # no result was produced
+    assert "t" not in out["node_outputs"]         # default path never ran
+
+
+def test_inner_failure_without_parent_edge_fails_run():
+    result = expand_workflow(_parent_wf(), _resolve(sub=_failing_sub()))
+    with pytest.raises(Exception, match="boom"):
+        run_workflow_sync(result.workflow, {"x": 5}, invocations=result.invocations)
+
+
+def test_authored_internal_error_edge_contains_failure():
+    sub = _failing_sub()
+    for n in sub.nodes:
+        if n.id == "cf":
+            n.error_handling = True
+    sub.nodes.append(Node(id="h", type="custom_function",
+                          config={"code": 'result["handled"] = True', "output_fields": ["handled"]}))
+    sub.edges.append(Edge(id="e-err", source_node_id="cf", source_handle="error",
+                          target_node_id="h", type="error"))
+    sub.edges.append(Edge(id="e-h", source_node_id="h", source_handle="default",
+                          target_node_id="end"))
+
+    result = expand_workflow(_bare_parent(), _resolve(sub=sub))
+    out = run_workflow_sync(result.workflow, {"x": 5}, invocations=result.invocations)
+    assert out["data"]["sub"] == {"x": 5, "handled": True}  # region completed normally
+
+
+def test_entry_gate_validation_failure_caught_by_parent():
+    result = expand_workflow(_parent_wf_catch(mapping=[]), _resolve())
+    out = run_workflow_sync(result.workflow, {"x": 5}, invocations=result.invocations)
+    assert out["data"]["caught"] is True
+    assert out["data"]["x"] == 5
+
+
+def test_nested_region_contained_error_completes_outer():
+    inner = _failing_sub()
+    mid = Workflow(
+        id="wf-mid", name="mid",
+        nodes=[
+            Node(id="start", type="start", config={}),
+            Node(id="inv", type="invoke", error_handling=True, config=InvokeNodeConfig(
+                capability="acme/inner", version="latest",
+                input_mapping=[FieldMapping(source="data.x", target="x")],
+                output_field="inner_out",
+            )),
+            Node(id="h", type="custom_function",
+                 config={"code": 'result["handled"] = True', "output_fields": ["handled"]}),
+            Node(id="end", type="end", config={}),
+        ],
+        edges=[
+            Edge(id="s", source_node_id="start", source_handle="default", target_node_id="inv"),
+            Edge(id="d", source_node_id="inv", source_handle="default", target_node_id="end"),
+            Edge(id="e", source_node_id="inv", source_handle="error", target_node_id="h", type="error"),
+            Edge(id="h", source_node_id="h", source_handle="default", target_node_id="end"),
+        ],
+    )
+
+    def resolve(name, version):
+        if name == "acme/inner":
+            return "1.0.0", {"kind": "workflow", "artifact": inner.model_dump(), "version": "1.0.0"}
+        return "2.0.0", {"kind": "workflow", "artifact": mid.model_dump(), "version": "2.0.0"}
+
+    parent = _bare_parent(output_field="mid_out")
+    result = expand_workflow(parent, resolve)
+    out = run_workflow_sync(result.workflow, {"x": 1}, invocations=result.invocations)
+    assert out["data"]["mid_out"] == {"x": 1, "handled": True}
+
+
+def test_nested_uncaught_failure_fails_at_innermost():
+    inner = _failing_sub()
+    mid = Workflow(
+        id="wf-mid", name="mid",
+        nodes=[
+            Node(id="start", type="start", config={}),
+            Node(id="inv", type="invoke", config=InvokeNodeConfig(
+                capability="acme/inner", version="latest",
+                input_mapping=[FieldMapping(source="data.x", target="x")],
+                output_field="inner_out",
+            )),
+            Node(id="end", type="end", config={}),
+        ],
+        edges=[
+            Edge(id="s", source_node_id="start", source_handle="default", target_node_id="inv"),
+            Edge(id="e", source_node_id="inv", source_handle="default", target_node_id="end"),
+        ],
+    )
+
+    def resolve(name, version):
+        if name == "acme/inner":
+            return "1.0.0", {"kind": "workflow", "artifact": inner.model_dump(), "version": "1.0.0"}
+        return "2.0.0", {"kind": "workflow", "artifact": mid.model_dump(), "version": "2.0.0"}
+
+    parent = _bare_parent(output_field="mid_out")
+    result = expand_workflow(parent, resolve)
+    with pytest.raises(Exception, match="boom"):
+        run_workflow_sync(result.workflow, {"x": 1}, invocations=result.invocations)
+
+
 # ─── pins ────────────────────────────────────────────────────────────────────
 
 def test_prepare_pins_resolved_versions():

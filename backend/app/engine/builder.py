@@ -132,8 +132,9 @@ class GraphBuilder:
             ))
             if isinstance(result, dict):
                 # A node may deliberately set a non-empty marker on success
-                # (the invoke exit gate re-keys a region failure to the invoke
-                # node); only clear markers the node didn't set.
+                # (the invoke exit gate re-keys a region failure to its own id
+                # so its router can take the parent's error edge); only clear
+                # markers the node didn't set.
                 marker = result.get("_error_info")
                 return {**result, "_error_info": marker if marker else {}}
             return result

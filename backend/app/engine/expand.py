@@ -247,7 +247,30 @@ def _expand_all(
             ]
 
         for e in old_outgoing:
+            if e.type == "error":
+                # The entry gate (the invoke node itself) keeps a copy so its own
+                # failures (input validation) are caught too; region failures
+                # arrive re-keyed at the exit gate, which owns the original.
+                edges.append(e.model_copy(deep=True))
             e.source_node_id = exit_id  # keep id/handle/type/condition; new source is the gate
+
+        # ── parent-side catch: when the invoke node owns a type='error' edge in
+        #    the parent graph, inner nodes without their own error edge get a
+        #    synthetic one to the exit gate, so a region failure is re-keyed at
+        #    the gate and routed to the parent's handler. Without a parent edge,
+        #    failures propagate and fail the run at the failing (prefixed) node. ──
+        if any(e.type == "error" for e in old_outgoing):
+            has_error_edge = {e.source_node_id for e in new_edges if e.type == "error"}
+            for sn in sub_nodes:
+                if sn.type in ("start", "end") or id_map[sn.id] in has_error_edge:
+                    continue
+                new_edges.append(Edge(
+                    id=_unique_id(f"{node.id}-err-{sn.id}"),
+                    source_node_id=id_map[sn.id],
+                    source_handle="error",
+                    target_node_id=exit_id,
+                    type="error",
+                ))
 
         edges.extend(splice_in)
         edges.extend(new_edges)
