@@ -351,7 +351,6 @@ Base URL: `http://127.0.0.1:3000`
 
 - **`llm` condition type** raises `NotImplementedError`; `json_path` and `regex` work.
 - **Anthropic provider** not implemented (OpenAI-compatible only).
-- **`error`-typed edges** are defined in the schema but not wired to failure handling — node exceptions currently fail the run (emitted as a fatal `node_error` event).
 - **Run records are in-memory** — checkpoint data survives restarts (paused runs are recovered on startup and their timeouts re-armed), but the run list itself starts empty after a restart except for recovered paused runs.
 
 ---
@@ -361,6 +360,6 @@ Base URL: `http://127.0.0.1:3000`
 - **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
 - **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
-- **Capability platform (R1 in progress):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 adds invoke nodes + dependency resolution; R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
+- **Capability platform (R1 complete):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 is in progress — the `invoke` node (call a registered capability by `name@version`) and publish-time governance checks have shipped; next up: remote invocation over HTTP, live refs/upgrade automation. R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
 
 Full detail in [the AI Forge Plan](./docs/ai-forge-plan.md).

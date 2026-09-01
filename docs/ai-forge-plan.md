@@ -26,7 +26,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   synchronously via `POST /api/workflows/{id}/run`.
 - **Node types wired in the builder**: `agent` (with tool-calling loop), `conditional`,
   `transform` (`template` + `mapping` + `custom_function` modes), `custom_function`
-  (RestrictedPython sandbox).
+  (RestrictedPython sandbox), `invoke` (registry capability invocation — tool kind
+  executes directly; workflow kind expands into a call frame at build time).
 - **Agent node**: reads `state["data"]` as user message (if no prior messages), calls LLM
   with system prompt, supports tool-calling loop. Output lands in `state["output"]`,
   `state["messages"]`, and `_node_outputs[<id>].content`.
@@ -251,7 +252,9 @@ start: `input_fields` · end: `output_fields` · agent: `model_id`, `system_prom
 `default_branch` · transform: `mode` (template/mapping/custom_function) + fields ·
 custom_function: `code`, `timeout_seconds`, input/output fields · human_in_loop: `approval_message`,
 `approval_required`, `timeout_seconds`, `input_fields[]` (name/label/type/required/options),
-`output_fields[]`.
+`output_fields[]` · invoke: capability picker (`name@version`, tool/workflow kinds only) +
+editable fields, `input_mapping[]` (source paths resolve from the state root — run inputs land
+in `data.*`), `output_field`.
 
 #### Verify
 - `npx tsc --noEmit` (strict, `noUnusedLocals`/`noUnusedParameters`) and `npm run build`.

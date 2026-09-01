@@ -64,6 +64,7 @@ So any field you pass in a run body is available as `$.data.<field>` to conditio
 | `transform` | state via template paths / field mappings / referenced sandbox code | `output`, `data[output_field]`, `_node_outputs[id]` | Static or conditional edges |
 | `custom_function` | full `state` (sandbox variable) | `output`, `data[<declared output_fields>]`, `_node_outputs[id]` | Static or conditional edges |
 | `human_in_loop` | `input_fields` from state; resumes with the human's response | `output`, `data[<output_fields>]`, `_node_outputs[id]` | Static or conditional edges (or fails on reject) |
+| `invoke` | capability resolved from the registry by `name@version` (pinned per run); entry gate reads mapped inputs, inner nodes read/write the call frame's channels | `_node_outputs[invoke_id]`, `data[output_field]` (sub result) | Static or conditional edges; region failures route to its error edge if present |
 
 ### start / end
 
@@ -131,7 +132,16 @@ On resume (`POST /api/runs/{id}/resume`), the human's response arrives via `Comm
 - If `config.approval_required` is set and the payload is `{approved: false}`, the node raises a `RuntimeError` — the run fails (or routes to an error edge if one exists).
 - Otherwise the response dict is mapped onto `data` using `output_fields` (1-to-1 by name, positional when there are several, or merged whole when no `output_fields` are declared), and written to `output` + `_node_outputs[id]`.
 
-`timeout_seconds` is metadata only — auto-fail-on-timeout is not yet enforced, so a run waits indefinitely until resumed.
+`timeout_seconds` (default `None` = indefinite) arms an asyncio timer at pause; on expiry the run fails with a terminal `human_timeout` event unless resumed first — resume cancels the timer. The interrupt payload carries `timeout_seconds` + `requested_at` so the frontend shows a live countdown.
+
+### invoke (`expand.py`, `nodes/invoke.py`, `nodes/invoke_exit.py`)
+
+References a registry capability by `name@version`; only `tool` and `workflow` kinds are invokable. The version resolves at run start and is **pinned to the run**, so pause/resume/restart re-expands the identical structure. A deleted pinned version fails loudly — resume returns 422, startup recovery marks the run failed with a terminal fatal event — it never silently re-resolves to a newer version.
+
+- **Tool kind:** fetches the `ToolDefinition` and executes it directly — no frame.
+- **Workflow kind:** at graph BUILD time, `expand()` splices the sub-workflow into the parent graph — inner node ids are prefixed `{invoke_id}__`, edges are re-routed through the invoke node (the builder maps `start`/`end` to LangGraph sentinels), and the sub's `models[]` is merged with a suffix-on-clash. A synthetic `invoke_exit` gate closes the region.
+- **Call frame:** the entry gate validates mapped inputs against the sub's `state_schema`, swaps ALL state channels to the restricted frame (`data` = mapped inputs only, `output` reset), and stashes parent state under `_invoke_stash[invoke_id]`. Inner nodes run exactly as authored — no reference rewriting. The exit gate restores parent state and writes the result to `_node_outputs[invoke_id]` + `data[output_field]`.
+- **Errors:** when the invoke node has a parent `type="error"` edge, expansion keeps a copy on the entry gate (its own input-validation failures get caught) and adds synthetic error edges from every inner node lacking its own to the exit gate; the exit gate re-keys `_error_info` to its own id so the router can take the parent's error edge, and skips output writes (no result was produced). Without a parent error edge, an inner failure fails the run at the prefixed node id.
 
 ## 4. Edges and routing (`builder._build_edges`)
 

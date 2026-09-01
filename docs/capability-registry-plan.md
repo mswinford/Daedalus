@@ -1,7 +1,7 @@
 # Capability Registry — Implementation Plan (Draft)
 
 > **Status:** Component plan — R1 complete (steps 1–8 shipped). Part of the [platform roadmap](./ROADMAP.md); a thin layer above AI Forge.
-> **Scope:** R1 (Find & Reuse) complete; R2 in progress (publish-time governance checks shipped); R3 is roadmap.
+> **Scope:** R1 (Find & Reuse) complete; R2 in progress (invoke node + publish-time governance checks shipped); R3 is roadmap.
 > **Companion docs:** [Roadmap](./ROADMAP.md) · [AI Forge plan](./ai-forge-plan.md) · concepts: `concepts/enterprise-foundry-overview.md`, `concepts/capabilities.md`, `concepts/capability-registry.md`.
 
 ## 1. Context & reframe
@@ -107,7 +107,7 @@ Roadmap kinds (sketched, not built in R1): `PolicySpec{type, config}` · `Knowle
 ### Runtime semantics (settled)
 - **skill → agent node.** A skill is *not* a graph node; it's a `skills[]` field on an agent node. At runtime the engine folds each skill into that agent's effective config — concatenates its prompt into the system prompt and unions its tools. **Always-active in R1** (no dynamic/just-in-time loading — that's R3).
 - **Only `workflow` carries a graph.** An `agent` or `skill` that needs a real multi-step graph should be published as a `workflow` kind instead — keeps the kinds non-overlapping.
-- **Import = inline (R1).** Composites declare their refs by `name@version` in the manifest, but "Use" *inlines* the referenced capabilities' contents into the imported artifact (self-contained). Live refs that resolve at runtime arrive with the R2 invoke node.
+- **Import = inline (R1).** Composites declare their refs by `name@version` in the manifest, but "Use" *inlines* the referenced capabilities' contents into the imported artifact (self-contained). Live refs that resolve at runtime are handled by the R2 invoke node (shipped) — an `invoke` node references a capability by `name@version`, resolves it from the registry at run start, and pins that version to the run.
 
 ### Versioning & breaking changes (per kind)
 - **Versioning:** strict semver (`MAJOR.MINOR.PATCH`); publish state is `stage`; prereleases use a semver `-tag` (e.g. `1.0.0-rc.1`). No separate channel/track system in R1.
@@ -229,7 +229,7 @@ GET    /registry/capabilities/{name}/use?version=&inline=true
 7. ✅ AI Forge import affordances — `prompt_ref` + `skills[]` on agent nodes (schema + builder fold-in at graph-build + validation), frontend ConfigPanel editors, registry-side ref inliner (`registry/inline.py`, `/use?inline=true`), and per-kind "Use in…" import actions in the Capabilities view.
 8. ✅ Run both servers together — `scripts/dev.sh` boots backend + registry + Vite (commit `81dd5ee`); README documents the registry (no docker-compose needed).
 
-**R2 — Govern & Compose (in progress):** ✅ declared-dependency resolution at publish + automated per-kind breaking-change detection (`registry/publish_checks.py` — every ref must resolve with import-time semantics, wrong-kind refs and cross-version kind changes are rejected, detected breaking changes require a major semver bump; enforced on both the API and CLI publish paths before anything reaches git) · new `capability`/`invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O, stream sub-run events) · remote invocation over HTTP · feed real run metrics (cost/success/latency) into `evaluation` scores · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.
+**R2 — Govern & Compose (in progress):** ✅ declared-dependency resolution at publish + automated per-kind breaking-change detection (`registry/publish_checks.py` — every ref must resolve with import-time semantics, wrong-kind refs and cross-version kind changes are rejected, detected breaking changes require a major semver bump; enforced on both the API and CLI publish paths before anything reaches git) · ✅ `invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O — tool kind executes directly; workflow kind expands into the parent graph at build time behind a call frame, so HIL/resume/restart work unmodified; versions pin per run and deleted pins fail loudly rather than re-resolve; parent-side error catch via synthetic error edges) · remote invocation over HTTP · feed real run metrics (cost/success/latency) into `evaluation` scores · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.
 
 **R3 — Agent-native (roadmap):** semantic/intent search · agent discovery API (`search`/`describe`/`resolve`) · MCP adapter (expose capabilities as MCP servers + an MCP node in AI Forge) · enforcement gateway (ACL/credential-brokerage/audit) built on the recorded metadata.
 
