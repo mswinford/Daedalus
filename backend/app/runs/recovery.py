@@ -17,6 +17,7 @@ from app.runs.store import (
     _load_events,
     _load_finished_summaries,
     _load_run_summary,
+    _save_run_summary,
 )
 from app.runs.timeouts import _schedule_human_timeout
 
@@ -31,6 +32,39 @@ def _checkpoint_started_at(ts: Any) -> float:
         return datetime.fromisoformat(str(ts)).timestamp()
     except (TypeError, ValueError):
         return time.time()
+
+
+def _fail_unrecoverable_run(thread_id: str, workflow_id: str, summary: Any, error: str) -> None:
+    """Fail a paused run whose pinned capability can no longer be resolved.
+
+    The record is rebuilt as failed with a terminal node_error event so the run
+    stays inspectable (GET /runs/{id}) instead of vanishing from RUNS. A newer
+    version must NOT be substituted: a different artifact changes the expanded
+    graph structure and would break checkpoint matching.
+    """
+    if thread_id in RUNS:
+        return
+    record = RunRecord(
+        run_id=thread_id,
+        workflow_id=workflow_id,
+        input_data=json.loads(summary["input_data"]) if summary else {},
+        status="failed",
+        error=error,
+        started_at=float(summary["started_at"]) if summary else time.time(),
+    )
+    record.completed_at = time.time()
+    events = _load_events(thread_id)
+    if events:
+        record.events = events
+        record._seq = max(int(e.get("seq", 0)) for e in events)
+    record.emit({
+        "type": "node_error",
+        "node_id": None,
+        "timestamp": time.time(),
+        "data": {"error": error, "fatal": True},
+    })
+    RUNS[thread_id] = record
+    _save_run_summary(record)
 
 
 def _pending_interrupt_threads(db_path: str) -> list[tuple[str, Any, bytes]]:
@@ -100,15 +134,25 @@ async def recover_paused_runs() -> int:
             if graph is None:
                 try:
                     workflow = _load_workflow(workflow_id)
-                    if pins:
+                except Exception:
+                    continue  # Workflow deleted.
+                invocations: dict[str, Any] | None = None
+                if pins:
+                    from app.capability_client import CapabilityNotFoundError
+                    from app.engine.expand import prepare_workflow_for_run
+
+                    try:
                         # Checkpoints were written against the expanded graph;
                         # rebuild it identically from the stored pins.
-                        from app.engine.expand import prepare_workflow_for_run
-
-                        workflow, _, _ = prepare_workflow_for_run(workflow, pins=pins)
-                except Exception:
-                    continue  # Workflow deleted or registry unreachable.
-                graph = GraphBuilder(workflow).build(checkpointer=saver)
+                        workflow, invocations, _ = prepare_workflow_for_run(workflow, pins=pins)
+                    except CapabilityNotFoundError as exc:
+                        # A pinned version was deleted from the registry: the
+                        # checkpointed graph can never be rebuilt. Fail loudly.
+                        _fail_unrecoverable_run(thread_id, workflow_id, summary, str(exc))
+                        continue
+                    except Exception:
+                        continue  # Registry unreachable; retried on next startup.
+                graph = GraphBuilder(workflow, invocations=invocations).build(checkpointer=saver)
                 graphs[workflow_id] = graph
             snapshot = await graph.aget_state(
                 {"configurable": {"thread_id": thread_id}}

@@ -13,6 +13,14 @@ class CapabilityFetchError(Exception):
     """A capability could not be fetched from the registry."""
 
 
+class CapabilityNotFoundError(CapabilityFetchError):
+    """The requested capability/version does not exist (or is unpublished).
+
+    Permanent, unlike a generic fetch error (registry unreachable) — callers
+    that rebuild checkpointed graphs can fail loudly instead of retrying.
+    """
+
+
 class CapabilityClient:
     def __init__(self, base_url: str | None = None, timeout: float = 10.0):
         self.base_url = (
@@ -35,7 +43,7 @@ class CapabilityClient:
         except httpx.HTTPError as exc:
             raise CapabilityFetchError(f"registry unreachable at {self.base_url}: {exc}") from exc
         if resp.status_code == 404:
-            raise CapabilityFetchError(
+            raise CapabilityNotFoundError(
                 f"capability '{name}' version '{version}' not found (or unpublished)"
             )
         if resp.status_code >= 400:
