@@ -270,6 +270,41 @@ class CustomFunctionNodeConfig(BaseModel):
     retry: Optional[RetryConfig] = Field(None)
 
 
+class InvokeNodeConfig(BaseModel):
+    """Configuration for an Invoke node (calls a registry capability).
+
+    Tool kind: the tool is executed in place. Workflow kind: at run start the
+    sub-workflow is expanded into the graph around this node (entry gate) and
+    a synthetic invoke_exit node (exit gate); resolved versions are pinned on
+    the run so every rebuild produces an identical structure.
+    """
+    capability: str = Field(
+        ..., description="Capability name, 'owner/name'"
+    )
+    version: str = Field(
+        "latest", description="Semver or 'latest'"
+    )
+    input_mapping: list[FieldMapping] = Field(
+        default_factory=list,
+        description="Maps parent state paths (source) to the capability's declared inputs (target)",
+    )
+    output_field: str = Field(
+        "result", description="Parent data key that receives the sub-workflow's final data"
+    )
+    set_output: bool = Field(
+        False, description="Also copy the sub's final output string into the parent output"
+    )
+
+
+class InvokeExitNodeConfig(BaseModel):
+    """Runtime-only exit gate for an expanded invoke region; never saved to workflow JSON."""
+    invoke_id: str = Field(..., description="Id of the invoke node this gate closes")
+    output_field: str = Field(
+        "result", description="Parent data key that receives the sub-workflow's final data"
+    )
+    set_output: bool = Field(False)
+
+
 # ─── Node Types ──────────────────────────────────────────────────────────────
 
 NodeType = Literal[
@@ -280,6 +315,8 @@ NodeType = Literal[
     "transform",
     "human_in_loop",
     "custom_function",
+    "invoke",
+    "invoke_exit",
 ]
 
 NodeConfig = Union[
@@ -290,6 +327,8 @@ NodeConfig = Union[
     TransformNodeConfig,
     HumanInLoopNodeConfig,
     CustomFunctionNodeConfig,
+    InvokeNodeConfig,
+    InvokeExitNodeConfig,
 ]
 
 

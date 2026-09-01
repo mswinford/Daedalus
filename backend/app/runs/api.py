@@ -18,6 +18,8 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.api.workflows import _load_workflow
+from app.capability_client import CapabilityFetchError
+from app.engine.expand import ExpansionError, prepare_workflow_for_run
 from app.runs.executor import _drive
 from app.runs.record import RUNS, RunRecord
 from app.runs.store import _is_terminal, _save_run_summary
@@ -26,16 +28,29 @@ from app.runs.timeouts import _cancel_human_timeout
 router = APIRouter()
 
 
+async def _prepare_run(workflow, pins: dict[str, str] | None = None):
+    """Expand invoke nodes (fresh resolve, or pinned re-expansion) off the event
+    loop. Unresolvable references fail the request before any run starts."""
+    try:
+        return await asyncio.to_thread(prepare_workflow_for_run, workflow, pins=pins)
+    except (CapabilityFetchError, ExpansionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/workflows/{workflow_id}/run", status_code=202)
 async def run_workflow(workflow_id: str, input_data: dict[str, Any] = {}):
     """Kick off a run in the background and return its id for streaming."""
     workflow = _load_workflow(workflow_id)  # raises 404 if missing
+    expanded, invocations, pins = await _prepare_run(workflow)
     record = RunRecord(
-        run_id=uuid.uuid4().hex, workflow_id=workflow_id, input_data=input_data
+        run_id=uuid.uuid4().hex, workflow_id=workflow_id, input_data=input_data,
+        invoke_pins=pins,
     )
     RUNS[record.run_id] = record
     _save_run_summary(record)
-    asyncio.create_task(_drive(record, workflow, input_data=input_data))
+    asyncio.create_task(
+        _drive(record, expanded, input_data=input_data, invocations=invocations)
+    )
     return {"run_id": record.run_id}
 
 
@@ -52,7 +67,12 @@ async def resume_run(run_id: str, human_input: dict[str, Any] = Body(default={})
         )
     _cancel_human_timeout(record)
     workflow = _load_workflow(record.workflow_id)
-    asyncio.create_task(_drive(record, workflow, human_input=human_input))
+    # Re-expand with the pins stored at run start so the graph structure is
+    # identical to the one that produced the checkpoint.
+    expanded, invocations, _ = await _prepare_run(workflow, pins=record.invoke_pins)
+    asyncio.create_task(
+        _drive(record, expanded, human_input=human_input, invocations=invocations)
+    )
     return {"run_id": run_id, "status": "resuming"}
 
 

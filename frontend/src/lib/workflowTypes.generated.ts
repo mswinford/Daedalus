@@ -168,6 +168,15 @@ export interface Node {
  * Configuration for a Human-in-the-Loop node.
  *
  * Configuration for a Custom Function node.
+ *
+ * Configuration for an Invoke node (calls a registry capability).
+ *
+ * Tool kind: the tool is executed in place. Workflow kind: at run start the
+ * sub-workflow is expanded into the graph around this node (entry gate) and
+ * a synthetic invoke_exit node (exit gate); resolved versions are pinned on
+ * the run so every rebuild produces an identical structure.
+ *
+ * Runtime-only exit gate for an expanded invoke region; never saved to workflow JSON.
  */
 export interface Config {
     /**
@@ -240,6 +249,8 @@ export interface Config {
     mode?: Mode;
     /**
      * Name of the output state field to write
+     *
+     * Parent data key that receives the sub-workflow's final data
      */
     output_field?: string;
     /**
@@ -265,6 +276,26 @@ export interface Config {
      * Python code to execute (sandboxed)
      */
     code?: string;
+    /**
+     * Capability name, 'owner/name'
+     */
+    capability?: string;
+    /**
+     * Maps parent state paths (source) to the capability's declared inputs (target)
+     */
+    input_mapping?: FieldMapping[];
+    /**
+     * Also copy the sub's final output string into the parent output
+     */
+    set_output?: boolean;
+    /**
+     * Semver or 'latest'
+     */
+    version?: string;
+    /**
+     * Id of the invoke node this gate closes
+     */
+    invoke_id?: string;
 }
 
 /**
@@ -372,7 +403,7 @@ export interface NodePosition {
 /**
  * Node type
  */
-export type NodeType = "start" | "end" | "agent" | "conditional" | "transform" | "human_in_loop" | "custom_function";
+export type NodeType = "start" | "end" | "agent" | "conditional" | "transform" | "human_in_loop" | "custom_function" | "invoke" | "invoke_exit";
 
 /**
  * A named prompt template stored at workflow level (`prompts[]`), referenced by agent nodes.

@@ -715,6 +715,73 @@
       "title": "InterfaceType",
       "type": "string"
     },
+    "InvokeExitNodeConfig": {
+      "description": "Runtime-only exit gate for an expanded invoke region; never saved to workflow JSON.",
+      "properties": {
+        "invoke_id": {
+          "description": "Id of the invoke node this gate closes",
+          "title": "Invoke Id",
+          "type": "string"
+        },
+        "output_field": {
+          "default": "result",
+          "description": "Parent data key that receives the sub-workflow's final data",
+          "title": "Output Field",
+          "type": "string"
+        },
+        "set_output": {
+          "default": false,
+          "title": "Set Output",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "invoke_id"
+      ],
+      "title": "InvokeExitNodeConfig",
+      "type": "object"
+    },
+    "InvokeNodeConfig": {
+      "description": "Configuration for an Invoke node (calls a registry capability).\n\nTool kind: the tool is executed in place. Workflow kind: at run start the\nsub-workflow is expanded into the graph around this node (entry gate) and\na synthetic invoke_exit node (exit gate); resolved versions are pinned on\nthe run so every rebuild produces an identical structure.",
+      "properties": {
+        "capability": {
+          "description": "Capability name, 'owner/name'",
+          "title": "Capability",
+          "type": "string"
+        },
+        "version": {
+          "default": "latest",
+          "description": "Semver or 'latest'",
+          "title": "Version",
+          "type": "string"
+        },
+        "input_mapping": {
+          "description": "Maps parent state paths (source) to the capability's declared inputs (target)",
+          "items": {
+            "$ref": "#/$defs/FieldMapping"
+          },
+          "title": "Input Mapping",
+          "type": "array"
+        },
+        "output_field": {
+          "default": "result",
+          "description": "Parent data key that receives the sub-workflow's final data",
+          "title": "Output Field",
+          "type": "string"
+        },
+        "set_output": {
+          "default": false,
+          "description": "Also copy the sub's final output string into the parent output",
+          "title": "Set Output",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "capability"
+      ],
+      "title": "InvokeNodeConfig",
+      "type": "object"
+    },
     "JsonSchemaParam": {
       "description": "A parameter in a tool's JSON Schema.",
       "properties": {
@@ -915,7 +982,9 @@
             "conditional",
             "transform",
             "human_in_loop",
-            "custom_function"
+            "custom_function",
+            "invoke",
+            "invoke_exit"
           ],
           "title": "Type",
           "type": "string"
@@ -946,6 +1015,12 @@
             },
             {
               "$ref": "#/$defs/CustomFunctionNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/InvokeNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/InvokeExitNodeConfig"
             }
           ],
           "description": "Node-specific configuration",

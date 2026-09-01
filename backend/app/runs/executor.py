@@ -9,20 +9,22 @@ from app.runs.store import _prune_store, _save_run_summary
 from app.runs.timeouts import _schedule_human_timeout
 
 
-async def _drive(record, workflow, *, input_data=None, human_input=None):
+async def _drive(record, workflow, *, input_data=None, human_input=None, invocations=None):
     """Run (or resume) the graph in a worker thread (streaming events), then emit
-    a terminal."""
+    a terminal. `workflow` is already invoke-expanded when the run has pins;
+    `invocations` carries the per-invoke-node metadata the gates need."""
     record._loop = asyncio.get_running_loop()
     record.status = "running"
     try:
         if human_input is None:
             result = await asyncio.to_thread(
                 run_workflow_sync, workflow, input_data, on_event=record.emit,
-                thread_id=record.run_id,
+                thread_id=record.run_id, invocations=invocations,
             )
         else:
             result = await asyncio.to_thread(
-                resume_workflow, workflow, record.run_id, human_input, on_event=record.emit
+                resume_workflow, workflow, record.run_id, human_input, on_event=record.emit,
+                invocations=invocations,
             )
         if result.get("paused"):
             record.status = "paused"

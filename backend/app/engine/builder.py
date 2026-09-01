@@ -37,11 +37,15 @@ class GraphBuilder:
         workflow: Workflow,
         trace: list[RunEvent] | None = None,
         on_event: Callable[[RunEvent], None] | None = None,
+        invocations: dict[str, Any] | None = None,
     ):
         self.workflow = workflow
         self.graph = StateGraph(AgentState)
         self.providers: dict[str, LLMProvider] = {}
         self._nodes_by_id = {n.id: n for n in workflow.nodes}
+        # invoke node id → InvocationInfo from build-time expansion (empty when
+        # the workflow has no invoke nodes).
+        self.invocations = invocations or {}
         # Execution trace (node_start/node_end/llm_call events). Callers may pass
         # a shared list to collect events even when a run fails mid-graph.
         self._trace: list[RunEvent] = trace if trace is not None else []
@@ -127,7 +131,11 @@ class GraphBuilder:
                 data={"duration_ms": round(duration_ms, 2), "output": _summarize(output)},
             ))
             if isinstance(result, dict):
-                return {**result, "_error_info": {}}
+                # A node may deliberately set a non-empty marker on success
+                # (the invoke exit gate re-keys a region failure to the invoke
+                # node); only clear markers the node didn't set.
+                marker = result.get("_error_info")
+                return {**result, "_error_info": marker if marker else {}}
             return result
         return wrapped
 

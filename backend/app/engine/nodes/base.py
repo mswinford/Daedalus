@@ -33,6 +33,8 @@ class AgentState(TypedDict):
     # Set by the instrument wrapper when a node with an error edge fails;
     # cleared on every successful node run so stale markers can't misroute.
     _error_info: dict[str, Any]
+    # Parent frames stashed by invoke entry gates (invoke_id → stashed channels).
+    _invoke_stash: dict[str, dict[str, Any]]
 
 
 class NodeContext(Protocol):
@@ -41,6 +43,7 @@ class NodeContext(Protocol):
     workflow: Any
     providers: dict[str, Any]
     _nodes_by_id: dict[str, Node]
+    invocations: dict[str, Any]  # invoke node id → InvocationInfo (from expansion)
 
     def _record_llm_call(self, node_id: str, model_id: str, result: Any) -> None: ...
 

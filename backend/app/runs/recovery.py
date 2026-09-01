@@ -90,12 +90,24 @@ async def recover_paused_runs() -> int:
             if not isinstance(payload, dict):
                 continue
             workflow_id = str(payload.get("workflow_id") or "")
+            summary = _load_run_summary(thread_id)
+            pins = (
+                json.loads(summary["invoke_pins"])
+                if summary is not None and summary["invoke_pins"]
+                else None
+            )
             graph = graphs.get(workflow_id)
             if graph is None:
                 try:
                     workflow = _load_workflow(workflow_id)
+                    if pins:
+                        # Checkpoints were written against the expanded graph;
+                        # rebuild it identically from the stored pins.
+                        from app.engine.expand import prepare_workflow_for_run
+
+                        workflow, _, _ = prepare_workflow_for_run(workflow, pins=pins)
                 except Exception:
-                    continue  # Workflow deleted since the run paused.
+                    continue  # Workflow deleted or registry unreachable.
                 graph = GraphBuilder(workflow).build(checkpointer=saver)
                 graphs[workflow_id] = graph
             snapshot = await graph.aget_state(
@@ -112,7 +124,6 @@ async def recover_paused_runs() -> int:
             tuple_ = await saver.aget_tuple(
                 {"configurable": {"thread_id": thread_id}}
             )
-            summary = _load_run_summary(thread_id)
             record = RunRecord(
                 run_id=thread_id,
                 workflow_id=workflow_id,

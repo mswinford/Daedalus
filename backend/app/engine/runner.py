@@ -57,13 +57,14 @@ def _validate_input(workflow: Workflow, input_data: dict[str, Any]) -> None:
 
 def _build_initial_state(input_data: dict[str, Any]) -> dict[str, Any]:
     """Build initial graph state from run input data."""
-    reserved = {"messages_by_node", "output", "error", "data", "_node_outputs"}
+    reserved = {"messages_by_node", "output", "error", "data", "_node_outputs", "_invoke_stash"}
     initial_state: dict[str, Any] = {
         "messages_by_node": {},
         "output": "",
         "error": "",
         "data": {},
         "_node_outputs": {},
+        "_invoke_stash": {},
     }
     for key, value in input_data.items():
         if key in reserved:
@@ -93,6 +94,7 @@ def run_workflow_sync(
     trace: list | None = None,
     on_event: Callable[[RunEvent], None] | None = None,
     thread_id: str | None = None,
+    invocations: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a workflow (blocking).
 
@@ -110,7 +112,9 @@ def run_workflow_sync(
 
     _validate_input(workflow, input_data)
 
-    builder = GraphBuilder(workflow, trace=trace, on_event=on_event)
+    builder = GraphBuilder(
+        workflow, trace=trace, on_event=on_event, invocations=invocations
+    )
 
     initial_state = _build_initial_state(input_data)
     config = {"configurable": {"thread_id": thread_id or "default"}}
@@ -153,6 +157,7 @@ def resume_workflow(
     human_input: Any,
     trace: list | None = None,
     on_event: Callable[[RunEvent], None] | None = None,
+    invocations: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resume a paused workflow with human-provided input.
 
@@ -162,7 +167,9 @@ def resume_workflow(
     """
     import asyncio
 
-    builder = GraphBuilder(workflow, trace=trace, on_event=on_event)
+    builder = GraphBuilder(
+        workflow, trace=trace, on_event=on_event, invocations=invocations
+    )
 
     config = {"configurable": {"thread_id": thread_id}}
 

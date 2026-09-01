@@ -3,11 +3,14 @@
 Mirrors the structural rules the GraphBuilder applies at build time so the
 editor's "Validate" button can surface problems before a run is attempted.
 """
+import re
 from typing import Optional
 
 from pydantic import BaseModel
 
 from schema.models import Workflow
+
+_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 
 
 class ValidationIssue(BaseModel):
@@ -256,6 +259,62 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
                         node_id=n.id,
                     ))
                     break
+
+        elif n.type == "invoke":
+            cfg = n.config
+            parts = cfg.capability.split("/")
+            if len(parts) != 2 or not all(parts):
+                errors.append(ValidationIssue(
+                    level="error", code="E_INVOKE_BAD_CAPABILITY",
+                    message=f"Invoke '{n.id}' capability must be 'owner/name', "
+                            f"got '{cfg.capability}'",
+                    node_id=n.id,
+                ))
+            if cfg.version != "latest" and not _SEMVER_RE.match(cfg.version):
+                errors.append(ValidationIssue(
+                    level="error", code="E_INVOKE_BAD_VERSION",
+                    message=f"Invoke '{n.id}' version must be 'latest' or a semver "
+                            f"string, got '{cfg.version}'",
+                    node_id=n.id,
+                ))
+            if not cfg.output_field:
+                errors.append(ValidationIssue(
+                    level="error", code="E_INVOKE_NO_OUTPUT_FIELD",
+                    message=f"Invoke '{n.id}' has an empty output_field",
+                    node_id=n.id,
+                ))
+            seen_targets: set = set()
+            for m in cfg.input_mapping:
+                if not m.target:
+                    errors.append(ValidationIssue(
+                        level="error", code="E_INVOKE_MAPPING_NO_TARGET",
+                        message=f"Invoke '{n.id}' has an input mapping with no target",
+                        node_id=n.id,
+                    ))
+                    continue
+                if m.target in seen_targets:
+                    warnings.append(ValidationIssue(
+                        level="warning", code="W_INVOKE_DUPLICATE_MAPPING",
+                        message=f"Invoke '{n.id}' maps target '{m.target}' more than "
+                                f"once; only the last mapping takes effect",
+                        node_id=n.id,
+                    ))
+                seen_targets.add(m.target)
+                if not m.transform and not m.source:
+                    errors.append(ValidationIssue(
+                        level="error", code="E_INVOKE_MAPPING_EMPTY",
+                        message=f"Invoke '{n.id}' input mapping for '{m.target}' has "
+                                f"neither a source path nor a transform",
+                        node_id=n.id,
+                    ))
+
+        elif n.type == "invoke_exit":
+            errors.append(ValidationIssue(
+                level="error", code="E_INVOKE_EXIT_SAVED",
+                message=f"Node '{n.id}' is an invoke exit gate — a runtime-only node "
+                        f"that must not be saved in a workflow",
+                node_id=n.id,
+            ))
 
         if n.type not in ("start", "end") and not out_edges.get(n.id):
             warnings.append(ValidationIssue(

@@ -5,6 +5,8 @@ from app.engine.nodes.conditional import ConditionalHandler
 from app.engine.nodes.transform import TransformHandler
 from app.engine.nodes.custom_function import CustomFunctionHandler
 from app.engine.nodes.human_in_loop import HumanInLoopHandler
+from app.engine.nodes.invoke import InvokeHandler
+from app.engine.nodes.invoke_exit import InvokeExitHandler
 
 HANDLERS: dict[str, NodeHandler] = {
     "agent": AgentHandler(),
@@ -12,6 +14,8 @@ HANDLERS: dict[str, NodeHandler] = {
     "transform": TransformHandler(),
     "custom_function": CustomFunctionHandler(),
     "human_in_loop": HumanInLoopHandler(),
+    "invoke": InvokeHandler(),
+    "invoke_exit": InvokeExitHandler(),
 }
 
 __all__ = ["HANDLERS", "AgentState", "NodeContext", "NodeHandler"]
