@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Plus, Trash2, AlertTriangle } from 'lucide-react'
 import type { Edge } from '@xyflow/react'
 
@@ -17,7 +18,9 @@ import {
   type FieldMapping,
   type PromptDefinition,
   type AgentSkill,
+  type InvokeNodeConfig,
 } from '@/lib/workflowTypes'
+import InvokeCapabilityPicker from './InvokeCapabilityPicker'
 
 interface Props {
   node: WorkflowNode | null
@@ -454,6 +457,94 @@ function HumanInLoopEditor({ config, set }: { config: HumanInLoopNodeConfig; set
   )
 }
 
+function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: InvokeNodeConfig) => void }) {
+  const [picking, setPicking] = useState(false)
+
+  const updateMapping = (i: number, patch: Partial<FieldMapping>) => {
+    const input_mapping = config.input_mapping.map((m, idx) => (idx === i ? { ...m, ...patch } : m))
+    set({ ...config, input_mapping })
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field label="Capability">
+        <div className="flex items-center gap-1.5">
+          <input
+            className={inputCls}
+            value={config.capability}
+            placeholder="owner/name"
+            onChange={(e) => set({ ...config, capability: e.target.value })}
+          />
+          <button
+            onClick={() => setPicking(true)}
+            className="shrink-0 rounded-md border border-zinc-700 px-2 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            Browse
+          </button>
+        </div>
+      </Field>
+      <Field label="Version">
+        <input className={inputCls} value={config.version} placeholder="latest" onChange={(e) => set({ ...config, version: e.target.value })} />
+        <p className="mt-0.5 text-[11px] text-zinc-600">'latest' resolves once at run start and is pinned for the run's lifetime.</p>
+      </Field>
+
+      <div>
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Input mapping (parent → sub)</span>
+          <button
+            onClick={() => set({ ...config, input_mapping: [...config.input_mapping, { source: '', target: '' }] })}
+            className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300"
+          >
+            <Plus size={12} /> Add
+          </button>
+        </div>
+        <div className="space-y-1">
+          {config.input_mapping.length === 0 && (
+            <p className="text-xs text-zinc-600">None — the sub starts with an empty data frame.</p>
+          )}
+          {config.input_mapping.map((m, i) => (
+            <div key={i} className="flex items-center gap-1">
+              <input className={inputCls} value={m.source} placeholder="data.message" onChange={(e) => updateMapping(i, { source: e.target.value })} />
+              <span className="text-zinc-600">→</span>
+              <input className={inputCls} value={m.target} placeholder="sub field" onChange={(e) => updateMapping(i, { target: e.target.value })} />
+              <button onClick={() => set({ ...config, input_mapping: config.input_mapping.filter((_, idx) => idx !== i) })} className="text-zinc-500 hover:text-red-400">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+          <p className="text-[11px] text-zinc-600">Source paths resolve from the state root — run inputs live under data.* (e.g. data.message).</p>
+        </div>
+      </div>
+
+      <Field label="Output field">
+        <input className={inputCls} value={config.output_field} placeholder="result" onChange={(e) => set({ ...config, output_field: e.target.value })} />
+        <p className="mt-0.5 text-[11px] text-zinc-600">Where the sub's result lands in the parent data.</p>
+      </Field>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="invoke-set-output"
+          checked={config.set_output}
+          onChange={(e) => set({ ...config, set_output: e.target.checked })}
+          className="rounded border-zinc-700 bg-zinc-950"
+        />
+        <label htmlFor="invoke-set-output" className="text-sm text-zinc-300">Also copy the sub's final output into the parent output</label>
+      </div>
+
+      {picking && (
+        <InvokeCapabilityPicker
+          onPick={(name) => {
+            set({ ...config, capability: name })
+            setPicking(false)
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ─── panel shell ────────────────────────────────────────────────────────────
 
 export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges }: Props) {
@@ -479,6 +570,7 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}
       {node.type === 'human_in_loop' && <HumanInLoopEditor config={node.config as HumanInLoopNodeConfig} set={(c) => onConfigChange(node.id, c)} />}
+      {node.type === 'invoke' && <InvokeEditor config={node.config} set={(c) => onConfigChange(node.id, c)} />}
 
       {node.type !== 'start' && node.type !== 'end' && (
         <div className="rounded-md border border-zinc-800 p-3">

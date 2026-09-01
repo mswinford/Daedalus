@@ -53,6 +53,7 @@ const nodeTypes = {
   transform: FlowNode,
   human_in_loop: FlowNode,
   custom_function: FlowNode,
+  invoke: FlowNode,
 }
 
 function WorkflowEditorInner() {

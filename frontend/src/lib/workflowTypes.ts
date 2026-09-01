@@ -111,6 +111,21 @@ export interface CustomFunctionNodeConfig {
   retry?: GenRetryConfig | null
 }
 
+export interface InvokeNodeConfig {
+  capability: string
+  version: string
+  input_mapping: GenFieldMapping[]
+  output_field: string
+  set_output: boolean
+}
+
+// Runtime-only synthetic gate created by expand(); never persisted to workflow JSON.
+export interface InvokeExitNodeConfig {
+  invoke_id: string
+  output_field: string
+  set_output: boolean
+}
+
 export type NodeConfig =
   | StartNodeConfig
   | EndNodeConfig
@@ -119,6 +134,8 @@ export type NodeConfig =
   | TransformNodeConfig
   | HumanInLoopNodeConfig
   | CustomFunctionNodeConfig
+  | InvokeNodeConfig
+  | InvokeExitNodeConfig
 
 // ─── Discriminated node union (narrows `config` from `type`) ────────────────
 
@@ -156,6 +173,15 @@ export interface CustomFunctionNode extends BaseNode {
   type: 'custom_function'
   config: CustomFunctionNodeConfig
 }
+export interface InvokeNode extends BaseNode {
+  type: 'invoke'
+  config: InvokeNodeConfig
+}
+// Runtime-only (see InvokeExitNodeConfig); kept in the union for exhaustiveness.
+export interface InvokeExitNode extends BaseNode {
+  type: 'invoke_exit'
+  config: InvokeExitNodeConfig
+}
 
 export type WorkflowNode =
   | StartNode
@@ -165,6 +191,8 @@ export type WorkflowNode =
   | TransformNode
   | HumanInLoopNode
   | CustomFunctionNode
+  | InvokeNode
+  | InvokeExitNode
 
 // Override: the schema makes the collections optional (Pydantic defaults), but a
 // loaded workflow always carries them. The intersection keeps the generated
@@ -187,6 +215,8 @@ export const NODE_META: Record<GenNodeType, { label: string; color: string }> = 
   transform: { label: 'Transform', color: '#06b6d4' },
   human_in_loop: { label: 'Human Input', color: '#3b82f6' },
   custom_function: { label: 'Custom Function', color: '#ec4899' },
+  invoke: { label: 'Invoke', color: '#f97316' },
+  invoke_exit: { label: 'Invoke Exit', color: '#fb923c' },
 }
 
 export const ALL_NODE_TYPES: GenNodeType[] = [
@@ -197,6 +227,7 @@ export const ALL_NODE_TYPES: GenNodeType[] = [
   'transform',
   'human_in_loop',
   'custom_function',
+  'invoke',
 ]
 
 export function defaultConfig(type: GenNodeType): NodeConfig {
@@ -215,6 +246,10 @@ export function defaultConfig(type: GenNodeType): NodeConfig {
       return { input_fields: [], approval_required: false, output_fields: [] }
     case 'custom_function':
       return { code: '', timeout_seconds: 30, input_fields: [], output_fields: [] }
+    case 'invoke':
+      return { capability: '', version: 'latest', input_mapping: [], output_field: 'result', set_output: false }
+    case 'invoke_exit':
+      return { invoke_id: '', output_field: 'result', set_output: false }
   }
 }
 

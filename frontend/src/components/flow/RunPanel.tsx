@@ -1,21 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X } from 'lucide-react'
 
-import type { WorkflowRun, RunEvent, HumanInterruptField } from '@/lib/api'
-import { NODE_META, type NodeType } from '@/lib/workflowTypes'
+import type { WorkflowRun, HumanInterruptField } from '@/lib/api'
+import type { NodeType } from '@/lib/workflowTypes'
 import type { FlowNodeType } from '@/lib/graphTransform'
-
-interface NodeExecution {
-  nodeId: string
-  label: string
-  color: string
-  durationMs?: number
-  output?: unknown
-  error?: string
-  tokensIn?: number
-  tokensOut?: number
-  llmCalls?: number
-}
+import { summarize, groupExecutions, regionStats } from '@/lib/runEvents'
 
 function fmtMs(ms?: number): string {
   if (ms == null) return ''
@@ -31,47 +20,6 @@ function formatOutput(value: unknown): string {
   } catch {
     return String(value)
   }
-}
-
-/** Fold the flat event stream into one summary per executed node, in run order. */
-function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>): NodeExecution[] {
-  const byId = new Map<string, NodeExecution>()
-  const order: string[] = []
-
-  const ensure = (nodeId: string): NodeExecution => {
-    let ex = byId.get(nodeId)
-    if (!ex) {
-      const type = nodeTypeById.get(nodeId)
-      ex = {
-        nodeId,
-        label: type ? NODE_META[type].label : nodeId,
-        color: type ? NODE_META[type].color : '#71717a',
-      }
-      byId.set(nodeId, ex)
-      order.push(nodeId)
-    }
-    return ex
-  }
-
-  for (const ev of events) {
-    if (!ev.node_id) continue
-    const ex = ensure(ev.node_id)
-    if (ev.type === 'node_end') {
-      ex.durationMs = ev.data.duration_ms
-      ex.output = ev.data.output
-    } else if (ev.type === 'node_error') {
-      ex.error = ev.data.error
-      if (typeof ev.data.duration_ms === 'number') ex.durationMs = ev.data.duration_ms
-    } else if (ev.type === 'human_timeout') {
-      ex.error = ev.data.error
-    } else if (ev.type === 'llm_call') {
-      ex.tokensIn = (ex.tokensIn ?? 0) + (ev.data.tokens_input ?? 0)
-      ex.tokensOut = (ex.tokensOut ?? 0) + (ev.data.tokens_output ?? 0)
-      ex.llmCalls = (ex.llmCalls ?? 0) + 1
-    }
-  }
-
-  return order.map((id) => byId.get(id)!)
 }
 
 function useNow(active: boolean): number {
@@ -205,10 +153,10 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
     return m
   }, [nodes])
 
-  const executions = useMemo(
-    () => summarize(run.events, nodeTypeById),
-    [run.events, nodeTypeById],
-  )
+  const { rows, totalExecutions } = useMemo(() => {
+    const executions = summarize(run.events, nodeTypeById)
+    return { rows: groupExecutions(executions), totalExecutions: executions.length }
+  }, [run.events, nodeTypeById])
 
   const totalMs =
     run.started_at != null && run.completed_at != null
@@ -268,9 +216,9 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
       <div className="flex flex-col gap-3 border-t border-zinc-800/60 px-3 py-2 md:flex-row">
         {/* Left: per-node execution */}
         <div className="min-w-0 flex-1">
-          <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-            Execution · {executions.length} node{executions.length === 1 ? '' : 's'}
-          </p>
+            <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+              Execution · {totalExecutions} node{totalExecutions === 1 ? '' : 's'}
+            </p>
           {isPaused && run.interrupt_value && onResume && (
             <div className="mb-2">
               {run.interrupt_value.message && (
@@ -292,12 +240,19 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
             </pre>
           )}
           <div className="max-h-56 space-y-0.5 overflow-auto pr-1">
-            {executions.length === 0 && (
+            {totalExecutions === 0 && (
               <p className="py-2 text-xs text-zinc-600">No node execution recorded.</p>
             )}
-            {executions.map((ex) => {
+            {rows.map(({ ex, children }) => {
+              const isRegion = children.length > 0
+              const stats = isRegion ? regionStats(ex, children) : null
+              const durationMs = stats?.durationMs ?? ex.durationMs
+              const tokensIn = stats?.tokensIn ?? ex.tokensIn
+              const tokensOut = stats?.tokensOut ?? ex.tokensOut
+              const llmCalls = stats?.llmCalls ?? ex.llmCalls
+              const error = ex.error ?? stats?.error
               const open = expanded.has(ex.nodeId)
-              const body = ex.error ? ex.error : formatOutput(ex.output)
+              const body = error ? error : formatOutput(ex.output)
               return (
                 <div key={ex.nodeId}>
                   <button
@@ -306,15 +261,20 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
                   >
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: ex.color }} />
                     <span className="truncate text-sm text-zinc-200">{ex.label}</span>
+                    {isRegion && (
+                      <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                        {children.length} inner
+                      </span>
+                    )}
                     <span className="shrink-0 font-mono text-[11px] text-zinc-600">{ex.nodeId}</span>
                     <span className="ml-auto flex shrink-0 items-center gap-2">
-                      {ex.llmCalls ? (
+                      {llmCalls ? (
                         <span className="rounded bg-indigo-950/60 px-1.5 py-0.5 text-[11px] text-indigo-300">
-                          {ex.tokensIn}→{ex.tokensOut} tok · {ex.llmCalls} call{ex.llmCalls === 1 ? '' : 's'}
+                          {tokensIn}→{tokensOut} tok · {llmCalls} call{llmCalls === 1 ? '' : 's'}
                         </span>
                       ) : null}
-                      {ex.durationMs != null && (
-                        <span className="text-[11px] text-zinc-500">{fmtMs(ex.durationMs)}</span>
+                      {durationMs != null && (
+                        <span className="text-[11px] text-zinc-500">{fmtMs(durationMs)}</span>
                       )}
                     </span>
                   </button>
@@ -328,6 +288,47 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
                     >
                       {body}
                     </pre>
+                  )}
+                  {open && isRegion && (
+                    <div className="mb-1 ml-4 space-y-0.5 border-l border-zinc-800 pl-2">
+                      {children.map((c) => {
+                        const cOpen = expanded.has(c.nodeId)
+                        const cBody = c.error ? c.error : formatOutput(c.output)
+                        return (
+                          <div key={c.nodeId}>
+                            <button
+                              onClick={() => toggle(c.nodeId)}
+                              className="flex w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-left hover:bg-zinc-900"
+                            >
+                              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+                              <span className="truncate text-xs text-zinc-300">{c.label}</span>
+                              <span className="shrink-0 font-mono text-[10px] text-zinc-600">{c.nodeId}</span>
+                              <span className="ml-auto flex shrink-0 items-center gap-2">
+                                {c.llmCalls ? (
+                                  <span className="rounded bg-indigo-950/60 px-1.5 py-0.5 text-[10px] text-indigo-300">
+                                    {c.tokensIn}→{c.tokensOut} tok · {c.llmCalls} call{c.llmCalls === 1 ? '' : 's'}
+                                  </span>
+                                ) : null}
+                                {c.durationMs != null && (
+                                  <span className="text-[10px] text-zinc-500">{fmtMs(c.durationMs)}</span>
+                                )}
+                              </span>
+                            </button>
+                            {cOpen && cBody !== '' && (
+                              <pre
+                                className={`mb-1 ml-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border p-2 text-xs ${
+                                  c.error
+                                    ? 'border-red-900/50 bg-red-950/30 text-red-300'
+                                    : 'border-zinc-800 bg-zinc-900/60 text-zinc-400'
+                                }`}
+                              >
+                                {cBody}
+                              </pre>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
               )
