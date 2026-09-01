@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { isCapabilityPresent, applyCapability } from './capabilityImport'
+import { isCapabilityPresent, applyCapability, missingSecrets } from './capabilityImport'
 import type { Workflow } from './api'
 import type { AgentNode, ModelConfig, ToolDefinition, StartNode } from './workflowTypes'
 
@@ -135,5 +135,16 @@ describe('applyCapability dedupe', () => {
     expect(r.wf.tools).toHaveLength(1)
     const skill = (r.wf.nodes.find((n) => n.id === 'a') as AgentNode).config.skills?.[0]
     expect(skill?.tool_ids).toEqual(['t1'])
+  })
+})
+
+describe('missingSecrets', () => {
+  it('returns declared secrets absent from the known store', () => {
+    expect(missingSecrets({ secrets_required: ['GITHUB_TOKEN', 'SLACK_TOKEN'] }, ['SLACK_TOKEN'])).toEqual(['GITHUB_TOKEN'])
+  })
+  it('returns [] when everything is covered or nothing is declared', () => {
+    expect(missingSecrets({ secrets_required: ['A'] }, ['A', 'B'])).toEqual([])
+    expect(missingSecrets({}, [])).toEqual([])
+    expect(missingSecrets(null, [])).toEqual([])
   })
 })

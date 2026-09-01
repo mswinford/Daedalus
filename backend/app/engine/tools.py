@@ -1,6 +1,8 @@
 """Tool schema building and execution for agent tool-calling."""
 import asyncio
+import base64
 import json
+import os
 import re
 from typing import Any, Callable, Coroutine
 
@@ -85,6 +87,168 @@ def register_builtin(name: str):
 @register_builtin("echo")
 async def _builtin_echo(arguments: dict, state: dict) -> Any:
     return arguments.get("message", "")
+
+
+# ─── GitHub builtins ──────────────────────────────────────────────────────────
+#
+# Token is never a tool argument: it resolves via get_secret("GITHUB_TOKEN")
+# (env var first, then the secrets file), so the key never enters state,
+# checkpoints, or the LLM's context. Base URL defaults to github.com; set
+# GITHUB_BASE_URL for GitHub Enterprise Server.
+
+_GITHUB_SECRET = "GITHUB_TOKEN"
+
+
+def _github_client(token: str) -> Any:
+    """Async client for the GitHub API. A factory so tests can swap in a mock transport."""
+    import httpx
+    return httpx.AsyncClient(
+        base_url=os.environ.get("GITHUB_BASE_URL", "https://api.github.com"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        timeout=30.0,
+    )
+
+
+def _gh_error(resp: Any) -> dict[str, Any]:
+    """Curated error for a failed GitHub API response (no raw dumps)."""
+    detail = ""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            detail = str(body.get("message") or "")
+            errs = body.get("errors")
+            if isinstance(errs, list):
+                msgs = [str(e.get("message")) for e in errs if isinstance(e, dict) and e.get("message")]
+                if msgs:
+                    detail = "; ".join(msgs)
+    except Exception:
+        pass
+    msg = f"GitHub API {resp.status_code}" + (f": {detail}" if detail else "")
+    headers = getattr(resp, "headers", {}) or {}
+    if resp.status_code in (401, 403):
+        if "rate limit" in detail.lower() or headers.get("x-ratelimit-remaining") == "0":
+            msg += f" (rate limited; resets at unix {headers.get('ratelimit-reset', '?')})"
+        else:
+            msg += f" — check that {_GITHUB_SECRET} is set and has repo scope"
+    return {"error": msg}
+
+
+def _gh_precheck(arguments: dict, required: tuple[str, ...]) -> dict | None:
+    """Missing-argument / missing-secret guard shared by the github_* builtins."""
+    missing = [n for n in required if not arguments.get(n)]
+    if missing:
+        return {"error": f"missing required arguments: {', '.join(missing)}"}
+    if not get_secret(_GITHUB_SECRET):
+        return {
+            "error": (
+                f"{_GITHUB_SECRET} secret is not configured — add it via the Secrets panel "
+                f"or set the {_GITHUB_SECRET} environment variable"
+            )
+        }
+    return None
+
+
+def _quote_path(path: str) -> str:
+    from urllib.parse import quote
+    return "/".join(quote(p, safe="") for p in path.split("/") if p)
+
+
+@register_builtin("github_create_branch")
+async def _builtin_github_create_branch(arguments: dict, state: dict) -> Any:
+    guard = _gh_precheck(arguments, ("owner", "repo", "branch"))
+    if guard:
+        return guard
+    owner, repo, branch = arguments["owner"], arguments["repo"], arguments["branch"]
+    base = arguments.get("base") or None
+    async with _github_client(get_secret(_GITHUB_SECRET)) as client:  # type: ignore[arg-type]
+        if not base:
+            r = await client.get(f"/repos/{owner}/{repo}")
+            if r.status_code != 200:
+                return _gh_error(r)
+            base = r.json().get("default_branch") or "main"
+        r = await client.get(f"/repos/{owner}/{repo}/commits/{base}")
+        if r.status_code != 200:
+            return _gh_error(r)
+        sha = r.json().get("sha", "")
+        r = await client.post(
+            f"/repos/{owner}/{repo}/git/refs",
+            json={"ref": f"refs/heads/{branch}", "sha": sha},
+        )
+        if r.status_code not in (200, 201):
+            return _gh_error(r)
+    return {
+        "branch": branch,
+        "sha": sha,
+        "url": f"https://github.com/{owner}/{repo}/tree/{branch}",
+    }
+
+
+@register_builtin("github_write_file")
+async def _builtin_github_write_file(arguments: dict, state: dict) -> Any:
+    guard = _gh_precheck(arguments, ("owner", "repo", "path", "content", "message", "branch"))
+    if guard:
+        return guard
+    owner, repo, branch = arguments["owner"], arguments["repo"], arguments["branch"]
+    path = _quote_path(str(arguments["path"]))
+    content_b64 = base64.b64encode(str(arguments["content"]).encode("utf-8")).decode("ascii")
+    async with _github_client(get_secret(_GITHUB_SECRET)) as client:  # type: ignore[arg-type]
+        existing_sha = None
+        r = await client.get(f"/repos/{owner}/{repo}/contents/{path}", params={"ref": branch})
+        if r.status_code == 200:
+            existing_sha = r.json().get("sha")
+        elif r.status_code != 404:
+            return _gh_error(r)
+        payload: dict[str, Any] = {
+            "message": arguments["message"],
+            "content": content_b64,
+            "branch": branch,
+        }
+        if existing_sha:
+            payload["sha"] = existing_sha  # GitHub requires the current sha to update a file
+        r = await client.put(f"/repos/{owner}/{repo}/contents/{path}", json=payload)
+        if r.status_code not in (200, 201):
+            return _gh_error(r)
+        commit = r.json().get("commit") or {}
+    return {
+        "path": arguments["path"],
+        "sha": commit.get("sha"),
+        "commit_url": commit.get("html_url"),
+    }
+
+
+@register_builtin("github_create_pr")
+async def _builtin_github_create_pr(arguments: dict, state: dict) -> Any:
+    guard = _gh_precheck(arguments, ("owner", "repo", "title", "head"))
+    if guard:
+        return guard
+    owner, repo = arguments["owner"], arguments["repo"]
+    base = arguments.get("base") or None
+    payload: dict[str, Any] = {
+        "title": arguments["title"],
+        "head": arguments["head"],
+    }
+    if arguments.get("body"):
+        payload["body"] = arguments["body"]
+    async with _github_client(get_secret(_GITHUB_SECRET)) as client:  # type: ignore[arg-type]
+        if not base:
+            r = await client.get(f"/repos/{owner}/{repo}")
+            if r.status_code != 200:
+                return _gh_error(r)
+            base = r.json().get("default_branch") or "main"
+        payload["base"] = base
+        r = await client.post(f"/repos/{owner}/{repo}/pulls", json=payload)
+        if r.status_code not in (200, 201):
+            return _gh_error(r)
+        pr = r.json()
+    return {
+        "number": pr.get("number"),
+        "url": pr.get("html_url"),
+        "state": pr.get("state"),
+    }
 
 
 async def execute_tool(

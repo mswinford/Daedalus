@@ -9,6 +9,18 @@ export interface ApplyResult {
 }
 
 /**
+ * Secrets a manifest declares but the consumer's secret store lacks.
+ * `known` is the list of secret names already available (env or file).
+ */
+export function missingSecrets(
+  manifest: { secrets_required?: string[] } | null | undefined,
+  known: string[],
+): string[] {
+  const required = manifest?.secrets_required ?? []
+  return required.filter((s) => !known.includes(s))
+}
+
+/**
  * Is this capability already present in the workflow at its attachment point?
  *
  * `key` semantics per kind:

@@ -449,3 +449,54 @@ def test_secret_hygiene_workflow_embedded_model():
     m = _m(_workflow_manifest(wf=wf))
     assert any("spec.workflow.models[0]" in e and "embedded API key value" in e
                for e in _secret_hygiene(m))
+
+
+# ─── Composite secret coverage ───────────────────────────────────────────────
+
+def test_publish_rejects_skill_with_undeclared_member_secret(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        member = _tool_manifest(name="acme/gh", stage="published",
+                                secrets_required=["GITHUB_TOKEN"])
+        assert _publish(client, member).status_code == 201
+        r = _publish(client, _skill_manifest(tools=[_ref("acme/gh")]))
+        assert r.status_code == 422
+        assert "GITHUB_TOKEN" in _detail(r) and "secrets_required" in _detail(r)
+
+
+def test_publish_accepts_skill_declaring_member_secret(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        member = _tool_manifest(name="acme/gh", stage="published",
+                                secrets_required=["GITHUB_TOKEN"])
+        assert _publish(client, member).status_code == 201
+        r = _publish(client, _skill_manifest(
+            tools=[_ref("acme/gh")], secrets_required=["GITHUB_TOKEN"]))
+        assert r.status_code == 201
+
+
+def test_top_level_dependencies_exempt_from_secret_coverage(tmp_path, monkeypatch):
+    """Top-level dependencies are metadata (not inlined at import) — no coverage duty."""
+    with _client(tmp_path, monkeypatch) as client:
+        member = _tool_manifest(name="acme/gh", stage="published",
+                                secrets_required=["GITHUB_TOKEN"])
+        assert _publish(client, member).status_code == 201
+        r = _publish(client, _tool_manifest(
+            name="acme/dep-only", dependencies=[_ref("acme/gh")]))
+        assert r.status_code == 201
+
+
+def test_cli_batch_covers_secrets_of_sibling_members(tmp_path):
+    """Batch publish: a skill may cover secrets of a tool in the same batch."""
+    import asyncio
+    from registry.db import Database
+    from registry.publish_checks import check_publish
+
+    db = asyncio.run(Database.connect(tmp_path / "registry.db"))
+    try:
+        tool = _m(_tool_manifest(name="acme/gh", stage="published",
+                                 secrets_required=["GITHUB_TOKEN"]))
+        skill = _m(_skill_manifest(tools=[_ref("acme/gh", "1.0.0")],
+                                   secrets_required=["GITHUB_TOKEN"]))
+        errors = asyncio.run(check_publish(db, skill, batch=[tool]))
+        assert errors == []
+    finally:
+        asyncio.run(db.close())

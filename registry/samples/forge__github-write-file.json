@@ -1,0 +1,81 @@
+{
+  "name": "forge/github-write-file",
+  "version": "1.0.0",
+  "kind": "tool",
+  "description": "Create or update a file in a GitHub repository branch with a single commit. Content is passed raw (the builtin handles encoding). Requires the GITHUB_TOKEN secret and AI Forge's github_write_file builtin (ships with the backend).",
+  "tags": ["github", "builtin", "vcs"],
+  "spec": {
+    "kind": "tool",
+    "tool": {
+      "id": "github_write_file",
+      "name": "github_write_file",
+      "description": "Write a file to a branch in a GitHub repository, committing it with the given message. Creates the file if it does not exist, updates it otherwise. The target branch must already exist.",
+      "parameters": {
+        "owner": {
+          "type": "string",
+          "description": "GitHub owner or organization of the repository",
+          "required": true
+        },
+        "repo": {
+          "type": "string",
+          "description": "Repository name (without the owner prefix)",
+          "required": true
+        },
+        "path": {
+          "type": "string",
+          "description": "File path relative to the repository root",
+          "required": true
+        },
+        "content": {
+          "type": "string",
+          "description": "Full file content (plain text, not encoded)",
+          "required": true
+        },
+        "message": {
+          "type": "string",
+          "description": "Commit message for the change",
+          "required": true
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch to commit to (must already exist; there is no default on purpose)",
+          "required": true
+        }
+      },
+      "implementation": {
+        "type": "builtin",
+        "config": { "function": "github_write_file" }
+      }
+    }
+  },
+  "interface": {
+    "type": "http",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "owner": { "type": "string" },
+        "repo": { "type": "string" },
+        "path": { "type": "string" },
+        "content": { "type": "string" },
+        "message": { "type": "string" },
+        "branch": { "type": "string" }
+      },
+      "required": ["owner", "repo", "path", "content", "message", "branch"]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "sha": { "type": "string" },
+        "commit_url": { "type": "string" }
+      }
+    }
+  },
+  "secrets_required": ["GITHUB_TOKEN"],
+  "governance": {
+    "owner": "forge",
+    "data_classification": "internal",
+    "security_status": "approved"
+  },
+  "stage": "published"
+}

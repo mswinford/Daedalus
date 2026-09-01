@@ -3,8 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Check, Loader2, Plus, Search, X } from 'lucide-react'
 
 import { capabilitiesApi, type CapabilityKind } from '@/lib/registryApi'
-import { applyCapability, isCapabilityPresent } from '@/lib/capabilityImport'
-import { apiErrorMessage, type Workflow } from '@/lib/api'
+import { applyCapability, isCapabilityPresent, missingSecrets } from '@/lib/capabilityImport'
+import { apiErrorMessage, secretsApi, type Workflow } from '@/lib/api'
 
 const KIND_COLORS: Record<CapabilityKind, string> = {
   tool: 'bg-sky-500/15 text-sky-400',
@@ -63,6 +63,7 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null)
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q.trim()), 250)
@@ -93,10 +94,19 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
     if (!wf || pending) return
     setPending(row.name)
     setError(null)
+    setNotice(null)
     try {
-      const res = await capabilitiesApi.use(row.name, 'latest', true)
+      const [res, secrets] = await Promise.all([
+        capabilitiesApi.use(row.name, 'latest', true),
+        secretsApi.list(),
+      ])
       const { wf: merged, added } = applyCapability(wf, row.kind, res.artifact, row.name, agentId ?? undefined)
-      if (added) onApply(merged)
+      if (!added) return
+      onApply(merged)
+      const missing = missingSecrets(res.manifest, (secrets ?? []).map((s) => s.name))
+      if (missing.length > 0) {
+        setNotice(`Added — but ${missing.join(', ')} missing from your secrets; add via the Secrets panel before running`)
+      }
     } catch (e) {
       setError(apiErrorMessage(e))
     } finally {
@@ -204,6 +214,7 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
           })}
         </div>
 
+        {notice && <p className="border-t border-zinc-800 px-4 py-2 text-xs text-amber-400">{notice}</p>}
         {error && <p className="border-t border-zinc-800 px-4 py-2 text-xs text-red-400">{error}</p>}
       </div>
     </div>

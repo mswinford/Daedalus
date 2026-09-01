@@ -8,8 +8,8 @@ import {
   CAPABILITY_KINDS,
   type CapabilityKind,
 } from '@/lib/registryApi'
-import { workflowsApi, apiErrorMessage } from '@/lib/api'
-import { applyCapability } from '@/lib/capabilityImport'
+import { workflowsApi, secretsApi, apiErrorMessage } from '@/lib/api'
+import { applyCapability, missingSecrets } from '@/lib/capabilityImport'
 import type { AgentNodeConfig } from '@/lib/workflowTypes'
 
 /** Common shape shared by list summaries and search hits. */
@@ -76,23 +76,33 @@ function UseButton({ cap }: { cap: RowCap }) {
   const applyUse = useMutation({
     mutationFn: async () => {
       if (!targetWf) throw new Error('Pick a target workflow')
-      const { artifact } = await capabilitiesApi.use(cap.name, 'latest', true)
+      const [{ artifact, manifest }, secrets] = await Promise.all([
+        capabilitiesApi.use(cap.name, 'latest', true),
+        secretsApi.list(),
+      ])
       const { wf: merged, added } = applyCapability(
         targetWf, cap.kind, artifact, cap.name, targetNodeId || undefined,
       )
       if (!added) return null
-      return workflowsApi.update(targetWf.id, merged)
+      const saved = await workflowsApi.update(targetWf.id, merged)
+      const missing = missingSecrets(manifest, (secrets ?? []).map((s) => s.name))
+      return { wf: saved, missing }
     },
-    onSuccess: (wf) => {
-      if (!wf) {
+    onSuccess: (result) => {
+      if (!result) {
         setApplyNotice(
           cap.kind === 'skill' ? 'Already on the selected agent' : 'Already in this workflow',
         )
         return
       }
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
-      queryClient.invalidateQueries({ queryKey: ['workflow', wf.id] })
-      navigate(`/workflows/${wf.id}`)
+      queryClient.invalidateQueries({ queryKey: ['workflow', result.wf.id] })
+      if (result.missing.length > 0) {
+        // Stay put so the warning is visible; the user adds secrets before running.
+        setApplyNotice(`Applied — add missing secret(s): ${result.missing.join(', ')} (Secrets panel)`)
+        return
+      }
+      navigate(`/workflows/${result.wf.id}`)
     },
   })
 

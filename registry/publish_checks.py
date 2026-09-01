@@ -11,7 +11,9 @@ Four checks:
    against the store with the same semantics import-time uses: an explicit
    version must exist (any stage); 'latest' must have a published version.
    Spec-level refs must also point at the expected kind, so wrong-kind refs
-   fail here with a precise message instead of at import time.
+   fail here with a precise message instead of at import time. And because
+   spec-level refs are inlined at import time, every secret they require must
+   be declared in this manifest's secrets_required (composite coverage).
 
 2. Kind stability — a capability name cannot change kind across versions;
    per the settled design that is a new capability under a new name.
@@ -130,6 +132,39 @@ async def _resolve_target(
     return None, f"capability {name} not found"
 
 
+async def _member_secrets_required(
+    db: Database, name: str, version: str, batch: list[CapabilityManifest]
+) -> Optional[list[str]]:
+    """secrets_required declared by the capability a ref points at (None = unresolvable)."""
+    if version != "latest":
+        rows = await db.conn.execute_fetchall(
+            "SELECT manifest_json FROM capability_versions WHERE name=? AND version=?",
+            (name, version),
+        )
+        if rows:
+            return CapabilityManifest.model_validate_json(rows[0]["manifest_json"]).secrets_required
+        for m in batch:
+            if m.name == name and m.version == version:
+                return m.secrets_required
+        return None
+
+    rows = await db.conn.execute_fetchall(
+        "SELECT manifest_json FROM capability_versions WHERE name=? AND stage=?",
+        (name, LifecycleStage.PUBLISHED.value),
+    )
+    best: Optional[CapabilityManifest] = None
+    for r in rows:
+        m = CapabilityManifest.model_validate_json(r["manifest_json"])
+        if best is None or semver_key(m.version) > semver_key(best.version):
+            best = m
+    if best is not None:
+        return best.secrets_required
+    for m in batch:
+        if m.name == name and m.stage == LifecycleStage.PUBLISHED:
+            return m.secrets_required
+    return None
+
+
 async def _check_dependencies(
     db: Database, manifest: CapabilityManifest, batch: list[CapabilityManifest]
 ) -> list[str]:
@@ -144,6 +179,22 @@ async def _check_dependencies(
             errors.append(
                 f"{slot}: {_ref_str(ref)} is kind '{kind}', expected '{want}'"
             )
+        # Composite secret coverage: spec-level refs are inlined at import time, so
+        # every secret the referenced capability needs must also be declared here —
+        # otherwise a consumer importing this manifest never gets flagged for it.
+        # Top-level dependencies are metadata only (not inlined) and are exempt.
+        if not slot.startswith("dependencies["):
+            member_secrets = await _member_secrets_required(
+                db, ref.name, ref.version, batch
+            )
+            if member_secrets is not None:
+                undeclared = [s for s in member_secrets if s not in manifest.secrets_required]
+                if undeclared:
+                    errors.append(
+                        f"{slot}: {_ref_str(ref)} requires secret(s) "
+                        f"{', '.join(sorted(undeclared))} which are not declared in "
+                        "this manifest's secrets_required"
+                    )
     return errors
 
 

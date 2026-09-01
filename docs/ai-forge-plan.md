@@ -18,7 +18,9 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > auto-save; runs stream live over WebSocket. Secrets store, per-agent message isolation, async
 > execution, timeout auto-fail, the Pending Approvals sidebar, and run-log persistence (event
 > history survives restarts) are all shipped.
-> Next up: `github_*` builtin tools, test-connection endpoint. Use this section as the source of
+> Next up: test-connection endpoint. The `github_*` builtins (create_branch / write_file /
+> create_pr) are shipped and published to the registry as forge/* capabilities plus the
+> forge/github-toolkit skill. Use this section as the source of
 > truth when resuming in a new session — it supersedes the phase notes below.
 
 ### What works today (shippable)
@@ -201,8 +203,14 @@ Gaps to close first:
 - [x] **URL templating for `http` tools** — done (see "Harden the http tool" above).
 - [x] **Secrets store** — done; GitHub token stored in `~/.ai-forge/secrets.json`, referenced via
   `${GITHUB_TOKEN}` in headers or `get_secret("GITHUB_TOKEN")` in sandbox.
-- **`github_*` builtins** — prefer a small set (`create_branch`, `write_file`, `create_pr`) over
-  raw `http` calls; register via `@register_builtin` in `backend/app/engine/tools.py`.
+- [x] **`github_*` builtins** — done: `github_create_branch`, `github_write_file`,
+  `github_create_pr` registered via `@register_builtin` in `backend/app/engine/tools.py`
+  (token resolves via `get_secret("GITHUB_TOKEN")` and is never a tool argument; GHES via the
+  `GITHUB_BASE_URL` env var). Published to the registry as forge/github-create-branch,
+  -write-file, -create-pr plus the forge/github-toolkit skill (one-click bundle of all three —
+  the "tool collection" pattern: a skill whose tools[] pool-adds every member). Shipped
+  alongside: import-time missing-secret warnings (both apply paths) and the publish-time
+  composite `secrets_required` coverage check.
 
 ### Phase 2 — Design (completed)
 
