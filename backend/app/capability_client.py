@@ -36,7 +36,7 @@ class CapabilityClient:
         """
         try:
             resp = httpx.get(
-                f"{self.base_url}/capabilities/{name}/use",
+                f"{self.base_url}/registry/capabilities/{name}/use",
                 params={"version": version},
                 timeout=self.timeout,
             )
