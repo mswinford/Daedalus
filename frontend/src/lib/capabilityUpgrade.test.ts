@@ -1,6 +1,20 @@
 import { describe, it, expect } from 'vitest'
 
-import { normalizeForDiff, deepEqual, computeFieldDiff, applyUpgradeChoices, type FieldStatus } from './capabilityUpgrade'
+import {
+  normalizeForDiff,
+  deepEqual,
+  computeFieldDiff,
+  applyUpgradeChoices,
+  stripStamps,
+  toolMap,
+  skillView,
+  skillArtifactView,
+  agentView,
+  agentArtifactView,
+  upsertTools,
+  upsertModel,
+  type FieldStatus,
+} from './capabilityUpgrade'
 
 function stamped(id: string, name: string, version: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { id, source_capability: name, source_version: version, ...extra }
@@ -262,5 +276,133 @@ describe('applyUpgradeChoices', () => {
     const neu = stamped('up-t1', 'ns/t1', '2.0.0', { name: 't1', prompt: 'changed' })
     const out = applyUpgradeChoices(local, neu, { prompt: 'local' }, 'ns/t1', '2.0.0')
     expect(out).toEqual({ id: 't1', source_capability: 'ns/t1', source_version: '2.0.0', name: 't1', prompt: 'hello' })
+  })
+})
+
+describe('stripStamps / toolMap', () => {
+  it('stripStamps removes only the two stamp fields and deep-copies', () => {
+    const entry = { id: 't1', source_capability: 'ns/s', source_version: '1.0.0', config: { a: [1] } }
+    const out = stripStamps(entry)
+    expect(out).toEqual({ id: 't1', config: { a: [1] } })
+    ;(out.config as any).a.push(2)
+    expect((entry.config as any).a).toEqual([1])
+  })
+
+  it('toolMap keys by name and keeps the id for remapping', () => {
+    const m = toolMap([
+      { id: 'alpha', name: 'Alpha', source_capability: 'ns/s', config: {} },
+      { id: 'beta', name: 'Beta' },
+    ])
+    expect(Object.keys(m).sort()).toEqual(['Alpha', 'Beta'])
+    expect((m.Alpha as any).id).toBe('alpha')
+    expect((m.Alpha as any).source_capability).toBeUndefined()
+  })
+
+  it('toolMap tolerates empty input', () => {
+    expect(toolMap([])).toEqual({})
+  })
+})
+
+describe('skillView / skillArtifactView', () => {
+  const wfTools = [
+    { id: 't-a', name: 'Alpha', source_capability: 'ns/s1', source_version: '1.0.0' },
+    { id: 't-b', name: 'Beta' },
+    { id: 'unrelated', name: 'Other' },
+  ]
+
+  it('projects a skill entry to prompt + resolved tools by name', () => {
+    const v = skillView({ name: 's1', prompt: 'do things', tool_ids: ['t-b', 't-a'] }, wfTools)
+    expect(v).toEqual({
+      prompt: 'do things',
+      tools: { Alpha: { id: 't-a', name: 'Alpha' }, Beta: { id: 't-b', name: 'Beta' } },
+    })
+  })
+
+  it('ignores tool ids that no longer resolve in the pool', () => {
+    const v = skillView({ prompt: '', tool_ids: ['t-a', 'ghost'] }, wfTools)
+    expect(Object.keys((v.tools as object))).toEqual(['Alpha'])
+  })
+
+  it('artifact view matches entry view when nothing was edited locally', () => {
+    const artifact = { name: 's1', prompt: 'do things', tools: [{ id: 't-a', name: 'Alpha' }, { id: 't-b', name: 'Beta' }] }
+    const local = skillView({ name: 's1', prompt: 'do things', tool_ids: ['t-a', 't-b'] }, wfTools)
+    expect(deepEqual(local, skillArtifactView(artifact))).toBe(true)
+  })
+
+  it('local edits to a nested tool surface as a difference', () => {
+    const edited = wfTools.map((t) => (t.id === 't-a' ? { ...t, description: 'I changed this' } : t))
+    const local = skillView({ prompt: '', tool_ids: ['t-a'] }, edited)
+    const upstream = skillArtifactView({ name: 's1', prompt: '', tools: [{ id: 't-a', name: 'Alpha' }] })
+    expect(deepEqual(local, upstream)).toBe(false)
+  })
+})
+
+describe('agentView / agentArtifactView', () => {
+  const wfModels = [{ id: 'm-1', name: 'GPT', provider: 'openai_compatible', source_capability: 'ns/a' }]
+  const wfTools = [{ id: 't-a', name: 'Alpha' }, { id: 't-s', name: 'SkillTool' }]
+
+  it('projects config to model / system_prompt / tools / skills-by-name', () => {
+    const cfg = {
+      model_id: 'm-1',
+      system_prompt: 'be nice',
+      tool_ids: ['t-a'],
+      skills: [{ name: 'sk', prompt: 'skill body', tool_ids: ['t-s'] }],
+    }
+    const v = agentView(cfg, wfModels, wfTools)
+    expect(v.model).toEqual({ id: 'm-1', name: 'GPT', provider: 'openai_compatible' })
+    expect(v.system_prompt).toBe('be nice')
+    expect(v.tools).toEqual({ Alpha: { id: 't-a', name: 'Alpha' } })
+    expect(v.skills).toEqual({ sk: { prompt: 'skill body', tools: { SkillTool: { id: 't-s', name: 'SkillTool' } } } })
+  })
+
+  it('artifact view matches config view when nothing was edited locally', () => {
+    const artifact = {
+      model: { id: 'm-1', name: 'GPT', provider: 'openai_compatible' },
+      prompt: 'be nice',
+      tools: [{ id: 't-a', name: 'Alpha' }],
+      skills: [{ name: 'sk', prompt: 'skill body', tools: [{ id: 't-s', name: 'SkillTool' }] }],
+    }
+    const cfg = { model_id: 'm-1', system_prompt: 'be nice', tool_ids: ['t-a'], skills: [{ name: 'sk', prompt: 'skill body', tool_ids: ['t-s'] }] }
+    expect(deepEqual(agentView(cfg, wfModels, wfTools), agentArtifactView(artifact))).toBe(true)
+  })
+
+  it('empty model pool projects an empty model object', () => {
+    const v = agentView({ model_id: 'missing', system_prompt: '', tool_ids: [], skills: [] }, [], [])
+    expect(v.model).toEqual({})
+  })
+})
+
+describe('upsertTools / upsertModel', () => {
+  it('updates existing pool entries in place and re-stamps them', () => {
+    const pool = [{ id: 't-a', name: 'Alpha', description: 'old', source_capability: 'ns/old', source_version: '1.0.0' }]
+    const out = upsertTools(pool, [{ id: 't-a', name: 'Alpha', description: 'new' }], 'ns/new', '2.0.0')
+    expect(out).toEqual([{ id: 't-a', name: 'Alpha', description: 'new', source_capability: 'ns/new', source_version: '2.0.0' }])
+  })
+
+  it('adds missing definitions and leaves others untouched', () => {
+    const pool = [{ id: 't-a', name: 'Alpha' }]
+    const out = upsertTools(pool, [{ id: 't-b', name: 'Beta' }], 'ns/new', '2.0.0')
+    expect(out).toHaveLength(2)
+    expect(out[0]).toEqual({ id: 't-a', name: 'Alpha' })
+    expect(out[1]).toEqual({ id: 't-b', name: 'Beta', source_capability: 'ns/new', source_version: '2.0.0' })
+  })
+
+  it('does not mutate the input pool', () => {
+    const pool = [{ id: 't-a', name: 'Alpha' }]
+    upsertTools(pool, [{ id: 't-b', name: 'Beta' }], 'ns/new', '2.0.0')
+    expect(pool).toHaveLength(1)
+  })
+
+  it('upsertModel returns the entry id and re-stamps existing entries', () => {
+    const pool = [{ id: 'm-1', name: 'GPT', source_version: '1.0.0' }]
+    const r = upsertModel(pool, { id: 'm-1', name: 'GPT-2' }, 'ns/a', '3.0.0')
+    expect(r.id).toBe('m-1')
+    expect(r.pool[0]).toEqual({ id: 'm-1', name: 'GPT-2', source_capability: 'ns/a', source_version: '3.0.0' })
+  })
+
+  it('upsertModel appends unknown models', () => {
+    const r = upsertModel([], { id: 'm-9', name: 'New' }, 'ns/a', '1.0.0')
+    expect(r.id).toBe('m-9')
+    expect(r.pool).toEqual([{ id: 'm-9', name: 'New', source_capability: 'ns/a', source_version: '1.0.0' }])
   })
 })

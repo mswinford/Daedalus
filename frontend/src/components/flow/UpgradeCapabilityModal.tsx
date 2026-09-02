@@ -6,11 +6,19 @@ import { apiErrorMessage } from '@/lib/api'
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
 import { applyUpgradeChoices, computeFieldDiff, type FieldDiff } from '@/lib/capabilityUpgrade'
 
+export interface UpgradeViews {
+  local: Record<string, unknown>
+  old: Record<string, unknown> | null
+  new: Record<string, unknown>
+}
+
 interface Props {
   status: UpdateStatus
   localEntry: Record<string, unknown>
+  /** Composite kinds (skill/agent): project raw artifacts + local state into comparable views. When absent, pool-entry mode. */
+  project?: (oldArtifact: Record<string, any> | null, newArtifact: Record<string, any>) => UpgradeViews
   onClose(): void
-  onApply(upgraded: Record<string, unknown>): Promise<void>
+  onApply(upgraded: Record<string, unknown>, choices: Record<string, 'local' | 'upstream'>): Promise<void>
 }
 
 function valueText(v: unknown): string {
@@ -28,11 +36,12 @@ function buildUpstreamObj(kind: UpdateStatus['kind'], artifact: Record<string, a
   return artifact
 }
 
-export default function UpgradeCapabilityModal({ status, localEntry, onClose, onApply }: Props) {
+export default function UpgradeCapabilityModal({ status, localEntry, project, onClose, onApply }: Props) {
   const [attempt, setAttempt] = useState(0)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [diff, setDiff] = useState<FieldDiff[]>([])
+  const [localView, setLocalView] = useState<Record<string, unknown>>(localEntry)
   const [upstreamNew, setUpstreamNew] = useState<Record<string, unknown> | null>(null)
   const [choices, setChoices] = useState<Record<string, 'local' | 'upstream'>>({})
   const [breakingAck, setBreakingAck] = useState(false)
@@ -53,20 +62,23 @@ export default function UpgradeCapabilityModal({ status, localEntry, onClose, on
     setFetchError(null)
     ;(async () => {
       try {
-        const fetches: Promise<Record<string, unknown>>[] = [
-          capabilitiesApi.use(status.capabilityName, status.latestVersion!, true).then((r) => buildUpstreamObj(status.kind, r.artifact, localEntry)),
-        ]
-        if (status.currentVersion != null) {
-          fetches.push(
-            capabilitiesApi.use(status.capabilityName, status.currentVersion, true).then((r) => buildUpstreamObj(status.kind, r.artifact, localEntry)),
-          )
-        }
-        const results = await Promise.all(fetches)
+        const newArtifact = await capabilitiesApi.use(status.capabilityName, status.latestVersion!, true)
+        const oldArtifact = status.currentVersion != null ? await capabilitiesApi.use(status.capabilityName, status.currentVersion, true) : null
         if (cancelled) return
-        const new_ = results[0]
-        const old = results.length > 1 ? (results[1] as Record<string, unknown>) : null
-        setUpstreamNew(new_)
-        const d = computeFieldDiff(localEntry, old, new_)
+        let local: Record<string, unknown>
+        let old: Record<string, unknown> | null
+        let fresh: Record<string, unknown>
+        if (project) {
+          const v = project(oldArtifact?.artifact ?? null, newArtifact.artifact)
+          ;({ local, old, new: fresh } = v)
+        } else {
+          local = localEntry
+          old = oldArtifact ? buildUpstreamObj(status.kind, oldArtifact.artifact, localEntry) : null
+          fresh = buildUpstreamObj(status.kind, newArtifact.artifact, localEntry)
+        }
+        setLocalView(local)
+        setUpstreamNew(fresh)
+        const d = computeFieldDiff(local, old, fresh)
         setDiff(d)
         const init: Record<string, 'local' | 'upstream'> = {}
         for (const f of d) if (f.status !== 'same') init[f.field] = f.defaultChoice
@@ -89,7 +101,7 @@ export default function UpgradeCapabilityModal({ status, localEntry, onClose, on
     setApplying(true)
     setApplyError(null)
     try {
-      await onApply(applyUpgradeChoices(localEntry, upstreamNew, choices, status.capabilityName, status.latestVersion!))
+      await onApply(applyUpgradeChoices(localView, upstreamNew, choices, status.capabilityName, status.latestVersion!), choices)
     } catch (e) {
       setApplyError(apiErrorMessage(e))
     } finally {

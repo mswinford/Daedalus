@@ -43,7 +43,17 @@ import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
 import CapabilityVersionBadge from '@/components/flow/CapabilityVersionBadge'
 import { useCapabilityUpdates } from '@/lib/useCapabilityUpdates'
-import type { AgentNodeConfig, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
+import type { UpdateStatus } from '@/lib/capabilityUpdates'
+import UpgradeCapabilityModal from '@/components/flow/UpgradeCapabilityModal'
+import {
+  agentArtifactView,
+  agentView,
+  skillArtifactView,
+  skillView,
+  upsertModel,
+  upsertTools,
+} from '@/lib/capabilityUpgrade'
+import type { AgentNodeConfig, AgentSkill, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
 
@@ -83,6 +93,9 @@ function WorkflowEditorInner() {
   })
   const updates = useCapabilityUpdates(workflow ?? null)
   const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false)
+  const [configUpgrading, setConfigUpgrading] = useState<UpdateStatus | null>(null)
+  const upgradeArtifactRef = useRef<Record<string, any> | null>(null)
+  const emptyEntryRef = useRef({})
   useEffect(() => {
     if (updates.error) setUpdateNoticeDismissed(false)
   }, [updates.error])
@@ -206,6 +219,101 @@ function WorkflowEditorInner() {
       )
     }
     setDirty(true)
+  }
+
+  // ─── Capability upgrades (skill attachments + agent nodes) ─────────────────
+
+  const openConfigUpgrade = (where: string) => {
+    const s = updates.statuses.find((x) => x.where === where && x.hasUpdate)
+    if (!s) return
+    upgradeArtifactRef.current = null
+    setConfigUpgrading(s)
+  }
+
+  const projectForUpgrade = useCallback(
+    (oldA: Record<string, any> | null, newA: Record<string, any>) => {
+      const s = configUpgrading
+      if (!s) throw new Error('No upgrade in progress')
+      upgradeArtifactRef.current = newA
+      const nodeId = s.where.split(' ')[0].slice(5)
+      const node = nodes.find((n) => n.id === nodeId)
+      if (!node || node.data.nodeType !== 'agent') throw new Error('Agent node no longer exists')
+      const cfg = node.data.config as AgentNodeConfig
+      const wfTools = tools as unknown as Array<Record<string, unknown>>
+      if (s.kind === 'skill') {
+        const skills = cfg.skills ?? []
+        const si = skills.findIndex((sk) => sk.source_capability === s.capabilityName)
+        if (si < 0) throw new Error('Skill no longer attached to this agent')
+        return {
+          local: skillView(skills[si] as unknown as Record<string, unknown>, wfTools),
+          old: oldA ? skillArtifactView(oldA) : null,
+          new: skillArtifactView(newA),
+        }
+      }
+      const wfModels = models as unknown as Array<Record<string, unknown>>
+      return {
+        local: agentView(cfg as unknown as Record<string, unknown>, wfModels, wfTools),
+        old: oldA ? agentArtifactView(oldA) : null,
+        new: agentArtifactView(newA),
+      }
+    },
+    [configUpgrading, nodes, tools, models],
+  )
+
+  const applyConfigUpgrade = async (merged: Record<string, unknown>, choices: Record<string, 'local' | 'upstream'>) => {
+    const s = configUpgrading
+    if (!s) return
+    const artifact = upgradeArtifactRef.current
+    const nodeId = s.where.split(' ')[0].slice(5)
+    const node = nodes.find((n) => n.id === nodeId)
+    if (!node || node.data.nodeType !== 'agent') throw new Error('Agent node no longer exists')
+    const cfg = { ...(node.data.config as AgentNodeConfig) }
+
+    let nextTools: Array<Record<string, unknown>> | null = null
+    const upsertIntoPool = (defs: ToolDefinition[]) => {
+      if (defs.length === 0) return
+      const base = nextTools ?? (tools as unknown as Array<Record<string, unknown>>)
+      const defsAny = defs as unknown as Array<Record<string, unknown>>
+      nextTools = upsertTools(base, defsAny, s.capabilityName, s.latestVersion!)
+    }
+
+    if (s.kind === 'skill') {
+      const skills = cfg.skills ?? []
+      const si = skills.findIndex((sk) => sk.source_capability === s.capabilityName)
+      if (si < 0) throw new Error('Skill no longer attached to this agent')
+      let toolIds = skills[si].tool_ids
+      if (choices.tools === 'upstream' && artifact) upsertIntoPool((artifact.tools as ToolDefinition[]) ?? [])
+      if (choices.tools === 'upstream' && artifact) toolIds = ((artifact.tools as ToolDefinition[]) ?? []).map((t) => t.id)
+      const skill: AgentSkill = { ...skills[si], prompt: merged.prompt as string, tool_ids: toolIds, source_version: s.latestVersion! }
+      cfg.skills = skills.map((sk, i) => (i === si ? skill : sk))
+    } else {
+      if (choices.model === 'upstream' && artifact?.model) {
+        const r = upsertModel(models as unknown as Array<Record<string, unknown>>, artifact.model as Record<string, any>, s.capabilityName, s.latestVersion!)
+        handleModelsChange(r.pool as unknown as ModelConfig[])
+        cfg.model_id = r.id
+      }
+      cfg.system_prompt = merged.system_prompt as string
+      if (choices.tools === 'upstream' && artifact) {
+        upsertIntoPool((artifact.tools as ToolDefinition[]) ?? [])
+        cfg.tool_ids = ((artifact.tools as ToolDefinition[]) ?? []).map((t) => t.id)
+      }
+      if (choices.skills === 'upstream' && artifact) {
+        const nested: Array<{ name: string; prompt: string; tools?: ToolDefinition[] }> = (artifact.skills as any) ?? []
+        upsertIntoPool(nested.flatMap((sk) => sk.tools ?? []))
+        cfg.skills = nested.map((sk) => ({
+          name: sk.name,
+          prompt: sk.prompt,
+          tool_ids: (sk.tools ?? []).map((t) => t.id),
+          source_capability: s.capabilityName,
+          source_version: s.latestVersion!,
+        }))
+      }
+      cfg.source_version = s.latestVersion!
+    }
+
+    if (nextTools) handleToolsChange(nextTools as unknown as ToolDefinition[])
+    handleConfigChange(nodeId, cfg)
+    setConfigUpgrading(null)
   }
 
   // ─── Node creation (drag from palette) ─────────────────────────────────────
@@ -741,9 +849,21 @@ function WorkflowEditorInner() {
             onDeleteNode={handleDeleteNode}
             edges={edges}
             updates={updates.statuses}
+            onUpgradeOrigin={openConfigUpgrade}
           />
         </aside>
       </div>
+
+      {/* Upgrade modal for skill attachments / agent nodes */}
+      {configUpgrading && (
+        <UpgradeCapabilityModal
+          status={configUpgrading}
+          localEntry={emptyEntryRef.current}
+          project={projectForUpgrade}
+          onClose={() => setConfigUpgrading(null)}
+          onApply={applyConfigUpgrade}
+        />
+      )}
 
       {/* Resources panel (tools + models) */}
       {showResources && (

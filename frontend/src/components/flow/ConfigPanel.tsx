@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, AlertTriangle, ArrowUpCircle } from 'lucide-react'
 import type { Edge } from '@xyflow/react'
 
 import {
@@ -34,6 +34,7 @@ interface Props {
   onDeleteNode: (nodeId: string) => void
   edges: Edge[]
   updates?: UpdateStatus[]
+  onUpgradeOrigin?: (where: string) => void
 }
 
 // ─── small form primitives ──────────────────────────────────────────────────
@@ -92,7 +93,20 @@ function EndEditor({ config, set }: { config: EndNodeConfig; set: (c: EndNodeCon
   )
 }
 
-function AgentEditor({ config, set, models, tools, prompts, nodeId, updates }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[]; prompts: PromptDefinition[]; nodeId: string; updates?: UpdateStatus[] }) {
+function UpgradeLink({ status, onClick }: { status: UpdateStatus; onClick(): void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+        status.isBreaking ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25' : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+      }`}
+    >
+      <ArrowUpCircle size={12} /> Upgrade
+    </button>
+  )
+}
+
+function AgentEditor({ config, set, models, tools, prompts, nodeId, updates, onUpgradeOrigin }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[]; prompts: PromptDefinition[]; nodeId: string; updates?: UpdateStatus[]; onUpgradeOrigin?: (where: string) => void }) {
   const skills = config.skills ?? []
 
   const toggleTool = (id: string) => {
@@ -181,6 +195,7 @@ function AgentEditor({ config, set, models, tools, prompts, nodeId, updates }: {
                     onChange={(e) => updateSkill(i, { name: e.target.value || null })}
                   />
                   {su && <CapabilityVersionBadge current={su.currentVersion} latest={su.latestVersion} breaking={su.isBreaking} />}
+                  {su?.hasUpdate && onUpgradeOrigin && <UpgradeLink status={su} onClick={() => onUpgradeOrigin(su.where)} />}
                   <button
                     onClick={() => set({ ...config, skills: skills.filter((_, j) => j !== i) })}
                     className="text-red-400 hover:text-red-300"
@@ -554,7 +569,7 @@ function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: Invo
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges, updates }: Props) {
+export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges, updates, onUpgradeOrigin }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -573,12 +588,13 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
           {agentStatus && (
             <CapabilityVersionBadge current={agentStatus.currentVersion} latest={agentStatus.latestVersion} breaking={agentStatus.isBreaking} />
           )}
+          {agentStatus?.hasUpdate && onUpgradeOrigin && <UpgradeLink status={agentStatus} onClick={() => onUpgradeOrigin(agentStatus.where)} />}
         </p>
       </div>
 
       {node.type === 'start' && <StartEditor config={node.config} set={set} />}
       {node.type === 'end' && <EndEditor config={node.config} set={set} />}
-      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} nodeId={node.id} updates={updates} />}
+      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} nodeId={node.id} updates={updates} onUpgradeOrigin={onUpgradeOrigin} />}
       {node.type === 'conditional' && <ConditionalEditor config={node.config} set={set} nodeId={node.id} edges={edges} />}
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}
