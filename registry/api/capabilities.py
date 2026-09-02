@@ -5,9 +5,10 @@ from registry.store import (
     InvalidTransitionError,
     get_versions,
     list_capabilities,
+    set_evaluation,
     transition_stage,
 )
-from schema.capability import LifecycleStage
+from schema.capability import CapabilityEvaluationRef, LifecycleStage
 
 router = APIRouter()
 
@@ -40,6 +41,20 @@ async def lifecycle(name: str, request: Request, body: dict):
     except InvalidTransitionError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"name": name, "version": version, "stage": new_stage}
+
+
+@router.put("/capabilities/{name:path}/versions/{version}/evaluation")
+async def set_capability_evaluation(
+    name: str, version: str, request: Request, body: CapabilityEvaluationRef
+):
+    """Store runtime evaluation metadata for a version (SQLite only — never
+    touches the manifest bytes or git). An all-null body clears it."""
+    stored = body.model_dump(mode="json", exclude_none=True) or None
+    try:
+        await set_evaluation(request.app.state.db, name, version, stored)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"{name}@{version} not found")
+    return {"ok": True, "name": name, "version": version, "evaluation": stored}
 
 
 @router.get("/capabilities/{name:path}")

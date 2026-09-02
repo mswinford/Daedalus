@@ -17,9 +17,11 @@ from registry.store import (
     VersionConflictError,
     extract_artifact,
     get_artifact,
+    get_versions,
     list_capabilities,
     resolve_version,
     search,
+    set_evaluation,
     transition_stage,
     upsert_version,
 )
@@ -318,6 +320,50 @@ def test_sync_prunes_removed_versions(tmp_path):
         assert [r["version"] for r in rows] == ["1.1.0"]
         assert await search(db, "alpha") == []
         assert [h["name"] for h in await search(db, "beta")] == ["acme/wf"]
+        await db.close()
+    asyncio.run(scenario())
+
+
+def test_evaluation_survives_resync(tmp_path):
+    """Evaluation is a mutable column (like stage/security_status); the
+    upsert never writes it, so a full repo->DB resync must leave it intact."""
+    repo = tmp_path / "caps"
+
+    async def scenario():
+        await ensure_repo(repo)
+        await write_manifest_to_repo(repo, _wf_manifest(version="1.0.0"))
+        await commit_all(repo, "publish 1.0.0")
+
+        db = await Database.connect(tmp_path / "registry.db")
+        assert (await sync_from_repo(repo, db))["synced"] == 1
+
+        ev = {
+            "suite_id": "nightly", "score": 0.5,
+            "stats": {"runs_total": 10, "runs_failed": 1},
+        }
+        assert await set_evaluation(db, "acme/wf", "1.0.0", ev) == ev
+
+        report = await sync_from_repo(repo, db)
+        assert report["synced"] == 0 and not report["pruned"]
+        rows = await db.conn.execute_fetchall(
+            "SELECT evaluation FROM capability_versions WHERE name='acme/wf'"
+        )
+        assert json.loads(rows[0]["evaluation"]) == ev
+
+        # manifest readers carry the merged evaluation
+        vers = await get_versions(db, "acme/wf")
+        assert vers[0]["manifest"].evaluation.score == 0.5
+        resolved = await resolve_version(db, "acme/wf", "1.0.0")
+        assert resolved["manifest"].evaluation.stats.runs_total == 10
+
+        # None clears it; unknown name@version raises KeyError
+        assert await set_evaluation(db, "acme/wf", "1.0.0", None) is None
+        rows = await db.conn.execute_fetchall(
+            "SELECT evaluation FROM capability_versions WHERE name='acme/wf'"
+        )
+        assert rows[0]["evaluation"] is None
+        with pytest.raises(KeyError):
+            await set_evaluation(db, "nope/nothing", "1.0.0", ev)
         await db.close()
     asyncio.run(scenario())
 

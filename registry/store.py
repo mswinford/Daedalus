@@ -5,8 +5,10 @@ same identity with different content is an error (git history is the amend
 path). The one exception is a format migration — when the stored JSON is
 semantically identical to the new one but serializes differently under the
 current model (schema added default fields), the row is re-serialized in place.
-Lifecycle stage and security status are mutable *columns* — they track the
-governance state of a version without touching its immutable manifest bytes.
+Lifecycle stage, security status, and runtime evaluation are mutable
+*columns* — they track the governance/operational state of a version without
+touching its immutable manifest bytes (evaluation in particular is
+runtime-derived and must never reach git).
 """
 import json
 import time
@@ -14,6 +16,7 @@ from typing import Any, Optional
 
 from registry.db import Database
 from schema.capability import (
+    CapabilityEvaluationRef,
     CapabilityManifest,
     LifecycleStage,
     ModelProfileSpec,
@@ -126,6 +129,21 @@ async def upsert_version(
     return True
 
 
+def _manifest_from_row(r) -> CapabilityManifest:
+    """The row's manifest with the stored runtime evaluation merged in.
+
+    Evaluation lives in its own column (never in the manifest bytes or git);
+    it is only attached here so every manifest response carries it. The key
+    is always present in dumps — null when no evaluation is stored.
+    """
+    manifest = CapabilityManifest.model_validate_json(r["manifest_json"])
+    if r["evaluation"] is not None:
+        manifest.evaluation = CapabilityEvaluationRef.model_validate(
+            json.loads(r["evaluation"])
+        )
+    return manifest
+
+
 async def get_versions(db: Database, name: str) -> list[dict[str, Any]]:
     """All versions of a capability, newest first (semver order)."""
     rows = await db.conn.execute_fetchall(
@@ -140,7 +158,7 @@ async def get_versions(db: Database, name: str) -> list[dict[str, Any]]:
             "security_status": r["security_status"],
             "source_commit": r["source_commit"],
             "created_at": r["created_at"],
-            "manifest": CapabilityManifest.model_validate_json(r["manifest_json"]),
+            "manifest": _manifest_from_row(r),
         }
         for r in rows
     ]
@@ -188,7 +206,7 @@ def _row_to_version(r) -> dict[str, Any]:
         "security_status": r["security_status"],
         "source_commit": r["source_commit"],
         "created_at": r["created_at"],
-        "manifest": CapabilityManifest.model_validate_json(r["manifest_json"]),
+        "manifest": _manifest_from_row(r),
     }
 
 
@@ -308,3 +326,26 @@ async def transition_stage(
     )
     await db.conn.commit()
     return new_stage.value
+
+
+async def set_evaluation(
+    db: Database, name: str, version: str, evaluation: Optional[dict[str, Any]]
+) -> Optional[dict[str, Any]]:
+    """Store (or clear, with None) the runtime evaluation for a version.
+
+    Runtime-derived metadata, updated straight in SQLite like stage/security
+    status — never written to the manifest bytes or the git repo.
+    """
+    rows = await db.conn.execute_fetchall(
+        "SELECT 1 FROM capability_versions WHERE name=? AND version=?",
+        (name, version),
+    )
+    if not rows:
+        raise KeyError(f"{name}@{version} not found")
+    payload = json.dumps(evaluation, sort_keys=True) if evaluation is not None else None
+    await db.conn.execute(
+        "UPDATE capability_versions SET evaluation=? WHERE name=? AND version=?",
+        (payload, name, version),
+    )
+    await db.conn.commit()
+    return evaluation

@@ -170,3 +170,103 @@ def test_list_kind_filter(tmp_path, monkeypatch):
         _publish(client, prompt)
         r = client.get("/registry/capabilities", params={"kind": "prompt"})
         assert [c["name"] for c in r.json()["capabilities"]] == ["acme/prompts"]
+
+
+def _evaluation():
+    return {
+        "suite_id": "nightly-2026",
+        "last_scored_at": 1750000000.0,
+        "score": 0.93,
+        "stats": {
+            "runs_total": 120,
+            "runs_failed": 8,
+            "duration_ms_p50": 412.5,
+            "duration_ms_p95": 900.0,
+            "avg_cost_usd": 0.004,
+        },
+    }
+
+
+def _publish_to_published(client):
+    _publish(client, _manifest())
+    for stage in ("review", "approved", "published"):
+        r = client.post(
+            "/registry/capabilities/acme/wf/lifecycle",
+            json={"version": "1.0.0", "stage": stage},
+        )
+        assert r.status_code == 200, r.text
+
+
+def test_set_evaluation_roundtrip(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        _publish_to_published(client)
+
+        r = client.put(
+            "/registry/capabilities/acme/wf/versions/1.0.0/evaluation",
+            json=_evaluation(),
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True and body["name"] == "acme/wf"
+        assert body["evaluation"]["score"] == 0.93
+
+        # detail response now includes it (score + stats round-trip)
+        r = client.get("/registry/capabilities/acme/wf")
+        ev = r.json()["versions"][0]["manifest"]["evaluation"]
+        assert ev["suite_id"] == "nightly-2026"
+        assert ev["last_scored_at"] == 1750000000.0
+        assert ev["score"] == 0.93
+        assert ev["stats"]["runs_total"] == 120
+        assert ev["stats"]["duration_ms_p95"] == 900.0
+
+        # the use endpoint merges it into its manifest too
+        r = client.get("/registry/capabilities/acme/wf/use")
+        assert r.status_code == 200
+        assert r.json()["manifest"]["evaluation"]["score"] == 0.93
+
+
+def test_set_evaluation_unknown_version_404(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        _publish(client, _manifest())
+        unknown_name = "/registry/capabilities/nope/nothing/versions/1.0.0/evaluation"
+        assert client.put(unknown_name, json={}).status_code == 404
+        bad_version = "/registry/capabilities/acme/wf/versions/9.9.9/evaluation"
+        assert client.put(bad_version, json={"score": 1.0}).status_code == 404
+
+
+def test_set_evaluation_malformed_body_422(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as client:
+        _publish(client, _manifest())
+        url = "/registry/capabilities/acme/wf/versions/1.0.0/evaluation"
+        # wrong types are rejected by the CapabilityEvaluationRef body model
+        assert client.put(url, json={"score": "high"}).status_code == 422
+        assert client.put(url, json={"stats": "not-a-dict"}).status_code == 422
+
+
+def test_detail_without_evaluation_is_null(tmp_path, monkeypatch):
+    """A version with no stored evaluation still carries the manifest key —
+    as null (the CapabilityManifest model always dumps it)."""
+    with _client(tmp_path, monkeypatch) as client:
+        _publish(client, _manifest())
+        r = client.get("/registry/capabilities/acme/wf")
+        manifest = r.json()["versions"][0]["manifest"]
+        assert "evaluation" in manifest and manifest["evaluation"] is None
+
+
+def test_evaluation_survives_registry_restart(tmp_path, monkeypatch):
+    """Evaluation is runtime metadata: a full git->DB resync (what happens on
+    every registry start) must not wipe it."""
+    with _client(tmp_path, monkeypatch) as client:
+        _publish(client, _manifest())
+        r = client.put(
+            "/registry/capabilities/acme/wf/versions/1.0.0/evaluation",
+            json=_evaluation(),
+        )
+        assert r.status_code == 200, r.text
+
+    # second client on the same DB + repo: lifespan re-syncs from git
+    with _client(tmp_path, monkeypatch) as restarted:
+        r = restarted.get("/registry/capabilities/acme/wf")
+        ev = r.json()["versions"][0]["manifest"]["evaluation"]
+        assert ev["score"] == 0.93
+        assert ev["stats"]["runs_total"] == 120

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS capability_versions (
     artifact_json TEXT NOT NULL,
     stage TEXT NOT NULL,
     security_status TEXT NOT NULL,
+    evaluation TEXT,
     source_commit TEXT,
     created_at REAL NOT NULL,
     PRIMARY KEY (name, version)
@@ -44,8 +45,22 @@ class Database:
         conn.row_factory = aiosqlite.Row
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.executescript(SCHEMA)
+        await cls._migrate(conn)
         await conn.commit()
         return cls(conn)
+
+    @staticmethod
+    async def _migrate(conn: aiosqlite.Connection) -> None:
+        """Add columns introduced after the initial schema to DBs created in
+        place (CREATE TABLE IF NOT EXISTS never alters existing tables)."""
+        rows = await conn.execute_fetchall(
+            "PRAGMA table_info(capability_versions)"
+        )
+        columns = {r["name"] for r in rows}
+        if "evaluation" not in columns:
+            await conn.execute(
+                "ALTER TABLE capability_versions ADD COLUMN evaluation TEXT"
+            )
 
     async def close(self) -> None:
         await self.conn.close()
