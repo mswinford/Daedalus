@@ -231,6 +231,22 @@ def _load_finished_summaries() -> list[sqlite3.Row]:
         conn.close()
 
 
+def _load_terminal_runs() -> list[sqlite3.Row]:
+    """Terminal (completed/failed) run rows for offline aggregation.
+
+    Only the columns the metrics pass needs: run_id, status, started_at,
+    completed_at, estimated_cost_usd, capability_usage.
+    """
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        return conn.execute(
+            "SELECT run_id, status, started_at, completed_at, estimated_cost_usd, "
+            "capability_usage FROM runs WHERE status IN ('completed', 'failed')"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
 def _prune_store() -> None:
     """Queue eviction of the oldest finished runs beyond MAX_RUNS."""
     _enqueue_write(("prune", str(get_settings().checkpoint_db)))

@@ -1,4 +1,5 @@
 """Startup recovery: rebuild in-memory run records from the SQLite store."""
+import asyncio
 import json
 import sqlite3
 import time
@@ -12,6 +13,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.config import get_settings
 from app.engine.builder import GraphBuilder
 from app.api.workflows import _load_workflow
+from app.runs.metrics import report_run_metrics
 from app.runs.record import RUNS, RunRecord
 from app.runs.store import (
     _load_events,
@@ -62,6 +64,9 @@ def _fail_unrecoverable_run(thread_id: str, workflow_id: str, summary: Any, erro
         status="failed",
         error=error,
         started_at=float(summary["started_at"]) if summary else time.time(),
+        capability_usage=(
+            _parse_json_dict(summary["capability_usage"]) if summary else None
+        ),
     )
     record.completed_at = time.time()
     events = _load_events(thread_id)
@@ -76,6 +81,8 @@ def _fail_unrecoverable_run(thread_id: str, workflow_id: str, summary: Any, erro
     })
     RUNS[thread_id] = record
     _save_run_summary(record)
+    # Sync path (startup recovery): fire-and-forget; the hook is total-safe.
+    asyncio.create_task(report_run_metrics(record))
 
 
 def _pending_interrupt_threads(db_path: str) -> list[tuple[str, Any, bytes]]:

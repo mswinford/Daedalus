@@ -51,3 +51,28 @@ class CapabilityClient:
                 f"registry error {resp.status_code} for {name}@{version}: {resp.text[:200]}"
             )
         return resp.json()
+
+    def write_evaluation(self, name: str, version: str, payload: dict) -> dict:
+        """PUT /capabilities/{name}/versions/{version}/evaluation → the registry's response.
+
+        Raises CapabilityNotFoundError for an unknown capability/version (404)
+        and CapabilityFetchError when the registry is unreachable or returns
+        any other error — same contract as use().
+        """
+        try:
+            resp = httpx.put(
+                f"{self.base_url}/registry/capabilities/{name}/versions/{version}/evaluation",
+                json=payload,
+                timeout=self.timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise CapabilityFetchError(f"registry unreachable at {self.base_url}: {exc}") from exc
+        if resp.status_code == 404:
+            raise CapabilityNotFoundError(
+                f"capability '{name}' version '{version}' not found (or unpublished)"
+            )
+        if resp.status_code >= 400:
+            raise CapabilityFetchError(
+                f"registry error {resp.status_code} for evaluation {name}@{version}: {resp.text[:200]}"
+            )
+        return resp.json()

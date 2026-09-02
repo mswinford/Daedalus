@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from app.engine.runner import run_workflow_sync, resume_workflow
+from app.runs.metrics import report_run_metrics
 from app.runs.record import _prune_runs
 from app.runs.store import _prune_store, _save_run_summary
 from app.runs.timeouts import _schedule_human_timeout
@@ -81,5 +82,6 @@ async def _drive(record, workflow, *, input_data=None, human_input=None, invocat
     record.completed_at = time.time()
     record.emit(terminal)
     _save_run_summary(record)
+    await report_run_metrics(record)
     _prune_runs()
     _prune_store()

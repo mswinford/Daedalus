@@ -3,6 +3,7 @@ import asyncio
 import time
 from typing import Any
 
+from app.runs.metrics import report_run_metrics
 from app.runs.record import RunRecord, _prune_runs
 from app.runs.store import _prune_store, _save_run_summary
 
@@ -29,6 +30,8 @@ def _fail_run_on_human_timeout(record: RunRecord, node_id: str, timeout_seconds:
         "data": {"error": error, "fatal": True},
     })
     _save_run_summary(record)
+    # Sync path (timer task / recovery): fire-and-forget; the hook is total-safe.
+    asyncio.create_task(report_run_metrics(record))
     _prune_runs()
     _prune_store()
 
