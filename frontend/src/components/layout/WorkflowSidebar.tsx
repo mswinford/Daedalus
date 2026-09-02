@@ -150,7 +150,7 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
       <div className="border-b border-zinc-800 px-4 py-3">
-        <h1 className="text-sm font-semibold text-zinc-100">AI Forge</h1>
+        <h1 className="text-sm font-semibold text-zinc-100">Daedalus</h1>
       </div>
 
       <div className="space-y-2 border-b border-zinc-800 p-3">
