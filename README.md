@@ -32,9 +32,9 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - Publish (git commit + index sync), search, and use APIs on a separate server (`127.0.0.1:3010`).
 - CLI: `ai-forge-registry serve | publish <files…> | seed` — publishing works offline; eleven sample capabilities (one per core kind + the `forge/*` GitHub set) ship in `registry/samples/`.
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
-- **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame) and publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage).
+- **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame), publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage), and the run-metrics pipeline (per-run usage snapshots pushed to the registry as capability `evaluation` stats, blended into search ranking).
 
-**Tests:** 347 backend tests passing (`python -m pytest -q`, as of 2026-09-01, incl. registry R1–R2); frontend 45 Vitest tests + typecheck/build clean.
+**Tests:** 388 backend tests passing (`python -m pytest -q`, as of 2026-09-02, incl. registry R1–R2); frontend 64 Vitest tests + typecheck/build clean.
 
 ---
 
@@ -131,7 +131,7 @@ With the frontend running, the **Capabilities** view in the sidebar browses and 
 ### 4. Run the tests
 
 ```bash
-python -m pytest -q          # backend (200 tests)
+python -m pytest -q          # backend
 cd frontend && npm run lint  # frontend typecheck (tsc --noEmit)
 ```
 
@@ -379,6 +379,6 @@ Base URL: `http://127.0.0.1:3000`
 - **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
 - **Post-Phase 3 (done):** per-node error branches (opt-in error edges), workflow templates with the create-from-template UI, and the `github_*` builtins (branch / read / write / PR).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
-- **Capability platform (R1 complete):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 is in progress — the `invoke` node (call a registered capability by `name@version`) and publish-time governance checks have shipped; next up: live refs + upgrade automation, run metrics → evaluation scores, remote invocation over HTTP, SQLite → Postgres. R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
+- **Capability platform (R1 complete):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 is in progress — the `invoke` node (call a registered capability by `name@version`), publish-time governance checks, and the run-metrics → evaluation pipeline have shipped; next up: live refs + upgrade automation, remote invocation over HTTP, SQLite → Postgres. R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
 
 Full detail in [the AI Forge Plan](./docs/ai-forge-plan.md).
