@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.api import workflows, secrets, templates
+from app.api import workflows, secrets, templates, models
 from app import runs
 
 
@@ -41,6 +41,7 @@ app.include_router(workflows.router, prefix="/api", tags=["workflows"])
 app.include_router(runs.router, prefix="/api", tags=["runs"])
 app.include_router(secrets.router, prefix="/api", tags=["secrets"])
 app.include_router(templates.router, prefix="/api", tags=["templates"])
+app.include_router(models.router, prefix="/api", tags=["models"])
 
 
 @app.get("/health")

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import type { ModelConfig } from '@/lib/workflowTypes'
-import { secretsApi } from '@/lib/api'
+import { apiErrorMessage, modelsApi, secretsApi } from '@/lib/api'
 
 const inputCls =
   'w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500'
@@ -27,6 +27,8 @@ export default function ModelForm({
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '')
   const [apiKey, setApiKey] = useState(initial?.api_key_ref ?? '')
   const [temperature, setTemperature] = useState(initial?.default_temperature ?? 0.7)
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
+  const [testError, setTestError] = useState('')
 
   const { data: secrets } = useQuery({
     queryKey: ['secrets'],
@@ -49,6 +51,28 @@ export default function ModelForm({
       track_cost: initial?.track_cost ?? false,
       pricing: initial?.pricing ?? null,
     })
+  }
+
+  const handleTest = async () => {
+    if (!model.trim()) return
+    setTestStatus('testing')
+    try {
+      const result = await modelsApi.testConnection({
+        provider: 'openai_compatible',
+        model: model.trim(),
+        base_url: baseUrl.trim() || null,
+        api_key_ref: trimmedKey || null,
+      })
+      if (result.ok) {
+        setTestStatus('ok')
+      } else {
+        setTestError(result.message ?? 'Unknown error')
+        setTestStatus('error')
+      }
+    } catch (e) {
+      setTestError(apiErrorMessage(e))
+      setTestStatus('error')
+    }
   }
 
   return (
@@ -95,7 +119,19 @@ export default function ModelForm({
           (top bar) and enter its name here — e.g. <code className="text-amber-300">OPENAI_API_KEY</code>.
         </p>
       )}
+      {(testStatus === 'ok' || testStatus === 'error') && (
+        <p className={testStatus === 'ok' ? 'text-xs text-emerald-400' : 'text-xs text-red-400'}>
+          {testStatus === 'ok' ? 'Connection OK' : testError}
+        </p>
+      )}
       <div className="flex justify-end gap-2 pt-1">
+        <button
+          onClick={handleTest}
+          disabled={!model.trim() || testStatus === 'testing'}
+          className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          {testStatus === 'testing' ? 'Testing…' : 'Test connection'}
+        </button>
         <button onClick={onCancel} className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
           Cancel
         </button>

@@ -136,6 +136,17 @@ export const secretsApi = {
   remove: (name: string) => api.delete(`/secrets/${name}`),
 }
 
+export interface ModelTestResult {
+  ok: boolean
+  message?: string
+  model?: string
+}
+
+export const modelsApi = {
+  testConnection: (p: { provider: string; model: string; base_url?: string | null; api_key_ref?: string | null }) =>
+    api.post<ModelTestResult>('/models/test-connection', p).then(r => r.data),
+}
+
 export const workflowsApi = {
   list: () => api.get<WorkflowSummary[]>('/workflows').then(r => r.data),
   get: (id: string) => api.get<Workflow>(`/workflows/${id}`).then(r => r.data),
