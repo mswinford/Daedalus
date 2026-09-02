@@ -218,6 +218,12 @@ async def recover_finished_runs() -> int:
         if row["run_id"] in RUNS:
             continue
         events = _load_events(row["run_id"])
+        pins = None
+        if row["invoke_pins"]:
+            try:
+                pins = json.loads(row["invoke_pins"])
+            except (TypeError, ValueError):
+                pins = None
         record = RunRecord(
             run_id=row["run_id"],
             workflow_id=row["workflow_id"],
@@ -230,6 +236,7 @@ async def recover_finished_runs() -> int:
             total_tokens_input=row["total_tokens_input"],
             total_tokens_output=row["total_tokens_output"],
             estimated_cost_usd=row["estimated_cost_usd"],
+            invoke_pins=pins,
             started_at=float(row["started_at"]),
             completed_at=row["completed_at"],
         )

@@ -335,3 +335,57 @@ def test_token_usage_across_region_boundary(invoke_client, monkeypatch):
     llm = [e for e in body["events"] if e["type"] == "llm_call"]
     assert len(llm) == 1
     assert llm[0]["node_id"] == "inv__agent"
+
+
+# ─── item 6: invoke_pins on finished-run recovery ────────────────────────────
+
+def test_finished_invoke_run_recovers_pins_after_restart(invoke_client):
+    """A completed run's stored pins are rebuilt from the store after a restart,
+    and GET /runs/{id} exposes them."""
+    client, reg = invoke_client
+    from app import runs as runs_module
+
+    reg.add("acme/sub", _sub(), "1.0.0")
+    run_id = _start_run(client)
+    body = _wait_for_status(client, run_id, "completed")
+    assert body["invoke_pins"] == {"acme/sub": "1.0.0"}
+
+    runs_module.flush_store()
+    runs_module.RUNS.clear()  # "restart"
+    with TestClient(app) as restarted:
+        body = restarted.get(f"/api/runs/{run_id}").json()
+        assert body["status"] == "completed"
+        assert body["invoke_pins"] == {"acme/sub": "1.0.0"}
+
+
+def test_finished_run_without_pins_recovers(invoke_client):
+    """A finished run whose store row has NULL invoke_pins recovers without
+    crashing and reports pins as null."""
+    client, _reg = invoke_client
+    from app import runs as runs_module
+
+    plain = {
+        "id": "plain-wf", "name": "Plain WF",
+        "nodes": [
+            {"id": "start", "type": "start", "position": {"x": 0, "y": 0}, "config": {}},
+            {"id": "cf", "type": "custom_function", "position": {"x": 200, "y": 0},
+             "config": {"code": 'result["v"] = 1', "output_fields": ["v"]}},
+            {"id": "end", "type": "end", "position": {"x": 400, "y": 0}, "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source_node_id": "start", "source_handle": "default", "target_node_id": "cf"},
+            {"id": "e2", "source_node_id": "cf", "source_handle": "default", "target_node_id": "end"},
+        ],
+    }
+    (wf_module.settings.workflows_dir / "plain-wf.json").write_text(json.dumps(plain))
+
+    run_id = _start_run(client, wf_id="plain-wf", payload={})
+    body = _wait_for_status(client, run_id, "completed")
+    assert body["invoke_pins"] in (None, {})  # no invoke nodes → nothing stored
+
+    runs_module.flush_store()
+    runs_module.RUNS.clear()  # "restart"
+    with TestClient(app) as restarted:
+        body = restarted.get(f"/api/runs/{run_id}").json()
+        assert body["status"] == "completed"
+        assert body["invoke_pins"] is None

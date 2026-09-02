@@ -119,6 +119,7 @@ def get_run(run_id: str):
         "total_tokens_input": record.total_tokens_input,
         "total_tokens_output": record.total_tokens_output,
         "estimated_cost_usd": record.estimated_cost_usd,
+        "invoke_pins": record.invoke_pins,
         "started_at": record.started_at,
         "completed_at": record.completed_at,
     }
