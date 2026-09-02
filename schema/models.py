@@ -125,6 +125,12 @@ class PromptDefinition(BaseModel):
     variables: list[str] = Field(
         default_factory=list, description="Declared {{var}} placeholders"
     )
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
 
 
 # ─── Retry Config ────────────────────────────────────────────────────────────
@@ -169,6 +175,12 @@ class AgentSkill(BaseModel):
     tool_ids: list[str] = Field(
         default_factory=list, description="References to workflow ToolDefinitions this skill uses"
     )
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
 
 
 class AgentNodeConfig(BaseModel):
@@ -187,6 +199,12 @@ class AgentNodeConfig(BaseModel):
     )
     skills: list[AgentSkill] = Field(
         default_factory=list, description="Inlined skills folded into this agent at runtime"
+    )
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
     )
 
 
@@ -395,6 +413,12 @@ class Workflow(BaseModel):
         default_factory=list, description="Named prompt templates referenced by agent nodes"
     )
     state_schema: Optional[StateSchema] = Field(None, description="Explicit state schema (auto-inferred if not set)")
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this workflow was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
 
 
 # ─── Run Types ───────────────────────────────────────────────────────────────

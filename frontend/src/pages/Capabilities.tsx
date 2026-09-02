@@ -114,7 +114,7 @@ function UseButton({ cap }: { cap: RowCap }) {
 
   const importWorkflow = useMutation({
     mutationFn: async () => {
-      const { artifact } = await capabilitiesApi.use(cap.name)
+      const { artifact, version } = await capabilitiesApi.use(cap.name)
       return workflowsApi.create({
         id: `workflow_${Date.now()}`,
         name: cap.name.split('/').pop() ?? cap.name,
@@ -125,6 +125,8 @@ function UseButton({ cap }: { cap: RowCap }) {
         tools: artifact.tools ?? [],
         models: artifact.models ?? [],
         state_schema: artifact.state_schema ?? null,
+        source_capability: cap.name,
+        source_version: version,
       })
     },
     onSuccess: (created) => {

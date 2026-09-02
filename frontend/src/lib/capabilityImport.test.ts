@@ -171,6 +171,52 @@ describe('applyCapability provenance stamping', () => {
     expect(r2.wf.tools[0].source_version).toBe('3.1.4')
   })
 
+  it('stamps imported prompts with capability name and resolved version', () => {
+    const r = applyCapability(makeWf(), 'prompt', { text: 'hello' }, 'ns/base', undefined, '1.0.0')
+    expect(r.added).toBe(true)
+    expect(r.wf.prompts?.[0].source_capability).toBe('ns/base')
+    expect(r.wf.prompts?.[0].source_version).toBe('1.0.0')
+  })
+
+  it('stamps imported skills with capability name and resolved version', () => {
+    const wf = makeWf({ nodes: [makeAgent('a')] })
+    const r = applyCapability(wf, 'skill', { name: 'sk1', prompt: 'p', tools: [] }, 'ns/sk1', 'a', '2.0.0')
+    expect(r.added).toBe(true)
+    const skill = (r.wf.nodes.find((n) => n.id === 'a') as AgentNode).config.skills?.[0]
+    expect(skill?.source_capability).toBe('ns/sk1')
+    expect(skill?.source_version).toBe('2.0.0')
+  })
+
+  it('stamps the agent node created from an agent capability', () => {
+    const r = applyCapability(
+      makeWf(),
+      'agent',
+      { model: makeModel('m9'), tools: [], skills: [], prompt: 'sys' },
+      'ns/ag', undefined, '3.1.4',
+    )
+    expect(r.added).toBe(true)
+    const node = r.wf.nodes[0] as AgentNode
+    expect(node.config.source_capability).toBe('ns/ag')
+    expect(node.config.source_version).toBe('3.1.4')
+  })
+
+  it('does not re-stamp existing prompt or skill entries (first provenance wins)', () => {
+    const wf = makeWf({
+      prompts: [{ id: 'base', name: 'base', text: 'old', source_capability: 'other/base', source_version: '9.9.9' }],
+      nodes: [makeAgent('a', [{ name: 'sk1', prompt: 'p', tool_ids: [], source_capability: 'other/sk1', source_version: '8.8.8' }])],
+    })
+    const r1 = applyCapability(wf, 'prompt', { text: 'hello' }, 'ns/base', undefined, '1.0.0')
+    expect(r1.added).toBe(false)
+    expect(r1.wf.prompts?.[0].source_capability).toBe('other/base')
+    expect(r1.wf.prompts?.[0].source_version).toBe('9.9.9')
+
+    const r2 = applyCapability(wf, 'skill', { name: 'sk1', prompt: 'p', tools: [] }, 'ns/sk1', 'a', '2.0.0')
+    expect(r2.added).toBe(false)
+    const skill = (r2.wf.nodes.find((n) => n.id === 'a') as AgentNode).config.skills?.[0]
+    expect(skill?.source_capability).toBe('other/sk1')
+    expect(skill?.source_version).toBe('8.8.8')
+  })
+
   it('stamps the capability name even when no resolved version is provided', () => {
     const r = applyCapability(makeWf(), 'tool', makeTool('t1'), 'ns/t1')
     expect(r.wf.tools[0].source_capability).toBe('ns/t1')

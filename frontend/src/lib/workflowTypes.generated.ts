@@ -27,6 +27,14 @@ export interface Workflow {
      */
     schema_version?: number;
     /**
+     * Registry capability name this workflow was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * Explicit state schema (auto-inferred if not set)
      */
     state_schema?: null | StateSchema;
@@ -224,6 +232,14 @@ export interface Config {
      */
     skills?: AgentSkill[];
     /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * System prompt for the agent
      */
     system_prompt?: string;
@@ -395,6 +411,14 @@ export interface AgentSkill {
      */
     prompt: string;
     /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * References to workflow ToolDefinitions this skill uses
      */
     tool_ids?: string[];
@@ -425,6 +449,14 @@ export interface PromptDefinition {
      * Human-readable name
      */
     name?: null | string;
+    /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
     /**
      * Template with {{var}} placeholders resolved from state data at runtime
      */

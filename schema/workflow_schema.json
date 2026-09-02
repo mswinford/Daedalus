@@ -76,6 +76,32 @@
           },
           "title": "Skills",
           "type": "array"
+        },
+        "source_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Registry capability name this entry was imported from (provenance)",
+          "title": "Source Capability"
+        },
+        "source_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Capability version it was imported at",
+          "title": "Source Version"
         }
       },
       "required": [
@@ -113,6 +139,32 @@
           },
           "title": "Tool Ids",
           "type": "array"
+        },
+        "source_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Registry capability name this entry was imported from (provenance)",
+          "title": "Source Capability"
+        },
+        "source_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Capability version it was imported at",
+          "title": "Source Version"
         }
       },
       "required": [
@@ -815,6 +867,32 @@
           },
           "title": "Variables",
           "type": "array"
+        },
+        "source_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Registry capability name this entry was imported from (provenance)",
+          "title": "Source Capability"
+        },
+        "source_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Capability version it was imported at",
+          "title": "Source Version"
         }
       },
       "required": [
@@ -1203,6 +1281,32 @@
       ],
       "default": null,
       "description": "Explicit state schema (auto-inferred if not set)"
+    },
+    "source_capability": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Registry capability name this workflow was imported from (provenance)",
+      "title": "Source Capability"
+    },
+    "source_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Capability version it was imported at",
+      "title": "Source Version"
     }
   },
   "required": [

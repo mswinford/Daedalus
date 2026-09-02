@@ -81,6 +81,8 @@ export interface AgentNodeConfig {
   retry?: GenRetryConfig | null
   prompt_ref?: string | null
   skills?: AgentSkill[]
+  source_capability?: string | null
+  source_version?: string | null
 }
 
 export interface ConditionalNodeConfig {
