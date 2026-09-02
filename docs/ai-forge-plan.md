@@ -11,7 +11,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Current Status (Phase 3 complete + post-Phase 3 increments)
 
-> Last updated: 2026-09-01. Human-in-loop nodes are implemented end-to-end: LangGraph
+> Last updated: 2026-09-02. Human-in-loop nodes are implemented end-to-end: LangGraph
 > `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
 > survive restarts and are recovered on startup), and the frontend shows a paused state with an
 > input form + resume button. The editor is a sidebar / master-detail layout with debounced
@@ -22,8 +22,13 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > (`backend/app/templates/`, create-from-template in the UI — including the `github-pr-agent`
 > demo), and the four `github_*` builtins (create_branch / read_file / write_file / create_pr)
 > published to the registry as forge/* capabilities plus the forge/github-toolkit skill (2.0.0).
-> Next up: test-connection endpoint (AI Forge); on the registry side — live refs + upgrade
-> automation, run metrics → `evaluation` scores, SQLite → Postgres (ROADMAP.md R2 remainder).
+> Also shipped: the **model test-connection endpoint** (`POST /api/models/test-connection`,
+> "Test connection" button in ModelForm), and the **run metrics → `evaluation` pipeline** —
+> registry imports stamp provenance on models/tools, every run snapshots its capability usage,
+> and on each terminal transition participation-level aggregates (success rate, duration p50/p95,
+> avg cost) are pushed to the registry per capability version; the Capabilities view shows them
+> and search ranking blends the success rate in.
+> Next up: live refs + upgrade automation, SQLite → Postgres (ROADMAP.md R2 remainder).
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
 
@@ -114,7 +119,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: backend suite green as of 2026-09-01 (347 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 45 Vitest tests + typecheck/build clean.
+- **Tests**: backend suite green as of 2026-09-02 (388 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 64 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -131,7 +136,6 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **Sample agent workflow** — `backend/app/templates/sample-agent.json` demonstrates agent → transform flow.
 
 ### What is deferred by design
-- **Phase 2 (remaining)** — test-connection endpoint.
 - **Phase 4** — container-based sandbox isolation, Anthropic provider, cost tracking,
   observability/Prometheus.
 
@@ -187,8 +191,35 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   - **Validation**: `E_MULTIPLE_ERROR_EDGES` (max one per source), `E_ERROR_EDGE_FROM_START`,
     `E_ERROR_EDGE_NO_FALLBACK` (a success path must exist to fall through to), and
     `W_ERROR_EDGE_NO_OPTIN` (warning).
-  - Tests: `backend/tests/test_error_branches.py` (routing, interrupt passthrough, all validation
+   - Tests: `backend/tests/test_error_branches.py` (routing, interrupt passthrough, all validation
     rules). Per-node retry logic (max_retries / backoff) remains a separate future increment.
+- [x] **Model test-connection endpoint** *(done 2026-09-01)* — `POST /api/models/test-connection`
+   probes a model config with a minimal chat call (secrets resolved exactly like the builder; a
+   set-but-unresolvable key fails naming the secret) under a 15s timeout and returns
+   `{ok, model | message}` with any resolved key scrubbed from error text. ModelForm gains a
+   "Test connection" button with inline OK/error status. `backend/tests/test_model_test_connection.py`.
+- [x] **Run metrics → `evaluation` scores** *(done 2026-09-02)* — production run data now feeds the
+   registry's `evaluation` field per capability version:
+   - **Provenance**: importing a model/tool from the registry stamps `source_capability` /
+     `source_version` on the new pool entry (additive optionals on `ModelConfig` /
+     `ToolDefinition`; first import wins, dedupe never re-stamps).
+   - **Usage snapshot**: at run start the run record stores `capability_usage` — the union of model/
+     tool provenance and invoke pins (name → version, pin wins a clash); restored on both recovery
+     paths so attribution survives restarts.
+   - **Aggregation + push**: on every terminal transition (complete / fail / HIL timeout / crash
+     recovery) `backend/app/runs/metrics.py` recomputes participation-level aggregates over terminal
+     runs — success rate (headline score), duration p50/p95, avg cost — and PUTs the fresh full
+     aggregate to the registry (`CapabilityClient.write_evaluation`). Idempotent, self-healing,
+     total-safe: a dead or 404-ing registry never affects the run.
+   - **Registry storage**: `evaluation` is a mutable SQLite column on `capability_versions`, written
+     straight to the DB (same precedent as `stage` / `security_status`) — never touches git, and
+     `sync_from_repo` resyncs structurally cannot clobber it. Merged into detail/use/inline
+     manifest responses; `PUT /capabilities/{name}/versions/{version}/evaluation` accepts writes.
+   - **Display + ranking**: the Capabilities view shows a "Production metrics" chip row per version
+     (success rate, runs, p50/p95, avg cost); search blends the score into ranking via a quality
+     factor (`0.9 + 0.2*score`, unmeasured = neutral 1.0) so relevance always dominates.
+   - Durations are run-level participation stats; node-level (invoke-node) duration attribution is a
+     follow-up. The `eval_suite` kind (runnable suites / publish gating) remains Phase 4 territory.
 
 ### GitHub "user story → PR" agent template — DONE (2026-09-01)
 Shipped as `backend/app/templates/github-pr-agent.json`, creatable from the sidebar / EmptyState
@@ -519,6 +550,7 @@ Status: `[done]` = implemented and tested, `[plan]` = not yet built.
 [done] GET    /api/secrets                # List secret names + source (values never returned)
 [done] PUT    /api/secrets                # Upsert a secret (name, value)
 [done] DELETE /api/secrets/:name          # Delete a secret
+[done] POST   /api/models/test-connection # Probe a model config (minimal chat call, 15s timeout)
 [plan] GET    /metrics                    # Prometheus metrics endpoint
 ```
 

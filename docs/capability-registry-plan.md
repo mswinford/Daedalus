@@ -1,7 +1,7 @@
 # Capability Registry — Implementation Plan (Draft)
 
 > **Status:** Component plan — R1 complete (steps 1–8 shipped). Part of the [platform roadmap](./ROADMAP.md); a thin layer above AI Forge.
-> **Scope:** R1 (Find & Reuse) complete; R2 in progress (invoke node, publish-time governance checks incl. secret governance, shipped); R3 is roadmap.
+> **Scope:** R1 (Find & Reuse) complete; R2 in progress (invoke node, publish-time governance checks incl. secret governance, and run metrics → `evaluation` scores shipped); R3 is roadmap.
 > **Companion docs:** [Roadmap](./ROADMAP.md) · [AI Forge plan](./ai-forge-plan.md) · concepts: `concepts/enterprise-foundry-overview.md`, `concepts/capabilities.md`, `concepts/capability-registry.md`.
 
 ## 1. Context & reframe
@@ -152,8 +152,13 @@ class CapabilitySemantics(BaseModel):  # for agent discovery (R3)
     purpose: Optional[str]; use_when: list[str] = []; avoid_when: list[str] = []
     related: list[str] = []
 
+class CapabilityEvaluationStats(BaseModel):  # runtime aggregates over terminal runs (R2)
+    runs_total: int = 0; runs_failed: int = 0
+    duration_ms_p50: Optional[float] = None; duration_ms_p95: Optional[float] = None
+    avg_cost_usd: Optional[float] = None
 class CapabilityEvaluationRef(BaseModel):  # scores computed by runtime (R2)
     suite_id: Optional[str]; last_scored_at: Optional[float]; score: Optional[float]
+    stats: Optional[CapabilityEvaluationStats] = None   # populated by the run-metrics push
 
 class CapabilityManifest(BaseModel):
     # Identity
@@ -191,7 +196,7 @@ registry/
   api/           # capabilities.py, search.py, publish.py, use.py
   samples/       # bundled sample manifests (one per core kind + the forge/* GitHub set) for `seed`
 ```
-DB: `capability_versions(name, version, kind, manifest_json, artifact_json, stage, security_status, source_commit, created_at, PK(name,version))` — **immutable** — plus an FTS5 table over name/description/tags.
+DB: `capability_versions(name, version, kind, manifest_json, artifact_json, stage, security_status, evaluation, source_commit, created_at, PK(name,version))` — the manifest columns are **immutable**; `stage`, `security_status`, and `evaluation` are mutable SQLite-only columns written straight to the DB (never to git — resyncs use explicit-column UPDATEs that cannot clobber them), plus an FTS5 table over name/description/tags.
 
 **Publish (R1, hybrid):** `POST /capabilities` writes the capability dir into the local git repo + commits, then runs `indexer.sync()`. You get the git-artifact model immediately *and* can drive it from the UI. Enterprise deployments later switch to pure PR-driven with the same indexer.
 
@@ -209,6 +214,8 @@ POST   /registry/capabilities/{name}/lifecycle # draft→review→approved→pub
 GET    /registry/search?q=&tags=&stage=&kind=  # FTS now, vector later
 GET    /registry/capabilities/{name}/use?version=&inline=true
        # consumable artifact; inline=true resolves skill/agent refs (registry/inline.py)
+PUT    /registry/capabilities/{name}/versions/{version}/evaluation
+       # runtime metrics write (SQLite-only, git-exempt); body = CapabilityEvaluationRef
 ```
 
 ### 5.5 AI Forge integration (minimal in R1)
@@ -229,7 +236,7 @@ GET    /registry/capabilities/{name}/use?version=&inline=true
 7. ✅ AI Forge import affordances — `prompt_ref` + `skills[]` on agent nodes (schema + builder fold-in at graph-build + validation), frontend ConfigPanel editors, registry-side ref inliner (`registry/inline.py`, `/use?inline=true`), and per-kind "Use in…" import actions in the Capabilities view.
 8. ✅ Run both servers together — `scripts/dev.sh` boots backend + registry + Vite (commit `81dd5ee`); README documents the registry (no docker-compose needed).
 
-**R2 — Govern & Compose (in progress):** ✅ declared-dependency resolution at publish + automated per-kind breaking-change detection (`registry/publish_checks.py` — every ref must resolve with import-time semantics, wrong-kind refs and cross-version kind changes are rejected, detected breaking changes require a major semver bump; enforced on both the API and CLI publish paths before anything reaches git) · ✅ secret governance (publish-time: `api_key_ref` must be name-only and declared in `secrets_required`, and composites must declare the union of their spec-level refs' secrets since those are inlined at import — top-level `dependencies` are metadata-only and exempt; import-time: missing-secret warnings in both frontend apply paths) · ✅ `invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O — tool kind executes directly; workflow kind expands into the parent graph at build time behind a call frame, so HIL/resume/restart work unmodified; versions pin per run and deleted pins fail loudly rather than re-resolve; parent-side error catch via synthetic error edges) · remote invocation over HTTP · feed real run metrics (cost/success/latency) into `evaluation` scores · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.
+**R2 — Govern & Compose (in progress):** ✅ declared-dependency resolution at publish + automated per-kind breaking-change detection (`registry/publish_checks.py` — every ref must resolve with import-time semantics, wrong-kind refs and cross-version kind changes are rejected, detected breaking changes require a major semver bump; enforced on both the API and CLI publish paths before anything reaches git) · ✅ secret governance (publish-time: `api_key_ref` must be name-only and declared in `secrets_required`, and composites must declare the union of their spec-level refs' secrets since those are inlined at import — top-level `dependencies` are metadata-only and exempt; import-time: missing-secret warnings in both frontend apply paths) · ✅ `invoke` node in the AI Forge engine (call a registered capability by `name@version`, map I/O — tool kind executes directly; workflow kind expands into the parent graph at build time behind a call frame, so HIL/resume/restart work unmodified; versions pin per run and deleted pins fail loudly rather than re-resolve; parent-side error catch via synthetic error edges) · ✅ run metrics → `evaluation` scores (provenance stamped on registry imports; per-run capability-usage snapshot; participation-level aggregates — success rate, duration p50/p95, avg cost — recomputed over terminal runs and PUT to the registry on every terminal transition; merged into manifest responses, shown in the Capabilities view, and blended into search ranking via a quality factor) · remote invocation over HTTP · live refs + upgrade automation for existing imports · graduate SQLite→Postgres + pgvector.
 
 **R3 — Agent-native (roadmap):** semantic/intent search · agent discovery API (`search`/`describe`/`resolve`) · MCP adapter (expose capabilities as MCP servers + an MCP node in AI Forge) · enforcement gateway (ACL/credential-brokerage/audit) built on the recorded metadata.
 
@@ -245,6 +252,6 @@ GET    /registry/capabilities/{name}/use?version=&inline=true
 **Deferred to R2/R3 (direction only, no R1 code):**
 - **Search ranking:** FTS5 keyword now; hybrid FTS+vector + embedding-model choice in R3.
 - **Topology/auth:** one registry : one AI Forge on localhost for R1; shared central registry + inter-service auth later.
-- **Evaluation:** `evaluation` stays optional metadata (unpopulated); suite format defined when the `eval_suite` kind lands.
+- **Evaluation:** runtime metrics now populate `evaluation` passively (see R2 above). Active evaluation — runnable suites, publish gating, and the `suite_id` linkage — waits for the `eval_suite` kind (Phase 4 territory); the ref already carries `suite_id` so active suites can point in later.
 - ✅ **Compatibility checker:** automated per-kind breaking-change detection shipped alongside the dependency resolver in R2 (`registry/publish_checks.py`).
 - **Live refs & upgrade automation:** runtime-resolved references + re-pointing existing imports to newer versions (R2).
