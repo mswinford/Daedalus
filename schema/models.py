@@ -66,6 +66,12 @@ class ModelConfig(BaseModel):
         None,
         description="Cost per 1M tokens, e.g. {'input': 0.0, 'output': 0.0}. Local models = $0."
     )
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
 
 
 # ─── Tool Definition ────────────────────────────────────────────────────────
@@ -93,6 +99,12 @@ class ToolDefinition(BaseModel):
         default_factory=dict, description="JSON Schema parameters for the tool"
     )
     implementation: ToolImplementation = Field(..., description="How the tool is implemented")
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
 
 
 class ToolImplementation(BaseModel):

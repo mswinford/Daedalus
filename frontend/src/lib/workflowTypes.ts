@@ -53,6 +53,8 @@ export interface ToolDefinition {
   description: string
   parameters: Record<string, GenJSONSchemaParam>
   implementation: { type: GenToolImplementationType; config: Record<string, unknown> }
+  source_capability?: string | null
+  source_version?: string | null
 }
 
 // ─── Per-type node configs (flattened into `Config` in the generated file) ──

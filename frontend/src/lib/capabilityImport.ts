@@ -68,6 +68,7 @@ export function applyCapability(
   artifact: Record<string, any>,
   capName: string,
   targetNodeId?: string,
+  sourceVersion?: string | null,
 ): ApplyResult {
   const prompts = [...(wf.prompts ?? [])]
   const next: Workflow = {
@@ -80,12 +81,17 @@ export function applyCapability(
   }
 
   // Nested adds (skills/agents carrying their own tools/models) reuse existing pool entries.
+  // New entries are stamped with the importing capability's provenance; existing ones are left untouched.
   const addTool = (t: ToolDefinition): string => {
-    if (!next.tools.some((x) => x.id === t.id)) next.tools.push(t)
+    if (!next.tools.some((x) => x.id === t.id)) {
+      next.tools.push({ ...t, source_capability: capName, source_version: sourceVersion ?? null })
+    }
     return t.id
   }
   const addModel = (m: ModelConfig): string => {
-    if (!next.models.some((x) => x.id === m.id)) next.models.push(m)
+    if (!next.models.some((x) => x.id === m.id)) {
+      next.models.push({ ...m, source_capability: capName, source_version: sourceVersion ?? null })
+    }
     return m.id
   }
 

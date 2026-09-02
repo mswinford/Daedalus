@@ -116,6 +116,14 @@ export interface ModelConfig {
      */
     provider: ModelProvider;
     /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * Whether to track token costs for this model
      */
     track_cost?: boolean;
@@ -492,6 +500,14 @@ export interface ToolDefinition {
      * JSON Schema parameters for the tool
      */
     parameters?: { [key: string]: JSONSchemaParam };
+    /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
 }
 
 /**

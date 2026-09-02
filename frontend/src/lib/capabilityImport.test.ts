@@ -138,6 +138,63 @@ describe('applyCapability dedupe', () => {
   })
 })
 
+describe('applyCapability provenance stamping', () => {
+  it('stamps imported tools with capability name and resolved version', () => {
+    const r = applyCapability(makeWf(), 'tool', makeTool('t1'), 'ns/t1', undefined, '1.2.3')
+    expect(r.added).toBe(true)
+    expect(r.wf.tools[0].source_capability).toBe('ns/t1')
+    expect(r.wf.tools[0].source_version).toBe('1.2.3')
+  })
+
+  it('stamps imported model profiles with capability name and resolved version', () => {
+    const r = applyCapability(makeWf(), 'model_profile', makeModel('m1'), 'ns/m1', undefined, '0.4.0')
+    expect(r.added).toBe(true)
+    expect(r.wf.models[0].source_capability).toBe('ns/m1')
+    expect(r.wf.models[0].source_version).toBe('0.4.0')
+  })
+
+  it('stamps nested tools/models carried by skill and agent artifacts', () => {
+    const wf = makeWf({ nodes: [makeAgent('a')] })
+    const r = applyCapability(wf, 'skill', { name: 'sk1', prompt: 'p', tools: [makeTool('t9')] }, 'ns/sk1', 'a', '2.0.0')
+    expect(r.wf.tools[0].source_capability).toBe('ns/sk1')
+    expect(r.wf.tools[0].source_version).toBe('2.0.0')
+
+    const r2 = applyCapability(
+      makeWf(),
+      'agent',
+      { model: makeModel('m9'), tools: [makeTool('t8')], skills: [], prompt: 'sys' },
+      'ns/ag', undefined, '3.1.4',
+    )
+    expect(r2.wf.models[0].source_capability).toBe('ns/ag')
+    expect(r2.wf.models[0].source_version).toBe('3.1.4')
+    expect(r2.wf.tools[0].source_capability).toBe('ns/ag')
+    expect(r2.wf.tools[0].source_version).toBe('3.1.4')
+  })
+
+  it('stamps the capability name even when no resolved version is provided', () => {
+    const r = applyCapability(makeWf(), 'tool', makeTool('t1'), 'ns/t1')
+    expect(r.wf.tools[0].source_capability).toBe('ns/t1')
+    expect(r.wf.tools[0].source_version).toBeNull()
+  })
+
+  it('does not re-stamp pool entries that already exist (first provenance wins)', () => {
+    const existing = makeWf({ tools: [{ ...makeTool('t1'), source_capability: 'other/t1', source_version: '9.9.9' }] })
+    const r = applyCapability(existing, 'tool', makeTool('t1'), 'ns/t1', undefined, '1.0.0')
+    expect(r.added).toBe(false)
+    expect(r.wf.tools[0].source_capability).toBe('other/t1')
+    expect(r.wf.tools[0].source_version).toBe('9.9.9')
+  })
+
+  it('leaves custom (form-created, non-imported) entries unstamped', () => {
+    // Form-created tools/models are pushed straight into the pool and never pass through applyCapability.
+    const wf = makeWf({ tools: [makeTool('custom-1')], models: [makeModel('custom-m')] })
+    expect(wf.tools[0].source_capability).toBeUndefined()
+    expect(wf.tools[0].source_version).toBeUndefined()
+    expect(wf.models[0].source_capability).toBeUndefined()
+    expect(wf.models[0].source_version).toBeUndefined()
+  })
+})
+
 describe('missingSecrets', () => {
   it('returns declared secrets absent from the known store', () => {
     expect(missingSecrets({ secrets_required: ['GITHUB_TOKEN', 'SLACK_TOKEN'] }, ['SLACK_TOKEN'])).toEqual(['GITHUB_TOKEN'])

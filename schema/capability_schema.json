@@ -979,6 +979,32 @@
           "default": null,
           "description": "Cost per 1M tokens, e.g. {'input': 0.0, 'output': 0.0}. Local models = $0.",
           "title": "Pricing"
+        },
+        "source_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Registry capability name this entry was imported from (provenance)",
+          "title": "Source Capability"
+        },
+        "source_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Capability version it was imported at",
+          "title": "Source Version"
         }
       },
       "required": [
@@ -1410,6 +1436,32 @@
         "implementation": {
           "$ref": "#/$defs/ToolImplementation",
           "description": "How the tool is implemented"
+        },
+        "source_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Registry capability name this entry was imported from (provenance)",
+          "title": "Source Capability"
+        },
+        "source_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Capability version it was imported at",
+          "title": "Source Version"
         }
       },
       "required": [

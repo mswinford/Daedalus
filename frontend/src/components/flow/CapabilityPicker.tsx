@@ -100,7 +100,7 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
         capabilitiesApi.use(row.name, 'latest', true),
         secretsApi.list(),
       ])
-      const { wf: merged, added } = applyCapability(wf, row.kind, res.artifact, row.name, agentId ?? undefined)
+      const { wf: merged, added } = applyCapability(wf, row.kind, res.artifact, row.name, agentId ?? undefined, res.version)
       if (!added) return
       onApply(merged)
       const missing = missingSecrets(res.manifest, (secrets ?? []).map((s) => s.name))

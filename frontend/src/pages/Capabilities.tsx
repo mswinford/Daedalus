@@ -76,12 +76,12 @@ function UseButton({ cap }: { cap: RowCap }) {
   const applyUse = useMutation({
     mutationFn: async () => {
       if (!targetWf) throw new Error('Pick a target workflow')
-      const [{ artifact, manifest }, secrets] = await Promise.all([
+      const [{ artifact, manifest, version }, secrets] = await Promise.all([
         capabilitiesApi.use(cap.name, 'latest', true),
         secretsApi.list(),
       ])
       const { wf: merged, added } = applyCapability(
-        targetWf, cap.kind, artifact, cap.name, targetNodeId || undefined,
+        targetWf, cap.kind, artifact, cap.name, targetNodeId || undefined, version,
       )
       if (!added) return null
       const saved = await workflowsApi.update(targetWf.id, merged)
