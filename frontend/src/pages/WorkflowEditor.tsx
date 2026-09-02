@@ -750,6 +750,8 @@ function WorkflowEditorInner() {
         <ResourcesPanel
           tools={tools}
           models={models}
+          prompts={workflow?.prompts ?? []}
+          wfId={id ?? undefined}
           updates={updates.statuses}
           onToolsChange={handleToolsChange}
           onModelsChange={handleModelsChange}

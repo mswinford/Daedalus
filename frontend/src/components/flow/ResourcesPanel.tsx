@@ -1,15 +1,20 @@
 import { useState } from 'react'
-import { Cpu, Layers, PackagePlus, Plus, Trash2, Wrench, X } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ArrowUpCircle, Cpu, Layers, PackagePlus, Plus, ScrollText, Trash2, Wrench, X } from 'lucide-react'
 
-import type { ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
+import type { ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workflowTypes'
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
+import { workflowsApi } from '@/lib/api'
 import CapabilityVersionBadge from './CapabilityVersionBadge'
 import ToolForm, { IMPL_LABEL } from './ToolForm'
 import ModelForm from './ModelForm'
+import UpgradeCapabilityModal from './UpgradeCapabilityModal'
 
 interface Props {
   tools: ToolDefinition[]
   models: ModelConfig[]
+  prompts?: PromptDefinition[]
+  wfId?: string
   updates?: UpdateStatus[]
   onToolsChange: (tools: ToolDefinition[]) => void
   onModelsChange: (models: ModelConfig[]) => void
@@ -24,16 +29,20 @@ const linkBtnCls = 'flex items-center gap-1 text-xs text-indigo-400 hover:text-i
 export default function ResourcesPanel({
   tools,
   models,
+  prompts = [],
+  wfId,
   updates,
   onToolsChange,
   onModelsChange,
   onOpenRegistry,
   onClose,
 }: Props) {
+  const queryClient = useQueryClient()
   const [editingTool, setEditingTool] = useState<ToolDefinition | null>(null)
   const [addingTool, setAddingTool] = useState(false)
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null)
   const [addingModel, setAddingModel] = useState(false)
+  const [upgrading, setUpgrading] = useState<{ status: UpdateStatus; localEntry: Record<string, unknown> } | null>(null)
 
   const saveTool = (t: ToolDefinition) => {
     onToolsChange(
@@ -51,7 +60,42 @@ export default function ResourcesPanel({
     setAddingModel(false)
   }
 
+  const applyUpgrade = async (upgraded: Record<string, unknown>) => {
+    if (!upgrading) return
+    const kind = upgrading.status.kind
+    if (kind === 'tool') {
+      onToolsChange(tools.map((x) => (x.id === upgraded.id ? (upgraded as unknown as ToolDefinition) : x)))
+    } else if (kind === 'model_profile') {
+      onModelsChange(models.map((x) => (x.id === upgraded.id ? (upgraded as unknown as ModelConfig) : x)))
+    } else if (kind === 'prompt') {
+      if (!wfId) throw new Error('Workflow id unavailable')
+      const fresh = await workflowsApi.get(wfId)
+      const idx = (fresh.prompts ?? []).findIndex((p) => p.id === upgraded.id)
+      if (idx < 0) throw new Error('Prompt no longer exists in the workflow')
+      const nextPrompts = [...(fresh.prompts ?? [])]
+      nextPrompts[idx] = upgraded as unknown as PromptDefinition
+      await workflowsApi.update(wfId, { ...fresh, prompts: nextPrompts })
+      await queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      await queryClient.invalidateQueries({ queryKey: ['workflow', wfId] })
+    } else {
+      throw new Error(`Cannot upgrade ${kind} here`)
+    }
+    setUpgrading(null)
+  }
+
+  const UpgradeButton = ({ status, entry }: { status: UpdateStatus; entry: object }) => (
+    <button
+      onClick={() => setUpgrading({ status, localEntry: entry as Record<string, unknown> })}
+      className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+        status.isBreaking ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25' : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+      }`}
+    >
+      <ArrowUpCircle size={12} /> Upgrade
+    </button>
+  )
+
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
         className="max-h-[80vh] w-[560px] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
@@ -86,6 +130,7 @@ export default function ResourcesPanel({
                       <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
                         <span className="truncate">{t.name}</span>
                         {tu && <CapabilityVersionBadge current={tu.currentVersion} latest={tu.latestVersion} breaking={tu.isBreaking} />}
+                        {tu?.hasUpdate && <UpgradeButton status={tu} entry={t} />}
                       </p>
                       <p className="truncate text-[11px] text-zinc-500">
                         {IMPL_LABEL[t.implementation.type]}
@@ -151,6 +196,7 @@ export default function ResourcesPanel({
                       <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
                         <span className="truncate">{m.name}</span>
                         {mu && <CapabilityVersionBadge current={mu.currentVersion} latest={mu.latestVersion} breaking={mu.isBreaking} />}
+                        {mu?.hasUpdate && <UpgradeButton status={mu} entry={m} />}
                       </p>
                       <p className="truncate text-[11px] text-zinc-500">
                         {m.model}
@@ -195,7 +241,47 @@ export default function ResourcesPanel({
             </button>
           </div>
         </div>
+
+        {/* Prompts */}
+        {prompts.length > 0 && (
+          <div className={sectionCls}>
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              <ScrollText size={12} /> Prompts
+            </p>
+            <div className="space-y-2">
+              {prompts.map((p) => {
+                const pu = updates?.find((u) => u.kind === 'prompt' && u.where === p.id)
+                return (
+                  <div key={p.id} className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
+                          <span className="truncate">{p.name ?? p.id}</span>
+                          {pu && <CapabilityVersionBadge current={pu.currentVersion} latest={pu.latestVersion} breaking={pu.isBreaking} />}
+                          {pu?.hasUpdate && <UpgradeButton status={pu} entry={p} />}
+                        </p>
+                        <p className="truncate text-[11px] text-zinc-500">
+                          {(p.variables ?? []).length > 0 ? `${(p.variables ?? []).length} variable(s)` : 'No variables'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
+
+    {upgrading && (
+      <UpgradeCapabilityModal
+        status={upgrading.status}
+        localEntry={upgrading.localEntry}
+        onClose={() => setUpgrading(null)}
+        onApply={applyUpgrade}
+      />
+    )}
+    </>
   )
 }
