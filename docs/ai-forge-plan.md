@@ -9,19 +9,23 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ---
 
-## Current Status (Phase 3 complete)
+## Current Status (Phase 3 complete + post-Phase 3 increments)
 
-> Last updated: Phase 3 complete. Human-in-loop nodes are implemented end-to-end: LangGraph
+> Last updated: 2026-09-01. Human-in-loop nodes are implemented end-to-end: LangGraph
 > `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
 > survive restarts and are recovered on startup), and the frontend shows a paused state with an
 > input form + resume button. The editor is a sidebar / master-detail layout with debounced
 > auto-save; runs stream live over WebSocket. Secrets store, per-agent message isolation, async
 > execution, timeout auto-fail, the Pending Approvals sidebar, and run-log persistence (event
-> history survives restarts) are all shipped.
-> Next up: test-connection endpoint. The `github_*` builtins (create_branch / write_file /
-> create_pr) are shipped and published to the registry as forge/* capabilities plus the
-> forge/github-toolkit skill. Use this section as the source of
-> truth when resuming in a new session — it supersedes the phase notes below.
+> history survives restarts) are all shipped. Post-Phase 3: per-node **error branches** (opt-in red
+> error handle → `type="error"` edge), the registry **`invoke` node**, **workflow templates**
+> (`backend/app/templates/`, create-from-template in the UI — including the `github-pr-agent`
+> demo), and the four `github_*` builtins (create_branch / read_file / write_file / create_pr)
+> published to the registry as forge/* capabilities plus the forge/github-toolkit skill (2.0.0).
+> Next up: test-connection endpoint (AI Forge); on the registry side — live refs + upgrade
+> automation, run metrics → `evaluation` scores, SQLite → Postgres (ROADMAP.md R2 remainder).
+> Use this section as the source of truth when resuming in a new session — it supersedes the
+> phase notes below.
 
 ### What works today (shippable)
 - **Backend engine (LangGraph)**: `start` → nodes → `end` graphs compile and run
@@ -110,7 +114,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: 200 passing (`python -m pytest -q`, including Capability Registry R1). Frontend typechecks + builds clean.
+- **Tests**: backend suite green as of 2026-09-01 (347 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 45 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

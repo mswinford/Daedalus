@@ -2,7 +2,7 @@
 
 A standalone web app for building **AI agent workflows** on [LangGraph](https://github.com/langchain-ai/langgraph). Workflows are directed graphs of nodes (agents, conditionals, transforms, sandboxed Python, human-in-loop gates) with file-based persistence. Author them in the visual React Flow editor or via the REST API.
 
-> **Status:** Phase 3 — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject), async execution with live WebSocket streaming, a secrets store, and per-agent message isolation are all implemented. A companion **Capability Registry** (R1 of the [platform roadmap](./docs/ROADMAP.md)) adds identity, versioning, lifecycle, and search for shareable AI capabilities — see [Capability Registry](#capability-registry).
+> **Status:** Phase 3 + post-Phase 3 increments — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject), async execution with live WebSocket streaming, a secrets store, per-agent message isolation, per-node error branches, workflow templates, and the `github_*` builtins are all implemented. A companion **Capability Registry** ([platform roadmap](./docs/ROADMAP.md): R1 complete, R2 in progress) adds identity, versioning, lifecycle, search, and the `invoke` node for calling registered capabilities — see [Capability Registry](#capability-registry).
 
 ---
 
@@ -10,7 +10,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 
 **Engine (works now)**
 - LangGraph-based execution of `start → … → end` graphs, run **asynchronously** over HTTP with live event streaming.
-- Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), and `human_in_loop` (pause / resume / reject).
+- Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), `invoke` (calls a registry capability by `name@version`), and `human_in_loop` (pause / resume / reject).
 - Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
 - **Error branches** — opt-in per-node error handle (config panel toggle); when a node fails, the run routes down its red-dashed `error` edge if one exists, otherwise the run fails. Human-in-loop pauses are never treated as failures.
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
@@ -26,14 +26,15 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - **Run debug panel**: live node/LLM trace, token + cost totals, expandable outputs, and a paused-state form for human-in-loop (approve / reject).
 - Models, tools, and secrets management panels. Auto-save with an unsaved/saving/saved indicator.
 
-**Capability Registry (R1 — works now)**
+**Capability Registry (R1 complete, R2 in progress — works now)**
 - Capability Manifest schema (`schema/capability.py`) with six core kinds: `tool`, `prompt`, `model_profile`, `skill`, `agent`, `workflow`; composites reference other capabilities by `name@version`.
 - Git-backed store + SQLite FTS5 index: immutable versions, lifecycle state machine (draft → review → approved → published → deprecated → retired).
 - Publish (git commit + index sync), search, and use APIs on a separate server (`127.0.0.1:3010`).
 - CLI: `ai-forge-registry serve | publish <files…> | seed` — publishing works offline; eleven sample capabilities (one per core kind + the `forge/*` GitHub set) ship in `registry/samples/`.
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
+- **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame) and publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage).
 
-**Tests:** 200 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
+**Tests:** 347 backend tests passing (`python -m pytest -q`, as of 2026-09-01, incl. registry R1–R2); frontend 45 Vitest tests + typecheck/build clean.
 
 ---
 
@@ -121,7 +122,7 @@ The registry is a separate server; it holds versioned, searchable capability man
 
 ```bash
 python -m registry.cli serve        # or: ai-forge-registry serve  → 127.0.0.1:3010
-python -m registry.cli seed         # publish six sample capabilities (one per kind)
+python -m registry.cli seed         # publish the eleven bundled sample capabilities
 curl http://127.0.0.1:3010/health
 ```
 
@@ -239,6 +240,11 @@ sandboxed tools, and the GitHub "user story → PR" agent). New workflows can be
 them via `GET /api/templates` — the sidebar's "New from template" picker and the EmptyState cards
 fetch a template and create a new workflow from it with a fresh id.
 
+The GitHub template makes a good first end-to-end run: set the `GITHUB_TOKEN` secret in the Secrets
+panel, point its model entry at a real model, then run it with e.g. *"add a contact form to
+octo/demo"* — it creates a branch and files, pauses for your approval (Pending Approvals sidebar),
+then opens the PR and returns its URL.
+
 ### Sandboxed custom function
 
 The `custom_function` node runs your Python in a RestrictedPython sandbox with a timeout. The code receives `state` and should write to `result`:
@@ -339,7 +345,7 @@ Base URL: `http://127.0.0.1:3000`
 }
 ```
 
-**Node:** `{ "id", "type", "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | conditional | transform | human_in_loop | custom_function`.
+**Node:** `{ "id", "type", "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | conditional | transform | human_in_loop | custom_function | invoke`.
 
 **Edge:** `{ "id", "source_node_id", "source_handle", "target_node_id", "type": "static|conditional|error", "condition"? }`. For a conditional node, each non-`default` `source_handle` is a branch; the `conditions[i]` maps to the i-th branch edge (in workflow order). A `"default"` handle (or `default_branch`) is the fallback.
 
@@ -355,6 +361,7 @@ Base URL: `http://127.0.0.1:3000`
 | `transform` | ✅ | `template`, `mapping`, and `custom_function` modes all work |
 | `custom_function` | ✅ | Sandboxed Python (RestrictedPython), timeout enforced |
 | `human_in_loop` | ✅ | Pauses the run for human input/approval; resume or reject via `POST /runs/{id}/resume` |
+| `invoke` | ✅ | Calls a registry capability by `name@version`; tool kind executes in place, workflow kind expands into the parent graph at build time (per-run version pinning) |
 
 ---
 
@@ -362,7 +369,7 @@ Base URL: `http://127.0.0.1:3000`
 
 - **`llm` condition type** raises `NotImplementedError`; `json_path` and `regex` work.
 - **Anthropic provider** not implemented (OpenAI-compatible only).
-- **Run records are in-memory** — checkpoint data survives restarts (paused runs are recovered on startup and their timeouts re-armed), but the run list itself starts empty after a restart except for recovered paused runs.
+- **Run history is rebuilt from `checkpoints.db` on startup** — run summaries + full event logs persist there, so completed/failed runs and their traces survive restarts; paused runs are additionally recovered with their timeouts re-armed.
 
 ---
 
@@ -370,7 +377,8 @@ Base URL: `http://127.0.0.1:3000`
 
 - **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
 - **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
+- **Post-Phase 3 (done):** per-node error branches (opt-in error edges), workflow templates with the create-from-template UI, and the `github_*` builtins (branch / read / write / PR).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
-- **Capability platform (R1 complete):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 is in progress — the `invoke` node (call a registered capability by `name@version`) and publish-time governance checks have shipped; next up: remote invocation over HTTP, live refs/upgrade automation. R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
+- **Capability platform (R1 complete):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 is in progress — the `invoke` node (call a registered capability by `name@version`) and publish-time governance checks have shipped; next up: live refs + upgrade automation, run metrics → evaluation scores, remote invocation over HTTP, SQLite → Postgres. R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
 
 Full detail in [the AI Forge Plan](./docs/ai-forge-plan.md).
