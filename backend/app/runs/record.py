@@ -29,6 +29,9 @@ class RunRecord:
     # capability name → resolved semver, for workflows with invoke nodes;
     # resume/restart re-expands with these pins so the graph structure is stable.
     invoke_pins: dict[str, str] | None = None
+    # capability name → version snapshot taken at run start (invoke pins ∪
+    # model/tool provenance); persisted with the run for registry evaluation.
+    capability_usage: dict[str, str | None] | None = None
     started_at: float = field(default_factory=time.time)
     completed_at: float | None = None
     subscribers: set[asyncio.Queue] = field(default_factory=set)

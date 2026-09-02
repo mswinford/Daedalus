@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS runs (
     total_tokens_output INTEGER NOT NULL DEFAULT 0,
     estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
     invoke_pins TEXT,
+    capability_usage TEXT,
     started_at REAL NOT NULL,
     completed_at REAL
 );
@@ -61,6 +62,10 @@ def _store_connect(path: str) -> sqlite3.Connection:
     if "invoke_pins" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN invoke_pins TEXT")
         conn.commit()
+    # Older DBs predate the capability_usage column; add it in place.
+    if "capability_usage" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN capability_usage TEXT")
+        conn.commit()
     return conn
 
 
@@ -84,8 +89,8 @@ def _write_summary(path: str, fields: tuple) -> None:
             INSERT OR REPLACE INTO runs (
                 run_id, workflow_id, status, input_data, output_data, error,
                 total_tokens_input, total_tokens_output, estimated_cost_usd,
-                invoke_pins, started_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                invoke_pins, capability_usage, started_at, completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             fields,
         )
@@ -201,6 +206,7 @@ def _save_run_summary(record: "RunRecord") -> None:
         record.error, record.total_tokens_input,
         record.total_tokens_output, record.estimated_cost_usd,
         json.dumps(record.invoke_pins, default=_json_default) if record.invoke_pins else None,
+        json.dumps(record.capability_usage, default=_json_default) if record.capability_usage else None,
         record.started_at, record.completed_at,
     )))
 

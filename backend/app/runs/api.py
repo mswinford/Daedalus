@@ -37,6 +37,26 @@ async def _prepare_run(workflow, pins: dict[str, str] | None = None):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _capability_usage(workflow, pins: dict[str, str] | None) -> dict[str, str | None] | None:
+    """Snapshot of which capability versions this run uses (name → version).
+
+    Union of model/tool provenance and the invoke pins resolved at run start;
+    on a name clash the pin wins (it is what the run actually resolved to).
+    Entries with provenance but no version are kept as name-only attribution.
+    Returns None for workflows without any attribution, so the store keeps NULL.
+    """
+    usage: dict[str, str | None] = {}
+    for model in workflow.models:
+        if model.source_capability:
+            usage[model.source_capability] = model.source_version
+    for tool in workflow.tools:
+        if tool.source_capability:
+            usage[tool.source_capability] = tool.source_version
+    for name, version in (pins or {}).items():
+        usage[name] = version
+    return usage or None
+
+
 @router.post("/workflows/{workflow_id}/run", status_code=202)
 async def run_workflow(workflow_id: str, input_data: dict[str, Any] = {}):
     """Kick off a run in the background and return its id for streaming."""
@@ -45,6 +65,7 @@ async def run_workflow(workflow_id: str, input_data: dict[str, Any] = {}):
     record = RunRecord(
         run_id=uuid.uuid4().hex, workflow_id=workflow_id, input_data=input_data,
         invoke_pins=pins,
+        capability_usage=_capability_usage(workflow, pins),
     )
     RUNS[record.run_id] = record
     _save_run_summary(record)
@@ -120,6 +141,7 @@ def get_run(run_id: str):
         "total_tokens_output": record.total_tokens_output,
         "estimated_cost_usd": record.estimated_cost_usd,
         "invoke_pins": record.invoke_pins,
+        "capability_usage": record.capability_usage,
         "started_at": record.started_at,
         "completed_at": record.completed_at,
     }

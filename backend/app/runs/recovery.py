@@ -34,6 +34,17 @@ def _checkpoint_started_at(ts: Any) -> float:
         return time.time()
 
 
+def _parse_json_dict(value: Any) -> dict[str, Any] | None:
+    """Parse a JSON object column; NULL or malformed values degrade to None."""
+    if not value:
+        return None
+    try:
+        data = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _fail_unrecoverable_run(thread_id: str, workflow_id: str, summary: Any, error: str) -> None:
     """Fail a paused run whose pinned capability can no longer be resolved.
 
@@ -130,6 +141,7 @@ async def recover_paused_runs() -> int:
                 if summary is not None and summary["invoke_pins"]
                 else None
             )
+            usage = _parse_json_dict(summary["capability_usage"]) if summary is not None else None
             graph = graphs.get(workflow_id)
             if graph is None:
                 try:
@@ -181,6 +193,7 @@ async def recover_paused_runs() -> int:
                 input_data=json.loads(summary["input_data"]) if summary else {},
                 status="paused",
                 interrupt_value=payload,
+                capability_usage=usage,
                 started_at=(
                     float(summary["started_at"])
                     if summary
@@ -224,6 +237,7 @@ async def recover_finished_runs() -> int:
                 pins = json.loads(row["invoke_pins"])
             except (TypeError, ValueError):
                 pins = None
+        usage = _parse_json_dict(row["capability_usage"])
         record = RunRecord(
             run_id=row["run_id"],
             workflow_id=row["workflow_id"],
@@ -237,6 +251,7 @@ async def recover_finished_runs() -> int:
             total_tokens_output=row["total_tokens_output"],
             estimated_cost_usd=row["estimated_cost_usd"],
             invoke_pins=pins,
+            capability_usage=usage,
             started_at=float(row["started_at"]),
             completed_at=row["completed_at"],
         )
