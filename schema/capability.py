@@ -221,11 +221,21 @@ class CapabilitySemantics(BaseModel):
     related: list[str] = Field(default_factory=list)
 
 
+class CapabilityEvaluationStats(BaseModel):
+    """Aggregated production run metrics for a capability version (runtime-computed)."""
+    runs_total: int = 0
+    runs_failed: int = 0
+    duration_ms_p50: Optional[float] = None
+    duration_ms_p95: Optional[float] = None
+    avg_cost_usd: Optional[float] = None
+
+
 class CapabilityEvaluationRef(BaseModel):
-    """Scores computed by the runtime (lights up in R2)."""
+    """Scores and aggregated run stats, computed by the runtime (lights up in R2)."""
     suite_id: Optional[str] = None
     last_scored_at: Optional[float] = None
     score: Optional[float] = None
+    stats: Optional[CapabilityEvaluationStats] = None
 
 
 # ─── Manifest ────────────────────────────────────────────────────────────────

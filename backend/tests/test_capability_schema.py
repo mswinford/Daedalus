@@ -219,6 +219,46 @@ def test_semver_key_rejects_invalid():
         semver_key("not-a-version")
 
 
+# ─── Evaluation block ────────────────────────────────────────────────────────
+
+def test_evaluation_with_full_stats_round_trips():
+    m = CapabilityManifest(**_manifest(
+        "prompt", {"kind": "prompt", "text": "x"},
+        evaluation={
+            "score": 0.97,
+            "last_scored_at": 1700000123.0,
+            "stats": {
+                "runs_total": 120,
+                "runs_failed": 4,
+                "duration_ms_p50": 350.5,
+                "duration_ms_p95": 980.25,
+                "avg_cost_usd": 0.0042,
+            },
+        },
+    ))
+    assert m.evaluation.score == 0.97
+    assert m.evaluation.stats.runs_total == 120
+    assert m.evaluation.stats.runs_failed == 4
+    assert m.evaluation.stats.duration_ms_p50 == 350.5
+    assert m.evaluation.stats.duration_ms_p95 == 980.25
+    assert m.evaluation.stats.avg_cost_usd == 0.0042
+    assert CapabilityManifest.model_validate(m.model_dump(mode="json")) == m
+
+
+def test_evaluation_score_only_still_validates():
+    m = CapabilityManifest(**_manifest(
+        "prompt", {"kind": "prompt", "text": "x"},
+        evaluation={"score": 0.9, "last_scored_at": 1700000000.0},
+    ))
+    assert m.evaluation.score == 0.9
+    assert m.evaluation.stats is None
+
+
+def test_manifest_without_evaluation_still_validates():
+    m = CapabilityManifest(**_manifest("prompt", {"kind": "prompt", "text": "x"}))
+    assert m.evaluation is None
+
+
 # ─── Round-trip ──────────────────────────────────────────────────────────────
 
 def test_json_round_trip():

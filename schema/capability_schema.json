@@ -178,7 +178,7 @@
       "type": "object"
     },
     "CapabilityEvaluationRef": {
-      "description": "Scores computed by the runtime (lights up in R2).",
+      "description": "Scores and aggregated run stats, computed by the runtime (lights up in R2).",
       "properties": {
         "suite_id": {
           "anyOf": [
@@ -215,9 +215,73 @@
           ],
           "default": null,
           "title": "Score"
+        },
+        "stats": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityEvaluationStats"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "CapabilityEvaluationRef",
+      "type": "object"
+    },
+    "CapabilityEvaluationStats": {
+      "description": "Aggregated production run metrics for a capability version (runtime-computed).",
+      "properties": {
+        "runs_total": {
+          "default": 0,
+          "title": "Runs Total",
+          "type": "integer"
+        },
+        "runs_failed": {
+          "default": 0,
+          "title": "Runs Failed",
+          "type": "integer"
+        },
+        "duration_ms_p50": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms P50"
+        },
+        "duration_ms_p95": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms P95"
+        },
+        "avg_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Cost Usd"
+        }
+      },
+      "title": "CapabilityEvaluationStats",
       "type": "object"
     },
     "CapabilityGovernance": {
