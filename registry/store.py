@@ -259,6 +259,34 @@ async def list_capabilities(db: Database) -> list[dict[str, Any]]:
     return out
 
 
+def _quality_factor(evaluation_json: Optional[str]) -> float:
+    """Ranking multiplier derived from a version's runtime evaluation score.
+
+    Formula: 0.9 + 0.2 * score, mapping a score in [0, 1] to a factor in
+    [0.9, 1.1]. A high success rate nudges a capability slightly above its
+    equal-relevance peers; a low one slightly below — a gentle quality signal
+    layered on top of FTS5 relevance, never strong enough to override it.
+
+    Unmeasured is neutral: when the evaluation is NULL, malformed JSON, lacks
+    a numeric `score`, or the score falls outside [0, 1], the factor is exactly
+    1.0. Capabilities are never penalized for lacking evaluation data.
+    """
+    if evaluation_json is None:
+        return 1.0
+    try:
+        data = json.loads(evaluation_json)
+    except (ValueError, TypeError):
+        return 1.0
+    if not isinstance(data, dict):
+        return 1.0
+    score = data.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return 1.0
+    if not 0 <= score <= 1:
+        return 1.0
+    return 0.9 + 0.2 * score
+
+
 async def search(
     db: Database, query: str, kind: Optional[str] = None, limit: int = 50
 ) -> list[dict[str, Any]]:
@@ -291,7 +319,8 @@ async def search(
         pool = published or vers
         best = max(pool, key=lambda r: semver_key(r["version"]))
         manifest = CapabilityManifest.model_validate_json(best["manifest_json"])
-        out.append({
+        score = -best["rank"]  # raw bm25-derived relevance (exposed unchanged)
+        out.append((score * _quality_factor(best["evaluation"]), {
             "name": name,
             "kind": best["kind"],
             "description": manifest.description,
@@ -299,10 +328,10 @@ async def search(
             "spec": extract_artifact(manifest),
             "version": best["version"],
             "stage": best["stage"],
-            "score": -best["rank"],
-        })
-    out.sort(key=lambda r: r["score"], reverse=True)
-    return out[:limit]
+            "score": score,
+        }))
+    out.sort(key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in out[:limit]]
 
 
 async def transition_stage(

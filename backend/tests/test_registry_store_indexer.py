@@ -231,6 +231,93 @@ def test_search_fts(db):
     asyncio.run(scenario())
 
 
+# ─── search ranking / evaluation blend ───────────────────────────────────────
+
+def test_search_ranking_blends_evaluation(db):
+    """Equal-relevance peers are ordered by runtime evaluation score: high
+    first, unmeasured in the middle (neutral 1.0), low last."""
+    async def scenario():
+        # Identical description + tags -> identical bm25 relevance; only the
+        # runtime evaluation differs across the three capabilities.
+        for name in ("acme/alpha", "acme/beta", "acme/gamma"):
+            await upsert_version(
+                db, _prompt_manifest(name=name, stage=LifecycleStage.PUBLISHED)
+            )
+        await set_evaluation(db, "acme/alpha", "1.0.0", {"score": 0.9})  # -> 1.08
+        await set_evaluation(db, "acme/gamma", "1.0.0", {"score": 0.2})  # -> 0.94
+        # acme/beta left unmeasured (factor 1.0)
+
+        hits = await search(db, "invoice")
+        assert [h["name"] for h in hits] == ["acme/alpha", "acme/beta", "acme/gamma"]
+    asyncio.run(scenario())
+
+
+def test_search_relevance_still_dominates_evaluation(db):
+    """A clearly better text match outranks a high-evaluation weak match — the
+    ±10% quality nudge must not override real relevance."""
+    async def scenario():
+        # 'better' repeats the query term (higher bm25) but has a LOW eval score;
+        # 'weaker' matches once but has a HIGH eval score. The relevance gap
+        # exceeds the max factor ratio (1.1/0.9 ~= 1.22), so relevance wins.
+        better = CapabilityManifest(
+            name="acme/better", version="1.0.0",
+            description=" ".join(["invoice"] * 5), tags=[], kind="prompt",
+            spec={"kind": "prompt", "text": "x"}, governance={"owner": "acme"},
+            stage=LifecycleStage.PUBLISHED, created_at=1700000003.0,
+        )
+        weaker = CapabilityManifest(
+            name="acme/weaker", version="1.0.0", description="invoice", tags=[],
+            kind="prompt", spec={"kind": "prompt", "text": "x"},
+            governance={"owner": "acme"}, stage=LifecycleStage.PUBLISHED,
+            created_at=1700000004.0,
+        )
+        await upsert_version(db, better)
+        await upsert_version(db, weaker)
+        await set_evaluation(db, "acme/better", "1.0.0", {"score": 0.0})  # -> 0.9
+        await set_evaluation(db, "acme/weaker", "1.0.0", {"score": 1.0})  # -> 1.1
+
+        hits = await search(db, "invoice")
+        assert [h["name"] for h in hits] == ["acme/better", "acme/weaker"]
+    asyncio.run(scenario())
+
+
+def test_search_malformed_evaluation_is_neutral(db):
+    """A version whose evaluation column is malformed JSON still returns,
+    unpenalized (treated as factor 1.0), without crashing."""
+    async def scenario():
+        for name in ("acme/high", "acme/bad", "acme/low"):
+            await upsert_version(
+                db, _prompt_manifest(name=name, stage=LifecycleStage.PUBLISHED)
+            )
+        await set_evaluation(db, "acme/high", "1.0.0", {"score": 0.9})  # -> 1.08
+        await set_evaluation(db, "acme/low", "1.0.0", {"score": 0.2})   # -> 0.94
+        # Corrupt acme/bad's evaluation column directly — malformed JSON.
+        await db.conn.execute(
+            "UPDATE capability_versions SET evaluation=? WHERE name='acme/bad'",
+            ("{not valid json",),
+        )
+        await db.conn.commit()
+
+        hits = await search(db, "invoice")  # must not raise
+        # bad (1.0) sits between high (1.08) and low (0.94) -> unpenalized
+        assert [h["name"] for h in hits] == ["acme/high", "acme/bad", "acme/low"]
+    asyncio.run(scenario())
+
+
+def test_search_response_shape_unchanged(db):
+    """Blending changes ordering only — each hit still carries the same keys."""
+    async def scenario():
+        await upsert_version(db, _prompt_manifest(stage=LifecycleStage.PUBLISHED))
+        await set_evaluation(db, "acme/prompts", "1.0.0", {"score": 0.7})
+
+        hits = await search(db, "invoice")
+        assert hits
+        assert set(hits[0].keys()) == {
+            "name", "kind", "description", "tags", "spec", "version", "stage", "score"
+        }
+    asyncio.run(scenario())
+
+
 # ─── git indexer ─────────────────────────────────────────────────────────────
 
 def test_sync_from_repo(tmp_path):
