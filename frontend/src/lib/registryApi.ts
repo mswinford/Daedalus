@@ -59,6 +59,23 @@ export interface UseResult {
   artifact: Record<string, any>
 }
 
+/** Aggregated production run metrics for a capability version (mirrors schema.capability.CapabilityEvaluationStats). */
+export interface CapabilityEvaluationStats {
+  runs_total: number
+  runs_failed: number
+  duration_ms_p50?: number | null
+  duration_ms_p95?: number | null
+  avg_cost_usd?: number | null
+}
+
+/** Runtime evaluation merged into every manifest dump (mirrors schema.capability.CapabilityEvaluationRef). */
+export interface CapabilityEvaluationRef {
+  suite_id?: string | null
+  last_scored_at?: number | null
+  score?: number | null
+  stats?: CapabilityEvaluationStats | null
+}
+
 export const capabilitiesApi = {
   list: (kind?: CapabilityKind) =>
     registry

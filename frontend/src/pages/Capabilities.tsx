@@ -10,6 +10,12 @@ import {
 } from '@/lib/registryApi'
 import { workflowsApi, secretsApi, apiErrorMessage } from '@/lib/api'
 import { applyCapability, missingSecrets } from '@/lib/capabilityImport'
+import {
+  formatCostUsd,
+  formatDurationMs,
+  formatScorePercent,
+  getManifestEvaluation,
+} from '@/lib/capabilityMetrics'
 import type { AgentNodeConfig } from '@/lib/workflowTypes'
 
 /** Common shape shared by list summaries and search hits. */
@@ -230,6 +236,46 @@ function UseButton({ cap }: { cap: RowCap }) {
   )
 }
 
+function VersionMetrics({ manifest }: { manifest: Record<string, any> }) {
+  const evaluation = getManifestEvaluation(manifest)
+  if (!evaluation) return null
+  const stats = evaluation.stats
+  const items: Array<{ label: string; value: string | null }> = [
+    { label: 'success rate', value: formatScorePercent(evaluation.score) },
+    {
+      label: 'runs',
+      value: stats ? `${stats.runs_total} total · ${stats.runs_failed} failed` : null,
+    },
+    { label: 'p50', value: formatDurationMs(stats?.duration_ms_p50) },
+    { label: 'p95', value: formatDurationMs(stats?.duration_ms_p95) },
+    { label: 'avg cost', value: formatCostUsd(stats?.avg_cost_usd) },
+  ]
+  const shown = items.filter((i) => i.value != null)
+  if (shown.length === 0) return null
+  return (
+    <div className="border-t border-zinc-800 px-3 py-2">
+      <p className="mb-1.5 text-xs font-medium text-zinc-500">Production metrics</p>
+      <div className="flex flex-wrap gap-1.5">
+        {shown.map((item) => (
+          <span
+            key={item.label}
+            className="flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1 text-xs"
+          >
+            <span className="text-zinc-500">{item.label}</span>
+            <span
+              className={`font-mono ${
+                item.label === 'success rate' ? 'text-emerald-400' : 'text-zinc-200'
+              }`}
+            >
+              {item.value}
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function CapabilityRow({ cap }: { cap: RowCap }) {
   const [open, setOpen] = useState(false)
   const { data: detail } = useQuery({
@@ -281,6 +327,7 @@ function CapabilityRow({ cap }: { cap: RowCap }) {
                   </span>
                   <span className="text-xs text-zinc-600">{v.security_status}</span>
                 </summary>
+                <VersionMetrics manifest={v.manifest} />
                 <pre className="max-h-80 overflow-auto border-t border-zinc-800 p-3 font-mono text-xs text-zinc-400">
                   {JSON.stringify(v.manifest, null, 2)}
                 </pre>
