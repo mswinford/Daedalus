@@ -20,6 +20,8 @@ import {
   type AgentSkill,
   type InvokeNodeConfig,
 } from '@/lib/workflowTypes'
+import type { UpdateStatus } from '@/lib/capabilityUpdates'
+import CapabilityVersionBadge from './CapabilityVersionBadge'
 import InvokeCapabilityPicker from './InvokeCapabilityPicker'
 
 interface Props {
@@ -31,6 +33,7 @@ interface Props {
   onErrorHandlingChange: (nodeId: string, enabled: boolean) => void
   onDeleteNode: (nodeId: string) => void
   edges: Edge[]
+  updates?: UpdateStatus[]
 }
 
 // ─── small form primitives ──────────────────────────────────────────────────
@@ -89,7 +92,7 @@ function EndEditor({ config, set }: { config: EndNodeConfig; set: (c: EndNodeCon
   )
 }
 
-function AgentEditor({ config, set, models, tools, prompts }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[]; prompts: PromptDefinition[] }) {
+function AgentEditor({ config, set, models, tools, prompts, nodeId, updates }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[]; prompts: PromptDefinition[]; nodeId: string; updates?: UpdateStatus[] }) {
   const skills = config.skills ?? []
 
   const toggleTool = (id: string) => {
@@ -166,40 +169,44 @@ function AgentEditor({ config, set, models, tools, prompts }: { config: AgentNod
           {skills.length === 0 && (
             <p className="text-xs text-zinc-600">None — skills fold extra prompt + tools into this agent.</p>
           )}
-          {skills.map((s, i) => (
-            <div key={i} className="space-y-1.5 rounded-md border border-zinc-800 p-2">
-              <div className="flex items-center gap-1.5">
-                <input
-                  className={inputCls}
-                  placeholder={`skill_${i + 1}`}
-                  value={s.name ?? ''}
-                  onChange={(e) => updateSkill(i, { name: e.target.value || null })}
-                />
-                <button
-                  onClick={() => set({ ...config, skills: skills.filter((_, j) => j !== i) })}
-                  className="text-red-400 hover:text-red-300"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <textarea
-                className={`${inputCls} min-h-[60px] font-mono text-xs`}
-                placeholder="Skill prompt (appended to the system prompt)"
-                value={s.prompt}
-                onChange={(e) => updateSkill(i, { prompt: e.target.value })}
-              />
-              {tools.length > 0 && (
-                <div className="space-y-1">
-                  {tools.map((t) => (
-                    <label key={t.id} className="flex items-center gap-2 text-sm text-zinc-300">
-                      <input type="checkbox" checked={s.tool_ids.includes(t.id)} onChange={() => toggleSkillTool(i, t.id)} />
-                      {t.name}
-                    </label>
-                  ))}
+          {skills.map((s, i) => {
+            const su = updates?.find((u) => u.kind === 'skill' && u.where === `node:${nodeId} skill:${s.name ?? i}`)
+            return (
+              <div key={i} className="space-y-1.5 rounded-md border border-zinc-800 p-2">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    className={inputCls}
+                    placeholder={`skill_${i + 1}`}
+                    value={s.name ?? ''}
+                    onChange={(e) => updateSkill(i, { name: e.target.value || null })}
+                  />
+                  {su && <CapabilityVersionBadge current={su.currentVersion} latest={su.latestVersion} breaking={su.isBreaking} />}
+                  <button
+                    onClick={() => set({ ...config, skills: skills.filter((_, j) => j !== i) })}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
+                <textarea
+                  className={`${inputCls} min-h-[60px] font-mono text-xs`}
+                  placeholder="Skill prompt (appended to the system prompt)"
+                  value={s.prompt}
+                  onChange={(e) => updateSkill(i, { prompt: e.target.value })}
+                />
+                {tools.length > 0 && (
+                  <div className="space-y-1">
+                    {tools.map((t) => (
+                      <label key={t.id} className="flex items-center gap-2 text-sm text-zinc-300">
+                        <input type="checkbox" checked={s.tool_ids.includes(t.id)} onChange={() => toggleSkillTool(i, t.id)} />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -547,7 +554,7 @@ function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: Invo
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges }: Props) {
+export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges, updates }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -555,17 +562,23 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
   }
 
   const set = (config: NodeConfig) => onConfigChange(node.id, config)
+  const agentStatus = node.type === 'agent' ? updates?.find((u) => u.kind === 'agent' && u.where === `node:${node.id}`) : undefined
 
   return (
     <div className="space-y-3">
       <div className="border-b border-zinc-800 pb-2">
         <p className="text-xs text-zinc-500">Editing node</p>
-        <p className="font-mono text-sm text-zinc-200">{node.id}</p>
+        <p className="flex items-center gap-1.5 font-mono text-sm text-zinc-200">
+          <span className="truncate">{node.id}</span>
+          {agentStatus && (
+            <CapabilityVersionBadge current={agentStatus.currentVersion} latest={agentStatus.latestVersion} breaking={agentStatus.isBreaking} />
+          )}
+        </p>
       </div>
 
       {node.type === 'start' && <StartEditor config={node.config} set={set} />}
       {node.type === 'end' && <EndEditor config={node.config} set={set} />}
-      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} />}
+      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} nodeId={node.id} updates={updates} />}
       {node.type === 'conditional' && <ConditionalEditor config={node.config} set={set} nodeId={node.id} edges={edges} />}
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}

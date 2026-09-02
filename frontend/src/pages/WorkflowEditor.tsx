@@ -14,7 +14,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X } from 'lucide-react'
 
 import { workflowsApi, streamRunEvents, apiErrorMessage, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
@@ -41,6 +41,8 @@ import type { CapabilityKind } from '@/lib/registryApi'
 import RunPanel from '@/components/flow/RunPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
+import CapabilityVersionBadge from '@/components/flow/CapabilityVersionBadge'
+import { useCapabilityUpdates } from '@/lib/useCapabilityUpdates'
 import type { AgentNodeConfig, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
@@ -79,6 +81,11 @@ function WorkflowEditorInner() {
     queryKey: ['workflow', id],
     queryFn: () => workflowsApi.get(id!),
   })
+  const updates = useCapabilityUpdates(workflow ?? null)
+  const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false)
+  useEffect(() => {
+    if (updates.error) setUpdateNoticeDismissed(false)
+  }, [updates.error])
   const navigate = useNavigate()
 
   const syncedIdRef = useRef<string | null>(null)
@@ -496,6 +503,10 @@ function WorkflowEditorInner() {
   }, [id])
 
   if (isLoading) return <div className="p-6 text-zinc-500">Loading...</div>
+  const updateCount = updates.statuses.filter((s) => s.hasUpdate).length
+  const hasBreakingUpdate = updates.statuses.some((s) => s.hasUpdate && s.isBreaking)
+  const wfUpdate = updates.statuses.find((s) => s.kind === 'workflow')
+
   if (isError || !workflow)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950 p-6 text-center">
@@ -524,8 +535,11 @@ function WorkflowEditorInner() {
     <div className="flex h-full flex-col bg-zinc-950">
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <h1 className="font-medium">{workflow.name}</h1>
+          {wfUpdate && (
+            <CapabilityVersionBadge current={wfUpdate.currentVersion} latest={wfUpdate.latestVersion} breaking={wfUpdate.isBreaking} />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -542,6 +556,22 @@ function WorkflowEditorInner() {
             <PackagePlus size={14} />
             Add capability
           </button>
+          {updates.statuses.length > 0 && (
+            <button
+              onClick={updates.check}
+              disabled={updates.checking}
+              title="Check for capability updates"
+              className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={updates.checking ? 'animate-spin' : ''} />
+              Updates
+              {updateCount > 0 && (
+                <span className={`rounded-full px-1.5 text-xs font-semibold ${hasBreakingUpdate ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                  {updateCount}
+                </span>
+              )}
+            </button>
+          )}
           <button
             onClick={() => setShowSecrets(true)}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
@@ -603,6 +633,15 @@ function WorkflowEditorInner() {
           </button>
         </div>
       </header>
+
+      {updates.error && !updateNoticeDismissed && (
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-800 bg-amber-950/20 px-4 py-1.5">
+          <p className="text-xs text-amber-400">Couldn't check for capability updates — {updates.error}</p>
+          <button onClick={() => setUpdateNoticeDismissed(true)} className="shrink-0 text-zinc-500 hover:text-zinc-300">
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       {showInput && (
         <div className="border-b border-zinc-800 bg-zinc-950 px-4 py-2">
@@ -701,6 +740,7 @@ function WorkflowEditorInner() {
             onErrorHandlingChange={handleErrorToggle}
             onDeleteNode={handleDeleteNode}
             edges={edges}
+            updates={updates.statuses}
           />
         </aside>
       </div>
@@ -710,6 +750,7 @@ function WorkflowEditorInner() {
         <ResourcesPanel
           tools={tools}
           models={models}
+          updates={updates.statuses}
           onToolsChange={handleToolsChange}
           onModelsChange={handleModelsChange}
           onOpenRegistry={(kind) => { setShowResources(false); setPickerKind(kind); setShowPicker(true) }}

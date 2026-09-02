@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { Cpu, Layers, PackagePlus, Plus, Trash2, Wrench, X } from 'lucide-react'
 
 import type { ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
+import type { UpdateStatus } from '@/lib/capabilityUpdates'
+import CapabilityVersionBadge from './CapabilityVersionBadge'
 import ToolForm, { IMPL_LABEL } from './ToolForm'
 import ModelForm from './ModelForm'
 
 interface Props {
   tools: ToolDefinition[]
   models: ModelConfig[]
+  updates?: UpdateStatus[]
   onToolsChange: (tools: ToolDefinition[]) => void
   onModelsChange: (models: ModelConfig[]) => void
   onOpenRegistry: (kind: 'tool' | 'model_profile') => void
@@ -21,6 +24,7 @@ const linkBtnCls = 'flex items-center gap-1 text-xs text-indigo-400 hover:text-i
 export default function ResourcesPanel({
   tools,
   models,
+  updates,
   onToolsChange,
   onModelsChange,
   onOpenRegistry,
@@ -73,38 +77,44 @@ export default function ResourcesPanel({
           )}
 
           <div className="space-y-2">
-            {tools.map((t) => (
-              <div key={t.id} className={`rounded-md border ${editingTool?.id === t.id ? 'border-indigo-500' : 'border-zinc-800'} bg-zinc-950 px-3 py-2`}>
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-zinc-200">{t.name}</p>
-                    <p className="truncate text-[11px] text-zinc-500">
-                      {IMPL_LABEL[t.implementation.type]}
-                      {Object.keys(t.parameters).length > 0 && ` · ${Object.keys(t.parameters).length} param(s)`}
-                    </p>
+            {tools.map((t) => {
+              const tu = updates?.find((u) => u.kind === 'tool' && u.where === t.id)
+              return (
+                <div key={t.id} className={`rounded-md border ${editingTool?.id === t.id ? 'border-indigo-500' : 'border-zinc-800'} bg-zinc-950 px-3 py-2`}>
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
+                        <span className="truncate">{t.name}</span>
+                        {tu && <CapabilityVersionBadge current={tu.currentVersion} latest={tu.latestVersion} breaking={tu.isBreaking} />}
+                      </p>
+                      <p className="truncate text-[11px] text-zinc-500">
+                        {IMPL_LABEL[t.implementation.type]}
+                        {Object.keys(t.parameters).length > 0 && ` · ${Object.keys(t.parameters).length} param(s)`}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        onClick={() => { setEditingTool(editingTool?.id === t.id ? null : t); setAddingTool(false) }}
+                        className={rowBtnCls}
+                      >
+                        {editingTool?.id === t.id ? 'Close' : 'Edit'}
+                      </button>
+                      <button
+                        onClick={() => onToolsChange(tools.filter((x) => x.id !== t.id))}
+                        className="rounded p-1 text-zinc-500 hover:text-red-400"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => { setEditingTool(editingTool?.id === t.id ? null : t); setAddingTool(false) }}
-                      className={rowBtnCls}
-                    >
-                      {editingTool?.id === t.id ? 'Close' : 'Edit'}
-                    </button>
-                    <button
-                      onClick={() => onToolsChange(tools.filter((x) => x.id !== t.id))}
-                      className="rounded p-1 text-zinc-500 hover:text-red-400"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+                  {editingTool?.id === t.id && (
+                    <div className="mt-2">
+                      <ToolForm initial={t} onSave={saveTool} onCancel={() => setEditingTool(null)} />
+                    </div>
+                  )}
                 </div>
-                {editingTool?.id === t.id && (
-                  <div className="mt-2">
-                    <ToolForm initial={t} onSave={saveTool} onCancel={() => setEditingTool(null)} />
-                  </div>
-                )}
-              </div>
-            ))}
+              )
+            })}
 
             {addingTool && (
               <ToolForm initial={null} onSave={saveTool} onCancel={() => setAddingTool(false)} />
@@ -132,38 +142,44 @@ export default function ResourcesPanel({
           )}
 
           <div className="space-y-2">
-            {models.map((m) => (
-              <div key={m.id} className={`rounded-md border ${editingModel?.id === m.id ? 'border-indigo-500' : 'border-zinc-800'} bg-zinc-950 px-3 py-2`}>
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-zinc-200">{m.name}</p>
-                    <p className="truncate text-[11px] text-zinc-500">
-                      {m.model}
-                      {m.base_url ? ` · ${m.base_url}` : ''}
-                    </p>
+            {models.map((m) => {
+              const mu = updates?.find((u) => u.kind === 'model_profile' && u.where === m.id)
+              return (
+                <div key={m.id} className={`rounded-md border ${editingModel?.id === m.id ? 'border-indigo-500' : 'border-zinc-800'} bg-zinc-950 px-3 py-2`}>
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
+                        <span className="truncate">{m.name}</span>
+                        {mu && <CapabilityVersionBadge current={mu.currentVersion} latest={mu.latestVersion} breaking={mu.isBreaking} />}
+                      </p>
+                      <p className="truncate text-[11px] text-zinc-500">
+                        {m.model}
+                        {m.base_url ? ` · ${m.base_url}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        onClick={() => { setEditingModel(editingModel?.id === m.id ? null : m); setAddingModel(false) }}
+                        className={rowBtnCls}
+                      >
+                        {editingModel?.id === m.id ? 'Close' : 'Edit'}
+                      </button>
+                      <button
+                        onClick={() => onModelsChange(models.filter((x) => x.id !== m.id))}
+                        className="rounded p-1 text-zinc-500 hover:text-red-400"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => { setEditingModel(editingModel?.id === m.id ? null : m); setAddingModel(false) }}
-                      className={rowBtnCls}
-                    >
-                      {editingModel?.id === m.id ? 'Close' : 'Edit'}
-                    </button>
-                    <button
-                      onClick={() => onModelsChange(models.filter((x) => x.id !== m.id))}
-                      className="rounded p-1 text-zinc-500 hover:text-red-400"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+                  {editingModel?.id === m.id && (
+                    <div className="mt-2">
+                      <ModelForm initial={m} onSave={saveModel} onCancel={() => setEditingModel(null)} />
+                    </div>
+                  )}
                 </div>
-                {editingModel?.id === m.id && (
-                  <div className="mt-2">
-                    <ModelForm initial={m} onSave={saveModel} onCancel={() => setEditingModel(null)} />
-                  </div>
-                )}
-              </div>
-            ))}
+              )
+            })}
 
             {addingModel && (
               <ModelForm initial={null} onSave={saveModel} onCancel={() => setAddingModel(false)} />
