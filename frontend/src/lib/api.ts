@@ -92,6 +92,23 @@ export interface PausedRunSummary {
   started_at?: number
 }
 
+export interface TemplateSummary {
+  id: string
+  name: string
+  description?: string | null
+}
+
+export const templatesApi = {
+  list: () => api.get<TemplateSummary[]>('/templates').then(r => r.data),
+  get: (id: string) => api.get<Workflow>(`/templates/${id}`).then(r => r.data),
+}
+
+/** Fetch a bundled template and create a new workflow from it (fresh id, keeps the template's name). */
+export async function instantiateTemplate(templateId: string): Promise<Workflow> {
+  const tpl = await templatesApi.get(templateId)
+  return workflowsApi.create({ ...tpl, id: `workflow_${Date.now()}` })
+}
+
 export interface ValidationIssue {
   level: 'error' | 'warning'
   code: string

@@ -30,7 +30,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - Capability Manifest schema (`schema/capability.py`) with six core kinds: `tool`, `prompt`, `model_profile`, `skill`, `agent`, `workflow`; composites reference other capabilities by `name@version`.
 - Git-backed store + SQLite FTS5 index: immutable versions, lifecycle state machine (draft → review → approved → published → deprecated → retired).
 - Publish (git commit + index sync), search, and use APIs on a separate server (`127.0.0.1:3010`).
-- CLI: `ai-forge-registry serve | publish <files…> | seed` — publishing works offline; six sample capabilities (one per kind) ship in `registry/samples/`.
+- CLI: `ai-forge-registry serve | publish <files…> | seed` — publishing works offline; eleven sample capabilities (one per core kind + the `forge/*` GitHub set) ship in `registry/samples/`.
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
 
 **Tests:** 200 passing backend tests (`python -m pytest -q`); frontend typechecks clean.
@@ -230,7 +230,14 @@ Point an agent at any OpenAI-compatible endpoint. For a local model via Ollama:
 }
 ```
 
-Agent nodes support a tool-calling loop: give the node `tool_ids` referencing workflow-level `tools[]`, and it will call tools up to `max_iterations` times before producing its final answer. See `samples/sample-order-assistant.json` for a complete example with sandboxed tools.
+Agent nodes support a tool-calling loop: give the node `tool_ids` referencing workflow-level `tools[]`, and it will call tools up to `max_iterations` times before producing its final answer. See `backend/app/templates/sample-order-assistant.json` for a complete example with sandboxed tools.
+
+### Workflow templates
+
+Bundled starter workflows live in `backend/app/templates/` (conditional routing, agent + transform,
+sandboxed tools, and the GitHub "user story → PR" agent). New workflows can be created from any of
+them via `GET /api/templates` — the sidebar's "New from template" picker and the EmptyState cards
+fetch a template and create a new workflow from it with a fresh id.
 
 ### Sandboxed custom function
 
@@ -262,7 +269,7 @@ A thin **system-of-record + discovery** layer above AI Forge (R1 of the [platfor
 |---|---|
 | `serve` | Start the registry server on `127.0.0.1:3010` (default subcommand) |
 | `publish <files…>` | Validate manifest JSON files, write them into the git repo, commit once, sync the index. Idempotent; same `name@version` with different content is rejected. Works offline. |
-| `seed` | Publish the six bundled sample capabilities from `registry/samples/`. |
+| `seed` | Publish the eleven bundled sample capabilities from `registry/samples/`. |
 
 **Sample capabilities** (seeded by `ai-forge-registry seed`; they cross-reference each other into a composition chain):
 
@@ -274,6 +281,8 @@ A thin **system-of-record + discovery** layer above AI Forge (R1 of the [platfor
 | `acme/tool-selftest-skill` | skill | Instructions + references `echo-tool` |
 | `acme/selftest-agent` | agent | References the model profile, echo tool, and self-test skill — the full dependency chain |
 | `acme/echo-workflow` | workflow | A complete `start → agent → end` graph using the builtin echo tool |
+| `forge/github-create-branch` / `-read-file` / `-write-file` / `-create-pr` | tool | The four `github_*` builtins (need the `GITHUB_TOKEN` secret) |
+| `forge/github-toolkit` | skill | One-click bundle of all four GitHub tools — the "tool collection" pattern |
 
 **Registry API** (base URL `http://127.0.0.1:3010`; proxied at `/registry` by the Vite dev server):
 
@@ -311,6 +320,8 @@ Base URL: `http://127.0.0.1:3000`
 | `GET` | `/api/secrets` | List secret names + source (values are never returned) |
 | `PUT` | `/api/secrets` | Upsert a secret |
 | `DELETE` | `/api/secrets/{name}` | Delete a secret |
+| `GET` | `/api/templates` | List bundled workflow templates (id, name, description) |
+| `GET` | `/api/templates/{id}` | Get one template's full workflow JSON |
 
 ### Workflow JSON shape
 

@@ -37,7 +37,7 @@ The original seven phases consolidate into three product releases (as the source
 Prove the #1 value: **reuse rate** — do new AI projects consume an existing capability instead of rebuilding?
 - ✅ Capability Manifest schema + all core `kind` specs (`schema/capability.py`).
 - ✅ Registry service: git-backed store, SQLite index (FTS5), immutable versions, lifecycle state machine.
-- ✅ Publish (git commit + index) + search + use APIs; offline CLI (`publish` / `seed`) with six sample capabilities in `registry/samples/`.
+- ✅ Publish (git commit + index) + search + use APIs; offline CLI (`publish` / `seed`) with eleven sample capabilities in `registry/samples/`.
 - ✅ AI Forge **Capabilities** view: browse/search → detail → one-click **Use** (inline import into a target workflow; name-based secret/model remapping), plus per-kind "Use in…" import affordances on agent nodes (`prompt_ref` + `skills[]`).
 - **KPI:** % of new workflows that reuse a registered capability.
 

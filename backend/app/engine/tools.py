@@ -220,6 +220,32 @@ async def _builtin_github_write_file(arguments: dict, state: dict) -> Any:
     }
 
 
+@register_builtin("github_read_file")
+async def _builtin_github_read_file(arguments: dict, state: dict) -> Any:
+    guard = _gh_precheck(arguments, ("owner", "repo", "path"))
+    if guard:
+        return guard
+    owner, repo = arguments["owner"], arguments["repo"]
+    ref = arguments.get("ref") or None
+    path = _quote_path(str(arguments["path"]))
+    async with _github_client(get_secret(_GITHUB_SECRET)) as client:  # type: ignore[arg-type]
+        if not ref:
+            r = await client.get(f"/repos/{owner}/{repo}")
+            if r.status_code != 200:
+                return _gh_error(r)
+            ref = r.json().get("default_branch") or "main"
+        r = await client.get(
+            f"/repos/{owner}/{repo}/contents/{path}",
+            params={"ref": ref},
+            headers={"Accept": "application/vnd.github.raw+json"},
+        )
+        if r.status_code == 404:
+            return {"error": f"file not found: {arguments['path']} on {ref}"}
+        if r.status_code != 200:
+            return _gh_error(r)
+    return {"path": arguments["path"], "ref": ref, "content": r.text}
+
+
 @register_builtin("github_create_pr")
 async def _builtin_github_create_pr(arguments: dict, state: dict) -> Any:
     guard = _gh_precheck(arguments, ("owner", "repo", "title", "head"))

@@ -128,7 +128,11 @@ def test_execute_http_missing_url_value():
     assert "missing values" in json.loads(result)["error"]
 
 
-def test_execute_http_missing_header_env(monkeypatch):
+def test_execute_http_missing_header_env(monkeypatch, tmp_path):
+    from app import secrets as secrets_mod
+    # Isolate the secrets store — a real GITHUB_TOKEN in ~/.ai-forge/secrets.json
+    # would otherwise resolve the placeholder and defeat the test.
+    monkeypatch.setattr(secrets_mod, "_secrets_path", lambda: tmp_path / "no-secrets.json")
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     tool = ToolDefinition(
         id="t1", name="get_repo", description="Get a repo",

@@ -216,7 +216,7 @@ Tools are defined at workflow level (`tools[]`) and attached to agents via `tool
 
 The live event stream (`WS /api/runs/{id}/events`) replays past events on connect, then streams new ones: `node_start`, `node_end` (duration + summarized output), `llm_call` (per-call token counts), `human_request`, and a terminal `run_end` / fatal `node_error`.
 
-## 8. Worked example: `samples/sample-order-assistant.json`
+## 8. Worked example: `backend/app/templates/sample-order-assistant.json`
 
 Workflow: `start → assistant (agent, 2 tools) → format (transform template) → end`.
 Run input: `{"request": "How much is order A-1002 with 8% tax?"}`

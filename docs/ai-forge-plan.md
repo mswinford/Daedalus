@@ -97,9 +97,11 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   and `${NAME}` placeholders in http tool headers. REST API: GET list (names + source only), PUT
   upsert, DELETE. Frontend: "Secrets" button opens a modal panel for CRUD. Accessible via "Secrets"
   button in top bar.
-- **Sample workflows**: `samples/sample-grade.json` (conditional routing demo),
-  `samples/sample-agent.json` (agent node with LLM call + transform), and
-  `samples/sample-order-assistant.json` (agent + two sandboxed `custom_function` tools).
+- **Workflow templates**: `backend/app/templates/` ships `sample-grade.json` (conditional routing demo),
+  `sample-agent.json` (agent node with LLM call + transform), `sample-order-assistant.json`
+  (agent + two sandboxed `custom_function` tools), and `github-pr-agent.json` (user story → GitHub PRs
+  with a human approval gate). New workflows can be created from any template via `GET /api/templates`
+  (sidebar "New from template" + EmptyState cards); instantiation is a normal `POST /workflows` with a fresh id.
 - **Human-in-loop nodes**: `interrupt()` in builder pauses the graph; SQLite checkpointer
   (`AsyncSqliteSaver`, one connection per run on the shared file) with `thread_id` preserves state
   across restarts — startup recovery rebuilds paused runs from checkpoints and re-arms timeouts;
@@ -122,7 +124,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - [x] **Agent non-system message fix** — if no user/assistant messages exist in state,
   synthesize one from `state["data"]` (JSON-serialized) so the LLM API is always satisfied.
 - [x] **Save toast** — ephemeral "Saved" indicator appears on successful save.
-- [x] **Sample agent workflow** — `samples/sample-agent.json` demonstrates agent → transform flow.
+- [x] **Sample agent workflow** — `backend/app/templates/sample-agent.json` demonstrates agent → transform flow.
 
 ### What is deferred by design
 - **Phase 2 (remaining)** — test-connection endpoint.
@@ -184,33 +186,45 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   - Tests: `backend/tests/test_error_branches.py` (routing, interrupt passthrough, all validation
     rules). Per-node retry logic (max_retries / backoff) remains a separate future increment.
 
-### Deferred experiment: GitHub "user story → PR" agent sample
-Held off until there are more tools to work with (decided 2026-08-28). Goal: a sample
-workflow where an agent intakes a user story, makes changes in a GitHub repo, and opens a PR.
+### GitHub "user story → PR" agent template — DONE (2026-09-01)
+Shipped as `backend/app/templates/github-pr-agent.json`, creatable from the sidebar / EmptyState
+template pickers (see "Workflow templates" above). Final shape — a multi-node pipeline with a
+human gate (variant of Option B; single-agent Option A was rejected because it skips the
+governance moment, which is the point of the demo):
 
-Two candidate shapes:
-- **Option A — single agent + tools (closest to what works today):**
-  `start(user_story, repo) → agent "coder" → transform (format PR link) → end`.
-  One agent node, generous `max_iterations`, system prompt describing the procedure
-  (create branch → implement → commit/push → open PR), driven by 3–4 GitHub tools.
-- **Option B — multi-node pipeline (more control):**
-  `start → agent "planner" (story → data.plan) → agent "implementer" (executes via github tools)
-  → conditional (regex on output: PR created?) → transform / end`.
-  Agents have isolated conversations (`messages_by_node`) — each starts fresh, sharing only
-  `state["data"]` for structured handoff. Clean for multi-repo or sequential specialist patterns.
+`start(request) → agent "implement" (branch + read/write files) → transform (report → data.implementation_report)
+→ human_in_loop (approve/reject + optional pr_notes) → agent "finalize" (one PR per repo) → end`.
+
+Design decisions:
+- **Single free-form `request` input** — multi-repo capable ("fix X in octo/a and add Y to octo/b");
+  repos are parsed as `owner/name`, never guessed. Trade-off accepted: no up-front state validation
+  of the repo name; a missing repo surfaces as a clear builtin error in the run trace.
+- **The implementer deliberately lacks `github_create_pr`** so the approval gate actually gates;
+  the finalizer gets it explicitly plus the `forge/github-toolkit` skill (registry reuse story,
+  shown with provenance in the ConfigPanel).
+- **Handoff via `state["output"]` → transform template → `data.implementation_report`**, which the
+  finalizer (isolated conversation) receives as its first message. The implementer's prompt requires
+  a structured per-repo report line (`branch | files | PR title | PR body`) that the finalizer parses.
+- Rejecting the approval fails the run; `timeout_seconds` is null (indefinite wait — no accidental
+  demo failure). Requires the `GITHUB_TOKEN` secret and a configured model (the template ships a
+  placeholder `gpt-4o-mini` entry to be pointed at the user's own model).
+- **Read-before-write** (added after the first demo run, where the agent could not modify existing
+  files because writes replace whole files): the new `github_read_file` builtin is in the implementer's
+  tool set and its prompt mandates reading an existing file before modifying it.
 
 Gaps to close first:
 - [x] **URL templating for `http` tools** — done (see "Harden the http tool" above).
 - [x] **Secrets store** — done; GitHub token stored in `~/.ai-forge/secrets.json`, referenced via
   `${GITHUB_TOKEN}` in headers or `get_secret("GITHUB_TOKEN")` in sandbox.
-- [x] **`github_*` builtins** — done: `github_create_branch`, `github_write_file`,
+- [x] **`github_*` builtins** — done: `github_create_branch`, `github_read_file`, `github_write_file`,
   `github_create_pr` registered via `@register_builtin` in `backend/app/engine/tools.py`
   (token resolves via `get_secret("GITHUB_TOKEN")` and is never a tool argument; GHES via the
   `GITHUB_BASE_URL` env var). Published to the registry as forge/github-create-branch,
-  -write-file, -create-pr plus the forge/github-toolkit skill (one-click bundle of all three —
-  the "tool collection" pattern: a skill whose tools[] pool-adds every member). Shipped
-  alongside: import-time missing-secret warnings (both apply paths) and the publish-time
-  composite `secrets_required` coverage check.
+  -read-file, -write-file, -create-pr plus the forge/github-toolkit skill (one-click bundle of all
+  four — the "tool collection" pattern: a skill whose tools[] pool-adds every member; toolkit is at
+  2.0.0 because adding the read tool is a ref-set change = major per the settled breaking-change
+  rule). Shipped alongside: import-time missing-secret warnings (both apply paths) and the
+  publish-time composite `secrets_required` coverage check.
 
 ### Phase 2 — Design (completed)
 

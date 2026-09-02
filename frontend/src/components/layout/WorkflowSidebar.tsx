@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Boxes, Hourglass, Plus, Search, Trash2 } from 'lucide-react'
+import { Boxes, Hourglass, LayoutTemplate, Plus, Search, Trash2 } from 'lucide-react'
 
-import { apiErrorMessage, workflowsApi, type PausedRunSummary, type WorkflowSummary } from '@/lib/api'
+import {
+  apiErrorMessage,
+  instantiateTemplate,
+  templatesApi,
+  workflowsApi,
+  type PausedRunSummary,
+  type WorkflowSummary,
+} from '@/lib/api'
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now())
@@ -94,7 +101,13 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [newName, setNewName] = useState('')
+  const [showTemplates, setShowTemplates] = useState(false)
   const onCapabilities = location.pathname === '/capabilities'
+
+  const { data: templates } = useQuery({
+    queryKey: ['templates'],
+    queryFn: () => templatesApi.list(),
+  })
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['workflows'],
@@ -123,6 +136,15 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
       setNewName('')
+      navigate(`/workflows/${created.id}`)
+    },
+  })
+
+  const instantiateMutation = useMutation({
+    mutationFn: (templateId: string) => instantiateTemplate(templateId),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setShowTemplates(false)
       navigate(`/workflows/${created.id}`)
     },
   })
@@ -177,8 +199,34 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
             <Plus size={16} />
           </button>
         </form>
+        <button
+          onClick={() => setShowTemplates((v) => !v)}
+          disabled={instantiateMutation.isPending}
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
+        >
+          <LayoutTemplate size={13} />
+          {showTemplates ? 'Hide templates' : 'New from template...'}
+        </button>
+        {showTemplates && (
+          <div className="space-y-0.5">
+            {templates?.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => instantiateMutation.mutate(t.id)}
+                disabled={instantiateMutation.isPending}
+                title={t.description ?? undefined}
+                className="w-full rounded-md px-2 py-1.5 text-left text-sm text-zinc-300 transition-colors hover:bg-zinc-900 disabled:opacity-40"
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+        )}
         {createMutation.error && (
           <p className="text-xs text-red-400">Failed to create workflow</p>
+        )}
+        {instantiateMutation.error && (
+          <p className="text-xs text-red-400">Failed to create from template: {apiErrorMessage(instantiateMutation.error)}</p>
         )}
         {deleteMutation.error && (
           <p className="text-xs text-red-400">Failed to delete workflow: {apiErrorMessage(deleteMutation.error)}</p>

@@ -1,20 +1,22 @@
 {
   "name": "forge/github-toolkit",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "kind": "skill",
-  "description": "The GitHub toolkit: branch creation, file writing, and pull request opening as one attachable skill. Add it to an agent node once and all three tools land in the workflow's tool pool. Requires the GITHUB_TOKEN secret and AI Forge's github_* builtins (ship with the backend).",
+  "description": "The GitHub toolkit: branch creation, file reading, file writing, and pull request opening as one attachable skill. Add it to an agent node once and all four tools land in the workflow's tool pool. Requires the GITHUB_TOKEN secret and AI Forge's github_* builtins (ship with the backend).",
   "tags": ["github", "composite", "toolkit"],
   "spec": {
     "kind": "skill",
-    "prompt": "You have GitHub tools for working in a repository. Follow this discipline: create a feature branch before writing any files (never commit to the default branch), write or update files with clear, specific commit messages, and open a pull request when the work is complete. When done, report the PR URL.",
+    "prompt": "You have GitHub tools for working in a repository. Follow this discipline: create a feature branch before writing any files (never commit to the default branch), read existing files before modifying them (writes replace whole files), write or update files with clear, specific commit messages, and open a pull request when the work is complete. When done, report the PR URL.",
     "tools": [
       { "name": "forge/github-create-branch", "version": "1.0.0" },
+      { "name": "forge/github-read-file", "version": "1.0.0" },
       { "name": "forge/github-write-file", "version": "1.0.0" },
       { "name": "forge/github-create-pr", "version": "1.0.0" }
     ]
   },
   "dependencies": [
     { "name": "forge/github-create-branch", "version": "1.0.0" },
+    { "name": "forge/github-read-file", "version": "1.0.0" },
     { "name": "forge/github-write-file", "version": "1.0.0" },
     { "name": "forge/github-create-pr", "version": "1.0.0" }
   ],

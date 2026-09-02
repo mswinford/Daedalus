@@ -189,7 +189,7 @@ registry/
   main.py        # FastAPI app + lifespan (open DB, sync-on-start)
   cli.py         # serve / publish / seed (publish works offline)
   api/           # capabilities.py, search.py, publish.py, use.py
-  samples/       # six sample manifests (one per core kind) for `seed`
+  samples/       # bundled sample manifests (one per core kind + the forge/* GitHub set) for `seed`
 ```
 DB: `capability_versions(name, version, kind, manifest_json, artifact_json, stage, security_status, source_commit, created_at, PK(name,version))` — **immutable** — plus an FTS5 table over name/description/tags.
 
@@ -224,7 +224,7 @@ GET    /registry/capabilities/{name}/use?version=&inline=true
 2. ✅ Registry skeleton: `config.py`, `db.py` (SQLite + schema), `main.py` + `/health`.
 3. ✅ `store.py` + `indexer.py` (git→DB, FTS5); tests against a temp git repo.
 4. ✅ API: capabilities / search / publish / use; TestClient tests.
-5. ✅ Publish mechanism (git commit + sync) — also exposed offline via the CLI (`ai-forge-registry publish <files…>` / `seed`); ten sample manifests ship in `registry/samples/` (one per core kind, cross-referencing into a composition chain, plus the `forge/*` GitHub set: three builtin-backed tools + the `forge/github-toolkit` skill that bundles them).
+5. ✅ Publish mechanism (git commit + sync) — also exposed offline via the CLI (`ai-forge-registry publish <files…>` / `seed`); eleven sample manifests ship in `registry/samples/` (one per core kind, cross-referencing into a composition chain, plus the `forge/*` GitHub set: four builtin-backed tools + the `forge/github-toolkit` skill that bundles them — toolkit 2.0.0 added `forge/github-read-file`, a ref-set change = major per the settled breaking-change rule).
 6. ✅ Frontend Capabilities view (filter by kind) + per-kind "Use" actions; `tsc --noEmit` + build.
 7. ✅ AI Forge import affordances — `prompt_ref` + `skills[]` on agent nodes (schema + builder fold-in at graph-build + validation), frontend ConfigPanel editors, registry-side ref inliner (`registry/inline.py`, `/use?inline=true`), and per-kind "Use in…" import actions in the Capabilities view.
 8. ✅ Run both servers together — `scripts/dev.sh` boots backend + registry + Vite (commit `81dd5ee`); README documents the registry (no docker-compose needed).

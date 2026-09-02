@@ -20,6 +20,7 @@ class FakeGitHub:
         self.head_sha = "a" * 40
         self.refs: set[str] = set()
         self.files: dict[tuple[str, str, str, str], str] = {}  # (owner, repo, branch, path) -> sha
+        self.contents: dict[tuple[str, str, str, str], str] = {}  # same key -> raw content
         self.pulls: list[dict] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -48,8 +49,10 @@ class FakeGitHub:
             file_path = "/".join(rest[1:])
             key = (owner, repo, request.url.params.get("ref", ""), file_path)
             if method == "GET":
-                if key in self.files:
-                    return httpx.Response(200, json={"sha": self.files[key]})
+                if key in self.files or key in self.contents:
+                    if "raw" in request.headers.get("accept", ""):
+                        return httpx.Response(200, text=self.contents.get(key, ""))
+                    return httpx.Response(200, json={"sha": self.files.get(key, "x")})
                 return httpx.Response(404, json={"message": "Not Found"})
             # PUT — create or update
             body = json.loads(request.content)
@@ -170,6 +173,39 @@ def test_write_file_requires_branch(monkeypatch):
         **ARGS, "path": "a.txt", "content": "x", "message": "m",
     })
     assert "branch" in out["error"]
+    assert fake.requests == []  # no HTTP at all
+
+
+# --- github_read_file ---
+
+def test_read_file_returns_raw_content_from_default_branch(monkeypatch):
+    fake = FakeGitHub()
+    fake.files[("acme", "widget", "main", "app.py")] = "sha1"
+    fake.contents[("acme", "widget", "main", "app.py")] = "print('hello')\n"
+    out, _ = run_builtin(monkeypatch, fake, "github_read_file", {**ARGS, "path": "app.py"})
+    assert out == {"path": "app.py", "ref": "main", "content": "print('hello')\n"}
+    get = [r for r in fake.requests if r.url.path.endswith("/contents/app.py")][0]
+    assert "raw" in get.headers["accept"]  # raw media type, not the JSON contents API
+
+
+def test_read_file_explicit_ref(monkeypatch):
+    fake = FakeGitHub()
+    fake.contents[("acme", "widget", "v1.0", "README.md")] = "# v1"
+    out, _ = run_builtin(monkeypatch, fake, "github_read_file", {**ARGS, "path": "README.md", "ref": "v1.0"})
+    assert out["content"] == "# v1" and out["ref"] == "v1.0"
+    assert "/repos/acme/widget" not in [r.url.path for r in fake.requests]  # no default-branch lookup
+
+
+def test_read_file_not_found(monkeypatch):
+    fake = FakeGitHub()
+    out, _ = run_builtin(monkeypatch, fake, "github_read_file", {**ARGS, "path": "nope.py"})
+    assert "file not found" in out["error"] and "main" in out["error"]
+
+
+def test_read_file_missing_path(monkeypatch):
+    fake = FakeGitHub()
+    out, _ = run_builtin(monkeypatch, fake, "github_read_file", {**ARGS})
+    assert "path" in out["error"]
     assert fake.requests == []  # no HTTP at all
 
 

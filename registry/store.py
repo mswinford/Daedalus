@@ -1,7 +1,10 @@
 """Version store — immutable capability version rows + lifecycle transitions.
 
-A published name@version row is never rewritten: re-publishing the same
-identity with different content is an error (git history is the amend path).
+A published name@version row's *content* is never rewritten: re-publishing the
+same identity with different content is an error (git history is the amend
+path). The one exception is a format migration — when the stored JSON is
+semantically identical to the new one but serializes differently under the
+current model (schema added default fields), the row is re-serialized in place.
 Lifecycle stage and security status are mutable *columns* — they track the
 governance state of a version without touching its immutable manifest bytes.
 """
@@ -70,6 +73,29 @@ async def upsert_version(
     new_manifest_json = json.dumps(manifest.model_dump(mode="json"), sort_keys=True)
     if rows:
         if rows[0]["manifest_json"] == new_manifest_json:
+            return False
+        # Schema evolution: a row written under an older model serializes
+        # differently (new default fields) even when the content is identical.
+        # Re-validate the stored row through the current model — if it
+        # round-trips to the same dump, this is a format migration, not a
+        # content change: rewrite the row in place and treat it as a no-op.
+        try:
+            stored = CapabilityManifest.model_validate_json(rows[0]["manifest_json"])
+            stored_dump = json.dumps(stored.model_dump(mode="json"), sort_keys=True)
+        except Exception:
+            stored_dump = None
+        if stored_dump == new_manifest_json:
+            await db.conn.execute(
+                "UPDATE capability_versions SET manifest_json=?, artifact_json=?"
+                " WHERE name=? AND version=?",
+                (
+                    new_manifest_json,
+                    json.dumps(extract_artifact(manifest), sort_keys=True),
+                    name,
+                    version,
+                ),
+            )
+            await db.conn.commit()
             return False
         raise VersionConflictError(f"{name}@{version} already exists with different content")
 

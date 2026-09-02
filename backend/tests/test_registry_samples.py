@@ -20,7 +20,7 @@ def _sample_manifests() -> list[CapabilityManifest]:
 
 def test_samples_all_validate_and_cover_core_kinds():
     manifests = _sample_manifests()
-    assert len(manifests) == 10
+    assert len(manifests) == len(list(SAMPLES_DIR.glob("*.json")))
     assert {m.kind.value for m in manifests} == CORE_KINDS
 
 
@@ -65,14 +65,14 @@ def _count_rows(db_path) -> int:
 def test_seed_publishes_all_samples(isolated_registry):
     rc = _publish(sorted(SAMPLES_DIR.glob("*.json")))
     assert rc == 0
-    assert _count_rows(isolated_registry / "registry.db") == 10
+    assert _count_rows(isolated_registry / "registry.db") == len(list(SAMPLES_DIR.glob("*.json")))
 
 
 def test_seed_is_idempotent(isolated_registry):
     samples = sorted(SAMPLES_DIR.glob("*.json"))
     assert _publish(samples) == 0
     assert _publish(samples) == 0
-    assert _count_rows(isolated_registry / "registry.db") == 10
+    assert _count_rows(isolated_registry / "registry.db") == len(list(SAMPLES_DIR.glob("*.json")))
 
 
 def test_publish_conflict_rejected(isolated_registry):
@@ -86,7 +86,7 @@ def test_publish_conflict_rejected(isolated_registry):
     bad.write_text(json.dumps(tampered))
 
     assert _publish([bad]) == 1
-    assert _count_rows(isolated_registry / "registry.db") == 10
+    assert _count_rows(isolated_registry / "registry.db") == len(list(SAMPLES_DIR.glob("*.json")))
 
 
 def test_publish_invalid_manifest_rejected(isolated_registry):
@@ -101,4 +101,4 @@ def test_cli_seed_command(isolated_registry, monkeypatch):
     with pytest.raises(SystemExit) as e:
         main()
     assert e.value.code == 0
-    assert _count_rows(isolated_registry / "registry.db") == 10
+    assert _count_rows(isolated_registry / "registry.db") == len(list(SAMPLES_DIR.glob("*.json")))

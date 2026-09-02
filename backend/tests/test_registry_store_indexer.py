@@ -1,5 +1,6 @@
 """Tests for the registry version store and git indexer."""
 import asyncio
+import json
 import shutil
 
 import pytest
@@ -78,6 +79,43 @@ def test_upsert_conflict_on_different_content(db):
         await upsert_version(db, _wf_manifest())
         with pytest.raises(VersionConflictError):
             await upsert_version(db, _wf_manifest(desc="different content"))
+    asyncio.run(scenario())
+
+
+def test_upsert_format_migration_reserializes_in_place(db):
+    """A row written under an older model (missing default fields) is
+    semantically identical on re-sync — no conflict; the row is re-serialized
+    in place and the upsert is a no-op."""
+    from schema.models import Node, StartNodeConfig
+
+    async def scenario():
+        wf = Workflow(
+            id="w", name="w",
+            nodes=[Node(id="start", type="start", config=StartNodeConfig(input_fields=["message"]))],
+        )
+        m = CapabilityManifest(
+            name="acme/wf2", version="1.0.0", description="Demo", tags=["demo"],
+            kind="workflow", spec={"kind": "workflow", "workflow": wf.model_dump()},
+            interface={"type": "ai_forge_workflow"}, governance={"owner": "acme"},
+            stage=LifecycleStage.DRAFT, created_at=1700000002.0,
+        )
+        await upsert_version(db, m)
+
+        # Simulate a row published before Node.error_handling existed.
+        rows = await db.conn.execute_fetchall("SELECT manifest_json FROM capability_versions")
+        old = json.loads(rows[0]["manifest_json"])
+        for node in old["spec"]["workflow"]["nodes"]:
+            node.pop("error_handling", None)
+        await db.conn.execute(
+            "UPDATE capability_versions SET manifest_json=?", (json.dumps(old, sort_keys=True),)
+        )
+        await db.conn.commit()
+
+        assert await upsert_version(db, m) is False  # no-op, not a conflict
+
+        rows = await db.conn.execute_fetchall("SELECT manifest_json FROM capability_versions")
+        fresh = json.loads(rows[0]["manifest_json"])
+        assert fresh["spec"]["workflow"]["nodes"][0].get("error_handling") is False
     asyncio.run(scenario())
 
 
