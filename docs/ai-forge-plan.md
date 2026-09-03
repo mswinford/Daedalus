@@ -38,7 +38,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > immediately and its checkpoint thread is deleted (indefinite HIL waits can no longer accumulate
 > as zombie approvals across restarts); a running run stops at the next super-step boundary;
 > cancelled runs stay inspectable but are excluded from capability metrics aggregation.
-> Next up: remote invocation over HTTP, SQLite → Postgres (ROADMAP.md R2 remainder). Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
+> Next up: `eval_suite` kind, SQLite → Postgres (ROADMAP.md R2 remainder). Remote invocation settled by design (2026-09-03) — workflows are always embedded; remote services are invoked as opaque `http` tools. Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
 
