@@ -72,6 +72,11 @@ class ModelConfig(BaseModel):
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
     )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this entry from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
+    )
 
 
 # ─── Tool Definition ────────────────────────────────────────────────────────
@@ -105,6 +110,11 @@ class ToolDefinition(BaseModel):
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
     )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this entry from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
+    )
 
 
 class ToolImplementation(BaseModel):
@@ -130,6 +140,11 @@ class PromptDefinition(BaseModel):
     )
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
+    )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this entry from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
     )
 
 
@@ -181,6 +196,11 @@ class AgentSkill(BaseModel):
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
     )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this skill from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
+    )
 
 
 class AgentNodeConfig(BaseModel):
@@ -205,6 +225,11 @@ class AgentNodeConfig(BaseModel):
     )
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
+    )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this agent node from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
     )
 
 
@@ -419,6 +444,11 @@ class Workflow(BaseModel):
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
     )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this workflow from the registry "
+                    "(newest published version within the same major) instead of using the saved copy",
+    )
 
 
 # ─── Run Types ───────────────────────────────────────────────────────────────
@@ -448,6 +478,7 @@ class RunEvent(BaseModel):
         "human_respond",
         "human_timeout",
         "retry",
+        "capability_notice",
     ]
     node_id: Optional[str] = None
     data: dict[str, Any] = Field(default_factory=dict)

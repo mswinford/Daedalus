@@ -10,10 +10,15 @@ Resolution is injected — (name, version) -> (resolved_version, use_response) �
 so tests stub it and production wires the registry client. Resolved versions
 are pinned per run by prepare_workflow_for_run(), so every rebuild (resume,
 restart recovery) produces an identical structure that matches checkpoints.
+
+Live refs: pool entries with track_latest are re-resolved from the registry at
+run start (newest published version within the same major as the stamped one)
+and swapped into a run-scoped copy; the saved workflow JSON is never mutated.
 """
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
+from schema.capability import semver_key
 from schema.models import (
     Edge,
     InvokeExitNodeConfig,
@@ -63,26 +68,142 @@ def prepare_workflow_for_run(
     pins: dict[str, str] | None = None,
     client=None,
 ):
-    """Resolve invoke refs for a run and expand.
+    """Resolve capability refs for a run and expand.
 
-    Returns (expanded_workflow, invocations, pins). Pins map capability name →
-    resolved version; stored on the run so resume/restart re-expand identically.
-    A workflow without invoke nodes passes through untouched.
+    Returns (expanded_workflow, invocations, pins, notices). Pins map capability
+    name → resolved version; stored on the run so resume/restart re-expand
+    identically. Live-tracked pool entries (track_latest) are re-resolved from
+    the registry at run start — newest published version within the same major
+    as the stamped one — and swapped into a run-scoped copy of the workflow; the
+    saved JSON is never mutated. Every tracked entry gets a pin recorded
+    (resolved or fallback), so resume fetches exactly what the run started with.
+    Notices are human-readable lines for entries that resolved away from their
+    stamp or fell back to the inlined copy. A workflow without invoke nodes and
+    without tracked entries passes through untouched.
     """
-    if not any(n.type == "invoke" for n in workflow.nodes):
-        return workflow, {}, dict(pins or {})
+    pins = dict(pins or {})
+    notices: list[str] = []
+    has_invoke = any(n.type == "invoke" for n in workflow.nodes)
+    tracked = _tracked_pool_entries(workflow)
+    if not has_invoke and not tracked:
+        return workflow, {}, pins, notices
+
     from app.capability_client import CapabilityClient
 
-    pins = dict(pins or {})
     client = client or CapabilityClient()
+    invocations: dict[str, InvocationInfo] = {}
 
-    def resolve(name: str, version: str) -> tuple[str, dict]:
-        use = client.use(name, pins.get(name) or version)
+    # Invoke expansion runs first so an explicit invoke version wins over
+    # tracking when the same capability is used both ways; the expanded result
+    # is already a deep copy that tracking may mutate.
+    if has_invoke:
+        def resolve(name: str, version: str) -> tuple[str, dict]:
+            use = client.use(name, pins.get(name) or version)
+            pins[name] = use["version"]
+            return use["version"], use
+
+        result = expand_workflow(workflow, resolve)
+        workflow = result.workflow
+        invocations = result.invocations
+    elif tracked:
+        workflow = workflow.model_copy(deep=True)
+
+    if tracked:
+        _apply_tracking(workflow, tracked, pins, client, notices)
+
+    return workflow, invocations, pins, notices
+
+
+def _tracked_pool_entries(workflow: Workflow):
+    """Pool entries opted into live tracking: (pool attribute, entry)."""
+    out = []
+    for attr in ("tools", "models", "prompts"):
+        for entry in getattr(workflow, attr):
+            if entry.track_latest and entry.source_capability and entry.source_version:
+                out.append((attr, entry))
+    return out
+
+
+def _major(version: str) -> str:
+    return version.split(".", 1)[0]
+
+
+def _tracking_target(versions: list[dict], current: str) -> str | None:
+    """Newest published version strictly newer than `current` within the same
+    major, or None. Major jumps are skipped by design (a breaking change must
+    go through the explicit upgrade flow)."""
+    major = _major(current)
+    candidates = [
+        v["version"] for v in versions
+        if v.get("stage") == "published" and _major(v["version"]) == major
+    ]
+    if not candidates:
+        return None
+    best = max(candidates, key=semver_key)
+    return best if semver_key(best) > semver_key(current) else None
+
+
+def _apply_tracking(workflow, tracked, pins, client, notices) -> None:
+    """Swap fresh registry content into the run-scoped workflow for tracked entries.
+
+    `workflow` must be a run-scoped copy (never the saved one). Every tracked
+    entry gets a pin recorded — the resolved version, or the stamped one when
+    falling back — so resume/restart fetches exactly what this run started with.
+    """
+    from app.capability_client import CapabilityFetchError
+
+    for attr, entry in tracked:
+        name, current = entry.source_capability, entry.source_version
+        pool = getattr(workflow, attr)
+        idx = next(i for i, e in enumerate(pool) if e.id == entry.id)
+        pinned = pins.get(name)
+        if pinned is not None:
+            # Resume/restart (or a sibling invoke node pinned this capability):
+            # fetch exactly that version; a failure propagates and fails loudly.
+            use = client.use(name, pinned)
+            _swap_entry(pool, idx, use["artifact"])
+            continue
+        try:
+            versions = client.list_versions(name)
+        except CapabilityFetchError as exc:
+            pins[name] = current
+            notices.append(f"{name}: registry unavailable ({exc}); using inlined {current}")
+            continue
+        target = _tracking_target(versions, current)
+        if target is None:
+            pins[name] = current
+            if target is None:
+                newest = max(
+                    (v["version"] for v in versions if v.get("stage") == "published"),
+                    key=semver_key,
+                    default=None,
+                )
+                if newest is not None and _major(newest) != _major(current):
+                    notices.append(
+                        f"{name}: newest published {newest} is a major jump; keeping inlined {current}"
+                    )
+            continue
+        try:
+            use = client.use(name, target)
+        except CapabilityFetchError as exc:
+            pins[name] = current
+            notices.append(f"{name}: could not fetch {target} ({exc}); using inlined {current}")
+            continue
         pins[name] = use["version"]
-        return use["version"], use
+        _swap_entry(pool, idx, use["artifact"])
+        notices.append(f"{name}: tracked {current} -> {use['version']}")
 
-    result = expand_workflow(workflow, resolve)
-    return result.workflow, result.invocations, pins
+
+def _swap_entry(pool: list, idx: int, artifact: dict | None) -> None:
+    """Replace pool[idx]'s content with the registry artifact, keeping id and
+    provenance fields so references by id stay valid."""
+    local = pool[idx]
+    data = local.model_dump()
+    for key, value in (artifact or {}).items():
+        if key in ("id", "source_capability", "source_version", "track_latest"):
+            continue
+        data[key] = value
+    pool[idx] = type(local).model_validate(data)
 
 
 def _entry_node(sub: Workflow) -> Node | None:

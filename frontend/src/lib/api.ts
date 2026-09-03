@@ -74,7 +74,7 @@ export interface HumanInterruptValue {
 // without null-checks (required in every response the backend actually sends).
 export type WorkflowRun = GenWorkflowRun & {
   interrupt_value?: HumanInterruptValue
-  invoke_pins?: Record<string, string>
+  capability_pins?: Record<string, string>
   capability_usage?: Record<string, string | null>
   input_data: Record<string, any>
   output_data?: Record<string, any>

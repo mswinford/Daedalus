@@ -26,9 +26,10 @@ class RunRecord:
     total_tokens_input: int = 0
     total_tokens_output: int = 0
     estimated_cost_usd: float = 0.0
-    # capability name → resolved semver, for workflows with invoke nodes;
-    # resume/restart re-expands with these pins so the graph structure is stable.
-    invoke_pins: dict[str, str] | None = None
+    # capability name → resolved semver, for invoke nodes and live-tracked imports;
+    # resume/restart re-resolves with these pins so the expanded graph and artifact
+    # content are stable for the run's lifetime.
+    capability_pins: dict[str, str] | None = None
     # capability name → version snapshot taken at run start (invoke pins ∪
     # model/tool provenance); persisted with the run for registry evaluation.
     capability_usage: dict[str, str | None] | None = None

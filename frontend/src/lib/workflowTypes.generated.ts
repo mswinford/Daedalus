@@ -39,6 +39,11 @@ export interface Workflow {
      */
     state_schema?: null | StateSchema;
     tools?:        ToolDefinition[];
+    /**
+     * Live ref: at run start, re-resolve this workflow from the registry (newest published
+     * version within the same major) instead of using the saved copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -135,6 +140,11 @@ export interface ModelConfig {
      * Whether to track token costs for this model
      */
     track_cost?: boolean;
+    /**
+     * Live ref: at run start, re-resolve this entry from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -251,6 +261,11 @@ export interface Config {
      * References to ToolDefinitions this agent can use
      */
     tool_ids?: string[];
+    /**
+     * Live ref: at run start, re-resolve this agent node from the registry (newest published
+     * version within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
     /**
      * Conditions that determine which branch to take
      */
@@ -422,6 +437,11 @@ export interface AgentSkill {
      * References to workflow ToolDefinitions this skill uses
      */
     tool_ids?: string[];
+    /**
+     * Live ref: at run start, re-resolve this skill from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -461,6 +481,11 @@ export interface PromptDefinition {
      * Template with {{var}} placeholders resolved from state data at runtime
      */
     text: string;
+    /**
+     * Live ref: at run start, re-resolve this entry from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
     /**
      * Declared {{var}} placeholders
      */
@@ -540,6 +565,11 @@ export interface ToolDefinition {
      * Capability version it was imported at
      */
     source_version?: null | string;
+    /**
+     * Live ref: at run start, re-resolve this entry from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -602,6 +632,6 @@ export interface RunEvent {
     type:      EventType;
 }
 
-export type EventType = "run_start" | "run_end" | "node_start" | "node_end" | "node_error" | "llm_call" | "llm_token" | "tool_call" | "tool_result" | "human_request" | "human_respond" | "human_timeout" | "retry";
+export type EventType = "run_start" | "run_end" | "node_start" | "node_end" | "node_error" | "llm_call" | "llm_token" | "tool_call" | "tool_result" | "human_request" | "human_respond" | "human_timeout" | "retry" | "capability_notice";
 
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "paused";

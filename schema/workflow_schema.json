@@ -102,6 +102,12 @@
           "default": null,
           "description": "Capability version it was imported at",
           "title": "Source Version"
+        },
+        "track_latest": {
+          "default": false,
+          "description": "Live ref: at run start, re-resolve this agent node from the registry (newest published version within the same major) instead of using the inlined copy",
+          "title": "Track Latest",
+          "type": "boolean"
         }
       },
       "required": [
@@ -165,6 +171,12 @@
           "default": null,
           "description": "Capability version it was imported at",
           "title": "Source Version"
+        },
+        "track_latest": {
+          "default": false,
+          "description": "Live ref: at run start, re-resolve this skill from the registry (newest published version within the same major) instead of using the inlined copy",
+          "title": "Track Latest",
+          "type": "boolean"
         }
       },
       "required": [
@@ -723,6 +735,12 @@
           "default": null,
           "description": "Capability version it was imported at",
           "title": "Source Version"
+        },
+        "track_latest": {
+          "default": false,
+          "description": "Live ref: at run start, re-resolve this entry from the registry (newest published version within the same major) instead of using the inlined copy",
+          "title": "Track Latest",
+          "type": "boolean"
         }
       },
       "required": [
@@ -893,6 +911,12 @@
           "default": null,
           "description": "Capability version it was imported at",
           "title": "Source Version"
+        },
+        "track_latest": {
+          "default": false,
+          "description": "Live ref: at run start, re-resolve this entry from the registry (newest published version within the same major) instead of using the inlined copy",
+          "title": "Track Latest",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1085,6 +1109,12 @@
           "default": null,
           "description": "Capability version it was imported at",
           "title": "Source Version"
+        },
+        "track_latest": {
+          "default": false,
+          "description": "Live ref: at run start, re-resolve this entry from the registry (newest published version within the same major) instead of using the inlined copy",
+          "title": "Track Latest",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1307,6 +1337,12 @@
       "default": null,
       "description": "Capability version it was imported at",
       "title": "Source Version"
+    },
+    "track_latest": {
+      "default": false,
+      "description": "Live ref: at run start, re-resolve this workflow from the registry (newest published version within the same major) instead of using the saved copy",
+      "title": "Track Latest",
+      "type": "boolean"
     }
   },
   "required": [

@@ -52,6 +52,29 @@ class CapabilityClient:
             )
         return resp.json()
 
+    def list_versions(self, name: str) -> list[dict]:
+        """GET /capabilities/{name} → all versions (newest first), each with
+        version/kind/stage/... metadata.
+
+        Raises CapabilityNotFoundError for an unknown capability (404) and
+        CapabilityFetchError when the registry is unreachable — same contract
+        as use().
+        """
+        try:
+            resp = httpx.get(
+                f"{self.base_url}/registry/capabilities/{name}",
+                timeout=self.timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise CapabilityFetchError(f"registry unreachable at {self.base_url}: {exc}") from exc
+        if resp.status_code == 404:
+            raise CapabilityNotFoundError(f"capability '{name}' not found")
+        if resp.status_code >= 400:
+            raise CapabilityFetchError(
+                f"registry error {resp.status_code} for {name}: {resp.text[:200]}"
+            )
+        return resp.json().get("versions", [])
+
     def write_evaluation(self, name: str, version: str, payload: dict) -> dict:
         """PUT /capabilities/{name}/versions/{version}/evaluation → the registry's response.
 

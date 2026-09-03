@@ -22,7 +22,8 @@
             "human_request",
             "human_respond",
             "human_timeout",
-            "retry"
+            "retry",
+            "capability_notice"
           ],
           "title": "Type",
           "type": "string"

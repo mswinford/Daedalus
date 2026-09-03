@@ -12,6 +12,7 @@ a background timer auto-fails the run (status="failed", terminal `human_timeout`
 event) when no input arrives in time; resuming before the deadline cancels it.
 """
 import asyncio
+import time
 import uuid
 from typing import Any
 
@@ -61,14 +62,21 @@ def _capability_usage(workflow, pins: dict[str, str] | None) -> dict[str, str | 
 async def run_workflow(workflow_id: str, input_data: dict[str, Any] = {}):
     """Kick off a run in the background and return its id for streaming."""
     workflow = _load_workflow(workflow_id)  # raises 404 if missing
-    expanded, invocations, pins = await _prepare_run(workflow)
+    expanded, invocations, pins, notices = await _prepare_run(workflow)
     record = RunRecord(
         run_id=uuid.uuid4().hex, workflow_id=workflow_id, input_data=input_data,
-        invoke_pins=pins,
+        capability_pins=pins,
         capability_usage=_capability_usage(workflow, pins),
     )
     RUNS[record.run_id] = record
     _save_run_summary(record)
+    for notice in notices:
+        record.emit({
+            "type": "capability_notice",
+            "node_id": None,
+            "timestamp": time.time(),
+            "data": {"message": notice},
+        })
     asyncio.create_task(
         _drive(record, expanded, input_data=input_data, invocations=invocations)
     )
@@ -88,9 +96,9 @@ async def resume_run(run_id: str, human_input: dict[str, Any] = Body(default={})
         )
     _cancel_human_timeout(record)
     workflow = _load_workflow(record.workflow_id)
-    # Re-expand with the pins stored at run start so the graph structure is
-    # identical to the one that produced the checkpoint.
-    expanded, invocations, _ = await _prepare_run(workflow, pins=record.invoke_pins)
+    # Re-expand with the pins stored at run start so the graph structure and
+    # tracked artifact content are identical to what produced the checkpoint.
+    expanded, invocations, _, _ = await _prepare_run(workflow, pins=record.capability_pins)
     asyncio.create_task(
         _drive(record, expanded, human_input=human_input, invocations=invocations)
     )
@@ -140,7 +148,7 @@ def get_run(run_id: str):
         "total_tokens_input": record.total_tokens_input,
         "total_tokens_output": record.total_tokens_output,
         "estimated_cost_usd": record.estimated_cost_usd,
-        "invoke_pins": record.invoke_pins,
+        "capability_pins": record.capability_pins,
         "capability_usage": record.capability_usage,
         "started_at": record.started_at,
         "completed_at": record.completed_at,

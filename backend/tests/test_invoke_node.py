@@ -191,8 +191,8 @@ def test_expand_non_invokable_kind_raises():
 
 def test_prepare_passthrough_without_invoke_nodes():
     wf = _sub_wf(required=False)
-    expanded, invocations, pins = prepare_workflow_for_run(wf)
-    assert expanded is wf and invocations == {} and pins == {}
+    expanded, invocations, pins, notices = prepare_workflow_for_run(wf)
+    assert expanded is wf and invocations == {} and pins == {} and notices == []
 
 
 # ─── execution: workflow kind frame swap ─────────────────────────────────────
@@ -455,7 +455,7 @@ def test_prepare_pins_resolved_versions():
             assert version == "latest"
             return {"version": "3.2.1", "kind": "workflow",
                     "artifact": _sub_wf().model_dump()}
-    _, _, pins = prepare_workflow_for_run(wf, client=StubClient())
+    _, _, pins, _ = prepare_workflow_for_run(wf, client=StubClient())
     assert pins == {"acme/sub": "3.2.1"}
 
     wf2 = _parent_wf()
@@ -465,7 +465,7 @@ def test_prepare_pins_resolved_versions():
             # the registry serves exactly the (pinned) version that was requested
             return {"version": version, "kind": "workflow",
                     "artifact": _sub_wf().model_dump()}
-    _, _, pins2 = prepare_workflow_for_run(wf2, pins={"acme/sub": "9.9.9"}, client=PinnedClient())
+    _, _, pins2, _ = prepare_workflow_for_run(wf2, pins={"acme/sub": "9.9.9"}, client=PinnedClient())
     # stored pin wins over the node's requested version
     assert pins2 == {"acme/sub": "9.9.9"}
 
