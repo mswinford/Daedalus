@@ -10,7 +10,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 
 **Engine (works now)**
 - LangGraph-based execution of `start → … → end` graphs, run **asynchronously** over HTTP with live event streaming.
-- Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), `invoke` (calls a registry capability by `name@version`), and `human_in_loop` (pause / resume / reject).
+- Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), `invoke` (calls a registry capability by `name@version`), `human_in_loop` (pause / resume / reject), and `copilot_agent` (delegates an atomic agentic step to the GitHub Copilot SDK runtime — optional dependency, `pip install ai-forge[copilot]`).
 - Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
 - **Error branches** — opt-in per-node error handle (config panel toggle); when a node fails, the run routes down its red-dashed `error` edge if one exists, otherwise the run fails. Human-in-loop pauses are never treated as failures.
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
@@ -34,7 +34,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
 - **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame), publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage), the run-metrics pipeline (per-run usage snapshots pushed to the registry as capability `evaluation` stats, blended into search ranking), and **upgrade automation** — every import stamps its registry origin, the editor detects newer versions (badges; breaking majors in red) and upgrades in place with a per-field drift diff that preserves local edits and never breaks workflow references (breaking changes require explicit confirmation; active/paused runs are guarded).
 
-**Tests:** 423 backend tests passing (`python -m pytest -q`, as of 2026-09-03, incl. registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+**Tests:** 440 backend tests passing (`python -m pytest -q`, as of 2026-09-03, incl. registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
 
 ---
 
@@ -346,7 +346,7 @@ Base URL: `http://127.0.0.1:3000`
 }
 ```
 
-**Node:** `{ "id", "type", "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | conditional | transform | human_in_loop | custom_function | invoke`.
+**Node:** `{ "id", "type", "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | copilot_agent | conditional | transform | human_in_loop | custom_function | invoke`.
 
 **Edge:** `{ "id", "source_node_id", "source_handle", "target_node_id", "type": "static|conditional|error", "condition"? }`. For a conditional node, each non-`default` `source_handle` is a branch; the `conditions[i]` maps to the i-th branch edge (in workflow order). A `"default"` handle (or `default_branch`) is the fallback.
 
@@ -363,6 +363,7 @@ Base URL: `http://127.0.0.1:3000`
 | `custom_function` | ✅ | Sandboxed Python (RestrictedPython), timeout enforced |
 | `human_in_loop` | ✅ | Pauses the run for human input/approval; resume or reject via `POST /runs/{id}/resume` |
 | `invoke` | ✅ | Calls a registry capability by `name@version`; tool kind executes in place, workflow kind expands into the parent graph at build time (per-run version pinning) |
+| `copilot_agent` | ✅ | Delegates an atomic agentic step to the GitHub Copilot SDK runtime (planning, tools, file edits); per-run scratch workdir, `safe_only` permission policy by default (no shell, writes confined to the workdir), ambient or secret-backed auth. Requires `pip install ai-forge[copilot]` + a signed-in GitHub user with Copilot |
 
 ---
 

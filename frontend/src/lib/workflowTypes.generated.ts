@@ -187,6 +187,9 @@ export interface Node {
  *
  * Configuration for an Agent node.
  *
+ * Configuration for a Copilot agent node (delegates an atomic agentic step
+ * to the GitHub Copilot SDK runtime: planning, tool calls, file edits).
+ *
  * Configuration for a Conditional node.
  *
  * Configuration for a Transform node.
@@ -215,6 +218,8 @@ export interface Config {
     input_fields?: Array<HumanInputField | string>;
     /**
      * Fields that the workflow produces as output
+     *
+     * Result keys to copy into data[] (default: final_message)
      *
      * State fields to write with human input
      *
@@ -267,6 +272,37 @@ export interface Config {
      */
     track_latest?: boolean;
     /**
+     * Secret name holding a GitHub token; None = ambient auth (logged-in user or environment
+     * token)
+     */
+    auth_ref?: null | string;
+    /**
+     * Copilot model id (e.g. 'gpt-5'); None = auto routing
+     */
+    model?: null | string;
+    /**
+     * safe_only: file writes inside the working dir only, no shell; approve_all: everything the
+     * runtime permits
+     */
+    permission_policy?: PermissionPolicy;
+    /**
+     * Task prompt; {{path}} placeholders resolve against run state
+     */
+    task?: string;
+    /**
+     * Wall-clock cap for the whole session
+     *
+     * If set, the run auto-fails when no human input arrives within this many seconds. None =
+     * wait indefinitely.
+     *
+     * Execution timeout
+     */
+    timeout_seconds?: number | null;
+    /**
+     * 'scratch' for a per-run private directory, or an absolute path
+     */
+    working_dir?: string;
+    /**
      * Conditions that determine which branch to take
      */
     conditions?: ConditionConfig[];
@@ -304,13 +340,6 @@ export interface Config {
      * If true, the human must approve/reject before continuing
      */
     approval_required?: boolean;
-    /**
-     * If set, the run auto-fails when no human input arrives within this many seconds. None =
-     * wait indefinitely.
-     *
-     * Execution timeout
-     */
-    timeout_seconds?: number | null;
     /**
      * Python code to execute (sandboxed)
      */
@@ -389,6 +418,12 @@ export type HumanInputFieldType = "text" | "textarea" | "select" | "boolean";
 export type Mode = "template" | "mapping" | "custom_function";
 
 /**
+ * safe_only: file writes inside the working dir only, no shell; approve_all: everything the
+ * runtime permits
+ */
+export type PermissionPolicy = "safe_only" | "approve_all";
+
+/**
  * Retry configuration for a node.
  */
 export interface RetryConfig {
@@ -455,7 +490,7 @@ export interface NodePosition {
 /**
  * Node type
  */
-export type NodeType = "start" | "end" | "agent" | "conditional" | "transform" | "human_in_loop" | "custom_function" | "invoke" | "invoke_exit";
+export type NodeType = "start" | "end" | "agent" | "conditional" | "transform" | "human_in_loop" | "custom_function" | "invoke" | "invoke_exit" | "copilot_agent";
 
 /**
  * A named prompt template stored at workflow level (`prompts[]`), referenced by agent nodes.

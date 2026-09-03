@@ -60,6 +60,7 @@ So any field you pass in a run body is available as `$.data.<field>` to conditio
 | `start` | — (not a real function) | — | Static edge(s); entry point of the graph |
 | `end` | — | — | Terminal (LangGraph `END`) |
 | `agent` | `messages_by_node[node_id]`, `data` (if no conversation yet), model config, tools | `messages_by_node[node_id]`, `output`, `_node_outputs[id]` | Static or conditional edges |
+| `copilot_agent` | rendered task template (`{{data.*}}`), working dir, permission policy; secret via `auth_ref` if set | `output` (final message), `data[<output_fields>]`, `_node_outputs[id]` (final_message, model, tool_calls, tokens, cost_usd, working_dir); emits `tool_call`/`tool_result` events per SDK tool use | Static or conditional edges (atomic — never pauses mid-step) |
 | `conditional` | — (passthrough function) | nothing | **Router**: conditions decide which branch edge |
 | `transform` | state via template paths / field mappings / referenced sandbox code | `output`, `data[output_field]`, `_node_outputs[id]` | Static or conditional edges |
 | `custom_function` | full `state` (sandbox variable) | `output`, `data[<declared output_fields>]`, `_node_outputs[id]` | Static or conditional edges |
@@ -83,6 +84,16 @@ So any field you pass in a run body is available as `$.data.<field>` to conditio
     - `_node_outputs[node.id]` = `{"content": final_content}`
 
 **Per-agent isolation:** because each agent reads and writes only its own `messages_by_node[node_id]` slice, two agent nodes in the same run keep **independent conversations**. Agent B does *not* see agent A's messages — but it *does* see everything agent A wrote to `data`, so structured hand-offs work while chat context stays separate.
+
+### copilot_agent (`nodes/copilot_agent.py`, `engine/copilot/`)
+
+1. Renders `config.task` against state (`{{data.field}}` placeholders), resolves the working dir — `scratch` → `~/.ai-forge/runs/{run_id}/copilot-{node_id}` (created, kept after the run) or the explicit absolute path — and resolves `auth_ref` from the secrets store when set.
+2. Calls the `CopilotRuntime` seam (`engine/copilot/runtime.py`) with one stdio runtime process per run: create session (permission handler + optional model) → send task → wait for idle, bounded by `timeout_seconds`.
+3. Permission policy: `safe_only` approves file writes inside the working dir and denies shell/URL requests; `approve_all` uses the SDK's built-in approve-all.
+4. Failure rules: session went idle without an assistant message → `CopilotNoResponseError` (the runtime fails silently on missing auth/subscription, so this is checked explicitly); a `SessionErrorData` event → `CopilotSessionError`; timeout → `CopilotTimeoutError`. All surface as node failures (or route to the node's error edge when opted in).
+5. Writes back: `output` = final message; `_node_outputs[id]` = full result (final_message, model, tool_calls with per-call success, tokens, cost_usd, working_dir); declared `output_fields` copied into `data` (default: `final_message`).
+
+The SDK is an optional dependency (`ai-forge[copilot]`) and imported lazily — the rest of the engine runs without it. Tests run against a fake runtime behind the seam; live e2e needs auth.
 
 ### conditional (`builder.py`)
 

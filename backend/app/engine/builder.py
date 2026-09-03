@@ -38,8 +38,10 @@ class GraphBuilder:
         trace: list[RunEvent] | None = None,
         on_event: Callable[[RunEvent], None] | None = None,
         invocations: dict[str, Any] | None = None,
+        run_id: str | None = None,
     ):
         self.workflow = workflow
+        self.run_id = run_id
         self.graph = StateGraph(AgentState)
         self.providers: dict[str, LLMProvider] = {}
         self._nodes_by_id = {n.id: n for n in workflow.nodes}

@@ -44,6 +44,9 @@ class NodeContext(Protocol):
     providers: dict[str, Any]
     _nodes_by_id: dict[str, Node]
     invocations: dict[str, Any]  # invoke node id → InvocationInfo (from expansion)
+    run_id: str | None  # set by the runner; used for per-run scratch paths
+
+    def _emit(self, event: Any) -> None: ...
 
     def _record_llm_call(self, node_id: str, model_id: str, result: Any) -> None: ...
 

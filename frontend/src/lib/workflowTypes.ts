@@ -87,6 +87,16 @@ export interface AgentNodeConfig {
   track_latest?: boolean
 }
 
+export interface CopilotAgentNodeConfig {
+  task: string
+  model?: string | null
+  working_dir: string
+  permission_policy: 'safe_only' | 'approve_all'
+  timeout_seconds?: number | null
+  output_fields: string[]
+  auth_ref?: string | null
+}
+
 export interface ConditionalNodeConfig {
   conditions: GenConditionConfig[]
   default_branch?: string | null
@@ -136,6 +146,7 @@ export type NodeConfig =
   | StartNodeConfig
   | EndNodeConfig
   | AgentNodeConfig
+  | CopilotAgentNodeConfig
   | ConditionalNodeConfig
   | TransformNodeConfig
   | HumanInLoopNodeConfig
@@ -162,6 +173,10 @@ export interface EndNode extends BaseNode {
 export interface AgentNode extends BaseNode {
   type: 'agent'
   config: AgentNodeConfig
+}
+export interface CopilotAgentNode extends BaseNode {
+  type: 'copilot_agent'
+  config: CopilotAgentNodeConfig
 }
 export interface ConditionalNode extends BaseNode {
   type: 'conditional'
@@ -193,6 +208,7 @@ export type WorkflowNode =
   | StartNode
   | EndNode
   | AgentNode
+  | CopilotAgentNode
   | ConditionalNode
   | TransformNode
   | HumanInLoopNode
@@ -223,6 +239,7 @@ export const NODE_META: Record<GenNodeType, { label: string; color: string }> = 
   custom_function: { label: 'Custom Function', color: '#ec4899' },
   invoke: { label: 'Invoke', color: '#f97316' },
   invoke_exit: { label: 'Invoke Exit', color: '#fb923c' },
+  copilot_agent: { label: 'Copilot Agent', color: '#a3e635' },
 }
 
 export const ALL_NODE_TYPES: GenNodeType[] = [
@@ -234,6 +251,7 @@ export const ALL_NODE_TYPES: GenNodeType[] = [
   'human_in_loop',
   'custom_function',
   'invoke',
+  'copilot_agent',
 ]
 
 export function defaultConfig(type: GenNodeType): NodeConfig {
@@ -244,6 +262,8 @@ export function defaultConfig(type: GenNodeType): NodeConfig {
       return { output_fields: [] }
     case 'agent':
       return { model_id: '', system_prompt: '', tool_ids: [], max_iterations: 10 }
+    case 'copilot_agent':
+      return { task: '', working_dir: 'scratch', permission_policy: 'safe_only', output_fields: [] }
     case 'conditional':
       return { conditions: [] }
     case 'transform':

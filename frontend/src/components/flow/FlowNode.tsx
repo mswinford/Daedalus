@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { Play, Flag, Bot, GitBranch, Shuffle, User, Code2, AlertTriangle, Container, DoorOpen } from 'lucide-react'
+import { Play, Flag, Bot, GitBranch, Shuffle, User, Code2, AlertTriangle, Container, DoorOpen, Sparkles } from 'lucide-react'
 
 import { NODE_META, type NodeType } from '@/lib/workflowTypes'
 import { ERROR_HANDLE_STYLE, type FlowNodeData } from '@/lib/graphTransform'
@@ -15,6 +15,7 @@ const ICONS: Record<NodeType, typeof Play> = {
   custom_function: Code2,
   invoke: Container,
   invoke_exit: DoorOpen,
+  copilot_agent: Sparkles,
 }
 
 function subtitle(nodeType: NodeType, config: FlowNodeData['config']): string {
@@ -43,6 +44,10 @@ function subtitle(nodeType: NodeType, config: FlowNodeData['config']): string {
     }
     case 'invoke_exit':
       return (config as { invoke_id: string }).invoke_id
+    case 'copilot_agent': {
+      const c = config as { model?: string | null; permission_policy?: string }
+      return `${c.model || 'auto'} · ${c.permission_policy === 'approve_all' ? 'full access' : 'safe only'}`
+    }
   }
 }
 

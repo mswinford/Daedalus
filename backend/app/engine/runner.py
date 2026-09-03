@@ -134,7 +134,8 @@ def run_workflow_sync(
     _validate_input(workflow, input_data)
 
     builder = GraphBuilder(
-        workflow, trace=trace, on_event=on_event, invocations=invocations
+        workflow, trace=trace, on_event=on_event, invocations=invocations,
+        run_id=thread_id or "default",
     )
 
     initial_state = _build_initial_state(input_data)
@@ -196,7 +197,8 @@ def resume_workflow(
     import asyncio
 
     builder = GraphBuilder(
-        workflow, trace=trace, on_event=on_event, invocations=invocations
+        workflow, trace=trace, on_event=on_event, invocations=invocations,
+        run_id=thread_id or "default",
     )
 
     config = {"configurable": {"thread_id": thread_id}}

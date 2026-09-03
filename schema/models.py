@@ -233,6 +233,38 @@ class AgentNodeConfig(BaseModel):
     )
 
 
+class CopilotAgentNodeConfig(BaseModel):
+    """Configuration for a Copilot agent node (delegates an atomic agentic step
+    to the GitHub Copilot SDK runtime: planning, tool calls, file edits)."""
+    task: str = Field(
+        ..., description="Task prompt; {{path}} placeholders resolve against run state"
+    )
+    model: Optional[str] = Field(
+        None, description="Copilot model id (e.g. 'gpt-5'); None = auto routing"
+    )
+    working_dir: str = Field(
+        "scratch",
+        description="'scratch' for a per-run private directory, or an absolute path",
+    )
+    permission_policy: Literal["safe_only", "approve_all"] = Field(
+        "safe_only",
+        description="safe_only: file writes inside the working dir only, no shell; "
+                    "approve_all: everything the runtime permits",
+    )
+    timeout_seconds: Optional[int] = Field(
+        None, ge=1, description="Wall-clock cap for the whole session"
+    )
+    output_fields: list[str] = Field(
+        default_factory=list,
+        description="Result keys to copy into data[] (default: final_message)",
+    )
+    auth_ref: Optional[str] = Field(
+        None,
+        description="Secret name holding a GitHub token; None = ambient auth "
+                    "(logged-in user or environment token)",
+    )
+
+
 class ConditionType(str, Enum):
     JSON_PATH = "json_path"
     REGEX = "regex"
@@ -372,12 +404,14 @@ NodeType = Literal[
     "custom_function",
     "invoke",
     "invoke_exit",
+    "copilot_agent",
 ]
 
 NodeConfig = Union[
     StartNodeConfig,
     EndNodeConfig,
     AgentNodeConfig,
+    CopilotAgentNodeConfig,
     ConditionalNodeConfig,
     TransformNodeConfig,
     HumanInLoopNodeConfig,

@@ -559,6 +559,85 @@
       "title": "ConditionalNodeConfig",
       "type": "object"
     },
+    "CopilotAgentNodeConfig": {
+      "description": "Configuration for a Copilot agent node (delegates an atomic agentic step\nto the GitHub Copilot SDK runtime: planning, tool calls, file edits).",
+      "properties": {
+        "task": {
+          "description": "Task prompt; {{path}} placeholders resolve against run state",
+          "title": "Task",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Copilot model id (e.g. 'gpt-5'); None = auto routing",
+          "title": "Model"
+        },
+        "working_dir": {
+          "default": "scratch",
+          "description": "'scratch' for a per-run private directory, or an absolute path",
+          "title": "Working Dir",
+          "type": "string"
+        },
+        "permission_policy": {
+          "default": "safe_only",
+          "description": "safe_only: file writes inside the working dir only, no shell; approve_all: everything the runtime permits",
+          "enum": [
+            "safe_only",
+            "approve_all"
+          ],
+          "title": "Permission Policy",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Wall-clock cap for the whole session",
+          "title": "Timeout Seconds"
+        },
+        "output_fields": {
+          "description": "Result keys to copy into data[] (default: final_message)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Fields",
+          "type": "array"
+        },
+        "auth_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Secret name holding a GitHub token; None = ambient auth (logged-in user or environment token)",
+          "title": "Auth Ref"
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "title": "CopilotAgentNodeConfig",
+      "type": "object"
+    },
     "CustomFunctionNodeConfig": {
       "description": "Configuration for a Custom Function node.",
       "properties": {
@@ -1144,7 +1223,8 @@
             "human_in_loop",
             "custom_function",
             "invoke",
-            "invoke_exit"
+            "invoke_exit",
+            "copilot_agent"
           ],
           "title": "Type",
           "type": "string"
@@ -1163,6 +1243,9 @@
             },
             {
               "$ref": "#/$defs/AgentNodeConfig"
+            },
+            {
+              "$ref": "#/$defs/CopilotAgentNodeConfig"
             },
             {
               "$ref": "#/$defs/ConditionalNodeConfig"

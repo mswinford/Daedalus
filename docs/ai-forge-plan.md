@@ -48,7 +48,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Node types wired in the builder**: `agent` (with tool-calling loop), `conditional`,
   `transform` (`template` + `mapping` + `custom_function` modes), `custom_function`
   (RestrictedPython sandbox), `invoke` (registry capability invocation — tool kind
-  executes directly; workflow kind expands into a call frame at build time).
+  executes directly; workflow kind expands into a call frame at build time),
+  `copilot_agent` (delegates an atomic agentic step to the GitHub Copilot SDK runtime).
 - **Agent node**: reads `state["data"]` as user message (if no prior messages), calls LLM
   with system prompt, supports tool-calling loop. Output lands in `state["output"]`,
   `state["messages"]`, and `_node_outputs[<id>].content`.
@@ -133,7 +134,23 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: backend suite green as of 2026-09-03 (423 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+- **Copilot agent node**: `copilot_agent` hands an atomic agentic step (planning, tool
+  calls, file edits) to the GitHub Copilot SDK runtime — one stdio runtime process per run
+  behind a thin `CopilotRuntime` seam (`engine/copilot/`), so a shared external server can be
+  swapped in later without touching the node. The node never pauses mid-step: it is one
+  super-step from the graph's point of view (no internal HIL, no session checkpointing).
+  Config: task template (`{{data.*}}` placeholders), optional model id (auto routing when
+  empty), working dir (per-run scratch under `~/.ai-forge/runs/{run_id}/copilot-{node}`, kept
+  after the run, or an explicit absolute path), permission policy — `safe_only` by default
+  (file writes confined to the working dir, no shell, no URL access; `approve_all` is an
+  explicit per-node opt-in) — wall-clock timeout, and output-field mapping into `data`.
+  Failure rules: idle without an assistant message → deterministic auth/subscription error
+  (the runtime fails silently otherwise); session error events → failure; timeout → failure.
+  The SDK is an optional dependency (`pip install ai-forge[copilot]`); auth is ambient
+  (logged-in user or `COPILOT_GITHUB_TOKEN`) or a secret-backed token via `auth_ref`.
+  Phases 2/3 (OAuth app flow with connect button; workflow-tool → SDK custom-tool mapping,
+  HIL permission bridge) are pending.
+- **Tests**: backend suite green as of 2026-09-03 (440 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

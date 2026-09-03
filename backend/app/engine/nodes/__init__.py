@@ -7,9 +7,11 @@ from app.engine.nodes.custom_function import CustomFunctionHandler
 from app.engine.nodes.human_in_loop import HumanInLoopHandler
 from app.engine.nodes.invoke import InvokeHandler
 from app.engine.nodes.invoke_exit import InvokeExitHandler
+from app.engine.nodes.copilot_agent import CopilotAgentHandler
 
 HANDLERS: dict[str, NodeHandler] = {
     "agent": AgentHandler(),
+    "copilot_agent": CopilotAgentHandler(),
     "conditional": ConditionalHandler(),
     "transform": TransformHandler(),
     "custom_function": CustomFunctionHandler(),

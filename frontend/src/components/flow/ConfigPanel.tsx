@@ -18,6 +18,7 @@ import {
   type FieldMapping,
   type PromptDefinition,
   type AgentSkill,
+  type CopilotAgentNodeConfig,
   type InvokeNodeConfig,
 } from '@/lib/workflowTypes'
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
@@ -483,6 +484,80 @@ function HumanInLoopEditor({ config, set }: { config: HumanInLoopNodeConfig; set
   )
 }
 
+function CopilotAgentEditor({ config, set }: { config: CopilotAgentNodeConfig; set: (c: CopilotAgentNodeConfig) => void }) {
+  return (
+    <div className="space-y-3">
+      <Field label="Task">
+        <textarea
+          className={`${inputCls} min-h-[90px] font-mono text-xs`}
+          value={config.task}
+          placeholder="Summarize the file in data.path and write a report"
+          onChange={(e) => set({ ...config, task: e.target.value })}
+        />
+        <p className="mt-0.5 text-[11px] text-zinc-600">
+          {'{{data.field}}'} placeholders resolve from run state (inputs live under data.*).
+        </p>
+      </Field>
+      <Field label="Model">
+        <input
+          className={inputCls}
+          value={config.model ?? ''}
+          placeholder="auto"
+          onChange={(e) => set({ ...config, model: e.target.value || null })}
+        />
+        <p className="mt-0.5 text-[11px] text-zinc-600">Copilot model id (e.g. gpt-5); empty = auto routing.</p>
+      </Field>
+      <Field label="Working directory">
+        <input
+          className={inputCls}
+          value={config.working_dir}
+          placeholder="scratch"
+          onChange={(e) => set({ ...config, working_dir: e.target.value })}
+        />
+        <p className="mt-0.5 text-[11px] text-zinc-600">
+          'scratch' for a per-run private directory, or an absolute path (kept after the run).
+        </p>
+      </Field>
+      <Field label="Permission policy">
+        <select
+          className={inputCls}
+          value={config.permission_policy}
+          onChange={(e) => set({ ...config, permission_policy: e.target.value as 'safe_only' | 'approve_all' })}
+        >
+          <option value="safe_only">safe_only — file writes in workdir only, no shell</option>
+          <option value="approve_all">approve_all — everything the runtime permits</option>
+        </select>
+        {config.permission_policy === 'approve_all' && (
+          <p className="mt-0.5 text-[11px] text-amber-400">
+            The agent can run shell commands and write anywhere under your account. Use with care.
+          </p>
+        )}
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Timeout (s)">
+          <input
+            className={inputCls}
+            type="number"
+            min={1}
+            value={config.timeout_seconds ?? ''}
+            placeholder="none"
+            onChange={(e) => set({ ...config, timeout_seconds: e.target.value ? Number(e.target.value) : null })}
+          />
+        </Field>
+        <Field label="Auth secret">
+          <input
+            className={inputCls}
+            value={config.auth_ref ?? ''}
+            placeholder="ambient"
+            onChange={(e) => set({ ...config, auth_ref: e.target.value || null })}
+          />
+        </Field>
+      </div>
+      <ListField value={config.output_fields} onChange={(v) => set({ ...config, output_fields: v })} placeholder="e.g. final_message" />
+    </div>
+  )
+}
+
 function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: InvokeNodeConfig) => void }) {
   const [picking, setPicking] = useState(false)
 
@@ -602,6 +677,7 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
       {node.type === 'start' && <StartEditor config={node.config} set={set} />}
       {node.type === 'end' && <EndEditor config={node.config} set={set} />}
       {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} nodeId={node.id} updates={updates} onUpgradeOrigin={onUpgradeOrigin} />}
+      {node.type === 'copilot_agent' && <CopilotAgentEditor config={node.config} set={(c) => onConfigChange(node.id, c)} />}
       {node.type === 'conditional' && <ConditionalEditor config={node.config} set={set} nodeId={node.id} edges={edges} />}
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}

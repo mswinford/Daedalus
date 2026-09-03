@@ -25,6 +25,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+copilot = [
+    "github-copilot-sdk>=1.0",
+]
 
 [project.scripts]
 ai-forge = "ai_forge.cli:main"
