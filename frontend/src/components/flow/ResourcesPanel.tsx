@@ -16,6 +16,7 @@ interface Props {
   prompts?: PromptDefinition[]
   wfId?: string
   updates?: UpdateStatus[]
+  runWarning?: string | null
   onToolsChange: (tools: ToolDefinition[]) => void
   onModelsChange: (models: ModelConfig[]) => void
   onOpenRegistry: (kind: 'tool' | 'model_profile') => void
@@ -32,6 +33,7 @@ export default function ResourcesPanel({
   prompts = [],
   wfId,
   updates,
+  runWarning,
   onToolsChange,
   onModelsChange,
   onOpenRegistry,
@@ -278,6 +280,7 @@ export default function ResourcesPanel({
       <UpgradeCapabilityModal
         status={upgrading.status}
         localEntry={upgrading.localEntry}
+        runWarning={runWarning}
         onClose={() => setUpgrading(null)}
         onApply={applyUpgrade}
       />

@@ -13,6 +13,7 @@ import {
   agentArtifactView,
   upsertTools,
   upsertModel,
+  runGuardWarning,
   type FieldStatus,
 } from './capabilityUpgrade'
 
@@ -404,5 +405,31 @@ describe('upsertTools / upsertModel', () => {
     const r = upsertModel([], { id: 'm-9', name: 'New' }, 'ns/a', '1.0.0')
     expect(r.id).toBe('m-9')
     expect(r.pool).toEqual([{ id: 'm-9', name: 'New', source_capability: 'ns/a', source_version: '1.0.0' }])
+  })
+})
+
+describe('runGuardWarning', () => {
+  it('returns null when nothing is active', () => {
+    expect(runGuardWarning(null, 0)).toBeNull()
+    expect(runGuardWarning(undefined, 0)).toBeNull()
+    expect(runGuardWarning('succeeded', 0)).toBeNull()
+  })
+
+  it('warns about a running run only', () => {
+    expect(runGuardWarning('running', 0)).toBe('A run of this workflow is currently running.')
+  })
+
+  it('uses singular wording for one paused run', () => {
+    expect(runGuardWarning(null, 1)).toBe('1 paused run of this workflow will resume against your current edits.')
+  })
+
+  it('uses plural wording for multiple paused runs', () => {
+    expect(runGuardWarning(null, 3)).toBe('3 paused runs of this workflow will resume against your current edits.')
+  })
+
+  it('combines running and paused clauses joined by a single space', () => {
+    expect(runGuardWarning('running', 2)).toBe(
+      'A run of this workflow is currently running. 2 paused runs of this workflow will resume against your current edits.',
+    )
   })
 })

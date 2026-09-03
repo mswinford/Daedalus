@@ -17,6 +17,7 @@ interface Props {
   localEntry: Record<string, unknown>
   /** Composite kinds (skill/agent): project raw artifacts + local state into comparable views. When absent, pool-entry mode. */
   project?: (oldArtifact: Record<string, any> | null, newArtifact: Record<string, any>) => UpgradeViews
+  runWarning?: string | null
   onClose(): void
   onApply(upgraded: Record<string, unknown>, choices: Record<string, 'local' | 'upstream'>): Promise<void>
 }
@@ -36,7 +37,7 @@ function buildUpstreamObj(kind: UpdateStatus['kind'], artifact: Record<string, a
   return artifact
 }
 
-export default function UpgradeCapabilityModal({ status, localEntry, project, onClose, onApply }: Props) {
+export default function UpgradeCapabilityModal({ status, localEntry, project, runWarning, onClose, onApply }: Props) {
   const [attempt, setAttempt] = useState(0)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [fetchError, setFetchError] = useState<string | null>(null)
@@ -45,6 +46,7 @@ export default function UpgradeCapabilityModal({ status, localEntry, project, on
   const [upstreamNew, setUpstreamNew] = useState<Record<string, unknown> | null>(null)
   const [choices, setChoices] = useState<Record<string, 'local' | 'upstream'>>({})
   const [breakingAck, setBreakingAck] = useState(false)
+  const [runAck, setRunAck] = useState(false)
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
 
@@ -162,6 +164,13 @@ export default function UpgradeCapabilityModal({ status, localEntry, project, on
                 </div>
               )}
 
+              {runWarning && (
+                <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  {runWarning}
+                </div>
+              )}
+
               {changed.length === 0 ? (
                 <p className="text-xs text-zinc-500">No content differences — this upgrade only re-points the version stamp.</p>
               ) : (
@@ -217,6 +226,13 @@ export default function UpgradeCapabilityModal({ status, localEntry, project, on
                   I understand this is a breaking change
                 </label>
               )}
+
+              {runWarning && (
+                <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+                  <input type="checkbox" checked={runAck} onChange={(e) => setRunAck(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
+                  I understand this may affect the active run(s)
+                </label>
+              )}
             </div>
 
             <div className="flex items-center justify-between border-t border-zinc-800 px-4 py-3">
@@ -227,7 +243,7 @@ export default function UpgradeCapabilityModal({ status, localEntry, project, on
                 </button>
                 <button
                   onClick={doApply}
-                  disabled={applying || (status.isBreaking && !breakingAck)}
+                  disabled={applying || (status.isBreaking && !breakingAck) || (!!runWarning && !runAck)}
                   className="flex items-center gap-1.5 rounded-md border border-indigo-500 bg-indigo-500/15 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/25 disabled:opacity-40"
                 >
                   {applying && <Loader2 size={12} className="animate-spin" />}

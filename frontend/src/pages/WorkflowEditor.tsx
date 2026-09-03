@@ -48,6 +48,7 @@ import UpgradeCapabilityModal from '@/components/flow/UpgradeCapabilityModal'
 import {
   agentArtifactView,
   agentView,
+  runGuardWarning,
   skillArtifactView,
   skillView,
   upsertModel,
@@ -92,6 +93,7 @@ function WorkflowEditorInner() {
     queryFn: () => workflowsApi.get(id!),
   })
   const updates = useCapabilityUpdates(workflow ?? null)
+  const { data: pausedRuns } = useQuery({ queryKey: ['runs', 'paused'], queryFn: () => workflowsApi.listPausedRuns() })
   const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false)
   const [configUpgrading, setConfigUpgrading] = useState<UpdateStatus | null>(null)
   const upgradeArtifactRef = useRef<Record<string, any> | null>(null)
@@ -486,6 +488,13 @@ function WorkflowEditorInner() {
   const runLastSeqRef = useRef(0)
   const runFinishedRef = useRef(false)
 
+  // Paused runs rebuild their graph from the saved workflow on resume, so
+  // upgrading capabilities mid-flight can break them.
+  const runWarning = useMemo(() => {
+    const pausedCount = (pausedRuns ?? []).filter((r) => r.workflow_id === id).length
+    return runGuardWarning(run?.status, pausedCount)
+  }, [pausedRuns, id, run])
+
   const streamEvents = (runId: string): (() => void) => {
     let close: () => void = () => {}
     close = streamRunEvents(
@@ -860,6 +869,7 @@ function WorkflowEditorInner() {
           status={configUpgrading}
           localEntry={emptyEntryRef.current}
           project={projectForUpgrade}
+          runWarning={runWarning}
           onClose={() => setConfigUpgrading(null)}
           onApply={applyConfigUpgrade}
         />
@@ -873,6 +883,7 @@ function WorkflowEditorInner() {
           prompts={workflow?.prompts ?? []}
           wfId={id ?? undefined}
           updates={updates.statuses}
+          runWarning={runWarning}
           onToolsChange={handleToolsChange}
           onModelsChange={handleModelsChange}
           onOpenRegistry={(kind) => { setShowResources(false); setPickerKind(kind); setShowPicker(true) }}

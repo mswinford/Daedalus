@@ -157,3 +157,10 @@ export function applyUpgradeChoices(
   result.source_version = newVersion
   return result
 }
+
+export function runGuardWarning(runStatus: string | null | undefined, pausedCount: number): string | null {
+  const clauses: string[] = []
+  if (runStatus === 'running') clauses.push('A run of this workflow is currently running.')
+  if (pausedCount > 0) clauses.push(`${pausedCount} paused run${pausedCount === 1 ? '' : 's'} of this workflow will resume against your current edits.`)
+  return clauses.length ? clauses.join(' ') : null
+}
