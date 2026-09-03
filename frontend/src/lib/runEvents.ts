@@ -69,13 +69,14 @@ export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType
       ex.toolCalls = ex.toolCalls ?? []
       ex.toolCalls.push({ name: ev.data.name, args: ev.data.args })
     } else if (ev.type === 'tool_result') {
-      // Results carry no id — resolve the most recent unresolved call of the
-      // same name (the runtime emits start/complete pairs in order).
+      // Results carry no id — resolve the oldest unresolved call of the same
+      // name: the runtime emits start/complete pairs in order, so completions
+      // match calls in start order.
       const calls = ex.toolCalls
       if (calls) {
-        for (let i = calls.length - 1; i >= 0; i--) {
-          if (calls[i].name === ev.data.name && calls[i].success === undefined) {
-            calls[i].success = Boolean(ev.data.success)
+        for (const c of calls) {
+          if (c.name === ev.data.name && c.success === undefined) {
+            c.success = Boolean(ev.data.success)
             break
           }
         }

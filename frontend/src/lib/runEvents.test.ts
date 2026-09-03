@@ -71,7 +71,7 @@ describe('summarize', () => {
     ])
   })
 
-  it('resolves repeated same-name calls in order (last unresolved wins)', () => {
+  it('resolves repeated same-name calls in start order', () => {
     const events = [
       ev({ type: 'tool_call', node_id: 'c', data: { name: 'shell', args: 1 } }),
       ev({ type: 'tool_call', node_id: 'c', data: { name: 'shell', args: 2 } }),
