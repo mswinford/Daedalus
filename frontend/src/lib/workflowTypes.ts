@@ -55,6 +55,7 @@ export interface ToolDefinition {
   implementation: { type: GenToolImplementationType; config: Record<string, unknown> }
   source_capability?: string | null
   source_version?: string | null
+  track_latest?: boolean
 }
 
 // ─── Per-type node configs (flattened into `Config` in the generated file) ──
@@ -83,6 +84,7 @@ export interface AgentNodeConfig {
   skills?: AgentSkill[]
   source_capability?: string | null
   source_version?: string | null
+  track_latest?: boolean
 }
 
 export interface ConditionalNodeConfig {

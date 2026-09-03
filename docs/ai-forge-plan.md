@@ -34,7 +34,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > local edits and never breaks workflow references (composite upgrades re-inline nested tools/models
 > into the workflow pools by id); breaking changes require explicit confirmation and active/paused
 > runs trigger a warning + mandatory ack.
-> Next up: live refs (opt-in `latest` tracking), remote invocation over HTTP, SQLite → Postgres (ROADMAP.md R2 remainder).
+> Next up: remote invocation over HTTP, SQLite → Postgres (ROADMAP.md R2 remainder). Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
 
@@ -125,7 +125,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: backend suite green as of 2026-09-02 (390 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+- **Tests**: backend suite green as of 2026-09-02 (413 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

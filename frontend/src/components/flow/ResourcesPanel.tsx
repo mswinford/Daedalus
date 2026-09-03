@@ -6,6 +6,7 @@ import type { ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workfl
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
 import { workflowsApi } from '@/lib/api'
 import CapabilityVersionBadge from './CapabilityVersionBadge'
+import TrackToggle from './TrackToggle'
 import ToolForm, { IMPL_LABEL } from './ToolForm'
 import ModelForm from './ModelForm'
 import UpgradeCapabilityModal from './UpgradeCapabilityModal'
@@ -60,6 +61,15 @@ export default function ResourcesPanel({
     )
     setEditingModel(null)
     setAddingModel(false)
+  }
+
+  const setPromptTrack = async (p: PromptDefinition, v: boolean) => {
+    if (!wfId) return
+    const fresh = await workflowsApi.get(wfId)
+    const nextPrompts = (fresh.prompts ?? []).map((x) => (x.id === p.id ? { ...x, track_latest: v } : x))
+    await workflowsApi.update(wfId, { ...fresh, prompts: nextPrompts })
+    await queryClient.invalidateQueries({ queryKey: ['workflows'] })
+    await queryClient.invalidateQueries({ queryKey: ['workflow', wfId] })
   }
 
   const applyUpgrade = async (upgraded: Record<string, unknown>) => {
@@ -131,7 +141,10 @@ export default function ResourcesPanel({
                     <div className="min-w-0">
                       <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
                         <span className="truncate">{t.name}</span>
-                        {tu && <CapabilityVersionBadge current={tu.currentVersion} latest={tu.latestVersion} breaking={tu.isBreaking} />}
+                        {tu && <CapabilityVersionBadge current={tu.currentVersion} latest={tu.latestVersion} breaking={tu.isBreaking} tracking={!!t.track_latest} />}
+                        {t.source_capability && (
+                          <TrackToggle checked={!!t.track_latest} onChange={(v) => onToolsChange(tools.map((x) => (x.id === t.id ? { ...x, track_latest: v } : x)))} />
+                        )}
                         {tu?.hasUpdate && <UpgradeButton status={tu} entry={t} />}
                       </p>
                       <p className="truncate text-[11px] text-zinc-500">
@@ -197,7 +210,10 @@ export default function ResourcesPanel({
                     <div className="min-w-0">
                       <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
                         <span className="truncate">{m.name}</span>
-                        {mu && <CapabilityVersionBadge current={mu.currentVersion} latest={mu.latestVersion} breaking={mu.isBreaking} />}
+                        {mu && <CapabilityVersionBadge current={mu.currentVersion} latest={mu.latestVersion} breaking={mu.isBreaking} tracking={!!m.track_latest} />}
+                        {m.source_capability && (
+                          <TrackToggle checked={!!m.track_latest} onChange={(v) => onModelsChange(models.map((x) => (x.id === m.id ? { ...x, track_latest: v } : x)))} />
+                        )}
                         {mu?.hasUpdate && <UpgradeButton status={mu} entry={m} />}
                       </p>
                       <p className="truncate text-[11px] text-zinc-500">
@@ -259,7 +275,10 @@ export default function ResourcesPanel({
                       <div className="min-w-0">
                         <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
                           <span className="truncate">{p.name ?? p.id}</span>
-                          {pu && <CapabilityVersionBadge current={pu.currentVersion} latest={pu.latestVersion} breaking={pu.isBreaking} />}
+                          {pu && <CapabilityVersionBadge current={pu.currentVersion} latest={pu.latestVersion} breaking={pu.isBreaking} tracking={!!p.track_latest} />}
+                          {p.source_capability && (
+                            <TrackToggle checked={!!p.track_latest} onChange={(v) => { void setPromptTrack(p, v) }} />
+                          )}
                           {pu?.hasUpdate && <UpgradeButton status={pu} entry={p} />}
                         </p>
                         <p className="truncate text-[11px] text-zinc-500">

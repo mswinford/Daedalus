@@ -22,6 +22,7 @@ import {
 } from '@/lib/workflowTypes'
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
 import CapabilityVersionBadge from './CapabilityVersionBadge'
+import TrackToggle from './TrackToggle'
 import InvokeCapabilityPicker from './InvokeCapabilityPicker'
 
 interface Props {
@@ -194,7 +195,10 @@ function AgentEditor({ config, set, models, tools, prompts, nodeId, updates, onU
                     value={s.name ?? ''}
                     onChange={(e) => updateSkill(i, { name: e.target.value || null })}
                   />
-                  {su && <CapabilityVersionBadge current={su.currentVersion} latest={su.latestVersion} breaking={su.isBreaking} />}
+                  {su && <CapabilityVersionBadge current={su.currentVersion} latest={su.latestVersion} breaking={su.isBreaking} tracking={!!s.track_latest} />}
+                  {s.source_capability && (
+                    <TrackToggle checked={!!s.track_latest} onChange={(v) => updateSkill(i, { track_latest: v })} />
+                  )}
                   {su?.hasUpdate && onUpgradeOrigin && <UpgradeLink status={su} onClick={() => onUpgradeOrigin(su.where)} />}
                   <button
                     onClick={() => set({ ...config, skills: skills.filter((_, j) => j !== i) })}
@@ -586,7 +590,10 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
         <p className="flex items-center gap-1.5 font-mono text-sm text-zinc-200">
           <span className="truncate">{node.id}</span>
           {agentStatus && (
-            <CapabilityVersionBadge current={agentStatus.currentVersion} latest={agentStatus.latestVersion} breaking={agentStatus.isBreaking} />
+            <CapabilityVersionBadge current={agentStatus.currentVersion} latest={agentStatus.latestVersion} breaking={agentStatus.isBreaking} tracking={node.type === 'agent' ? !!(node.config as AgentNodeConfig).track_latest : false} />
+          )}
+          {node.type === 'agent' && (node.config as AgentNodeConfig).source_capability && (
+            <TrackToggle checked={!!(node.config as AgentNodeConfig).track_latest} onChange={(v) => onConfigChange(node.id, { ...(node.config as AgentNodeConfig), track_latest: v })} />
           )}
           {agentStatus?.hasUpdate && onUpgradeOrigin && <UpgradeLink status={agentStatus} onClick={() => onUpgradeOrigin(agentStatus.where)} />}
         </p>

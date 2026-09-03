@@ -42,6 +42,7 @@ import RunPanel from '@/components/flow/RunPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
 import CapabilityVersionBadge from '@/components/flow/CapabilityVersionBadge'
+import TrackToggle from '@/components/flow/TrackToggle'
 import { useCapabilityUpdates } from '@/lib/useCapabilityUpdates'
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
 import UpgradeCapabilityModal from '@/components/flow/UpgradeCapabilityModal'
@@ -87,6 +88,8 @@ function WorkflowEditorInner() {
   const [showSecrets, setShowSecrets] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // Local override for the workflow-level live-ref flag (the query data is read-only).
+  const [wfTrackOverride, setWfTrackOverride] = useState<boolean | null>(null)
 
   const { data: workflow, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['workflow', id],
@@ -120,6 +123,7 @@ function WorkflowEditorInner() {
     setSelectedId(null)
     setValidation(null)
     setDirty(false)
+    setWfTrackOverride(null)
     syncedIdRef.current = workflow.id
     syncedJsonRef.current = json
   }, [workflow])
@@ -151,8 +155,12 @@ function WorkflowEditorInner() {
       models,
       prompts: workflow.prompts ?? [],
       state_schema: workflow.state_schema ?? null,
+      // Top-level provenance must round-trip or autosave would wipe the stamp.
+      source_capability: workflow.source_capability ?? null,
+      source_version: workflow.source_version ?? null,
+      track_latest: wfTrackOverride ?? workflow.track_latest ?? false,
     }
-  }, [workflow, id, nodes, edges, tools, models])
+  }, [workflow, id, nodes, edges, tools, models, wfTrackOverride])
 
   useEffect(() => {
     latestPayloadRef.current = buildPayload()
@@ -655,7 +663,10 @@ function WorkflowEditorInner() {
         <div className="flex items-center gap-2">
           <h1 className="font-medium">{workflow.name}</h1>
           {wfUpdate && (
-            <CapabilityVersionBadge current={wfUpdate.currentVersion} latest={wfUpdate.latestVersion} breaking={wfUpdate.isBreaking} />
+            <CapabilityVersionBadge current={wfUpdate.currentVersion} latest={wfUpdate.latestVersion} breaking={wfUpdate.isBreaking} tracking={!!(wfTrackOverride ?? workflow.track_latest)} />
+          )}
+          {workflow.source_capability && (
+            <TrackToggle checked={!!(wfTrackOverride ?? workflow.track_latest)} onChange={(v) => { setWfTrackOverride(v); setDirty(true) }} />
           )}
         </div>
         <div className="flex items-center gap-2">
