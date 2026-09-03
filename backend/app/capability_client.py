@@ -28,16 +28,22 @@ class CapabilityClient:
         ).rstrip("/")
         self.timeout = timeout
 
-    def use(self, name: str, version: str = "latest") -> dict:
-        """GET /capabilities/{name}/use → {name, version (resolved), kind, stage, artifact, manifest}.
+    def use(self, name: str, version: str = "latest", inline: bool = False) -> dict:
+        """GET /capabilities/{name}/use?version=...[&inline=true] → {version, kind, artifact}.
 
-        Raises CapabilityFetchError when the registry is unreachable or the
-        capability/version does not exist (or is unpublished).
+        With inline=True, composite artifacts (skill/agent) come back with all
+        capability refs resolved into self-contained payloads (registry/inline.py).
+
+        Raises CapabilityNotFoundError for 404 (unknown capability/version or
+        unpublished) and CapabilityFetchError when the registry is unreachable.
         """
+        params = {"version": version}
+        if inline:
+            params["inline"] = "true"
         try:
             resp = httpx.get(
                 f"{self.base_url}/registry/capabilities/{name}/use",
-                params={"version": version},
+                params=params,
                 timeout=self.timeout,
             )
         except httpx.HTTPError as exc:
