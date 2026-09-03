@@ -11,7 +11,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Current Status (Phase 3 complete + post-Phase 3 increments)
 
-> Last updated: 2026-09-02. Human-in-loop nodes are implemented end-to-end: LangGraph
+> Last updated: 2026-09-03. Human-in-loop nodes are implemented end-to-end: LangGraph
 > `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
 > survive restarts and are recovered on startup), and the frontend shows a paused state with an
 > input form + resume button. The editor is a sidebar / master-detail layout with debounced
@@ -34,6 +34,10 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > local edits and never breaks workflow references (composite upgrades re-inline nested tools/models
 > into the workflow pools by id); breaking changes require explicit confirmation and active/paused
 > runs trigger a warning + mandatory ack.
+> Also shipped: **run cancellation** (`POST /runs/{id}/cancel`) — a paused run terminates
+> immediately and its checkpoint thread is deleted (indefinite HIL waits can no longer accumulate
+> as zombie approvals across restarts); a running run stops at the next super-step boundary;
+> cancelled runs stay inspectable but are excluded from capability metrics aggregation.
 > Next up: remote invocation over HTTP, SQLite → Postgres (ROADMAP.md R2 remainder). Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
@@ -120,12 +124,16 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Human-in-loop nodes**: `interrupt()` in builder pauses the graph; SQLite checkpointer
   (`AsyncSqliteSaver`, one connection per run on the shared file) with `thread_id` preserves state
   across restarts — startup recovery rebuilds paused runs from checkpoints and re-arms timeouts;
-  `POST /runs/{id}/resume` sends human input via `Command(resume=...)`. Frontend: RunPanel shows
-  paused state (purple indicator) with a dynamic
+   `POST /runs/{id}/resume` sends human input via `Command(resume=...)`;
+   `POST /runs/{id}/cancel` abandons the run (paused: immediate terminal + checkpoint-thread
+   deletion so it never resurrects; running: stops at the next super-step — the runner drives
+   graphs via `astream(stream_mode="values")` and checks a per-run cancel flag between steps).
+   Frontend: RunPanel shows
+   paused state (purple indicator) with a dynamic
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: backend suite green as of 2026-09-02 (413 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+- **Tests**: backend suite green as of 2026-09-03 (423 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

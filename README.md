@@ -2,7 +2,7 @@
 
 A standalone web app for building **AI agent workflows** on [LangGraph](https://github.com/langchain-ai/langgraph). Workflows are directed graphs of nodes (agents, conditionals, transforms, sandboxed Python, human-in-loop gates) with file-based persistence. Author them in the visual React Flow editor or via the REST API.
 
-> **Status:** Phase 3 + post-Phase 3 increments — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject), async execution with live WebSocket streaming, a secrets store, per-agent message isolation, per-node error branches, workflow templates, and the `github_*` builtins are all implemented. A companion **Capability Registry** ([platform roadmap](./docs/ROADMAP.md): R1 complete, R2 in progress) adds identity, versioning, lifecycle, search, and the `invoke` node for calling registered capabilities — see [Capability Registry](#capability-registry).
+> **Status:** Phase 3 + post-Phase 3 increments — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject / cancel), async execution with live WebSocket streaming, a secrets store, per-agent message isolation, per-node error branches, workflow templates, and the `github_*` builtins are all implemented. A companion **Capability Registry** ([platform roadmap](./docs/ROADMAP.md): R1 complete, R2 in progress) adds identity, versioning, lifecycle, search, and the `invoke` node for calling registered capabilities — see [Capability Registry](#capability-registry).
 
 ---
 
@@ -18,7 +18,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - Run input validated against the workflow's `state_schema` (if defined) before execution.
 
 **API (works now)**
-- Full workflow CRUD + async `run` + `validate`, plus run retrieval, resume, and a secrets store. See [REST API](#rest-api).
+- Full workflow CRUD + async `run` + `validate`, plus run retrieval, resume, cancel, and a secrets store. See [REST API](#rest-api).
 
 **Frontend (works now)**
 - Sidebar **master-detail** layout: workflow list with search, create, rename, delete.
@@ -34,7 +34,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
 - **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame), publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage), the run-metrics pipeline (per-run usage snapshots pushed to the registry as capability `evaluation` stats, blended into search ranking), and **upgrade automation** — every import stamps its registry origin, the editor detects newer versions (badges; breaking majors in red) and upgrades in place with a per-field drift diff that preserves local edits and never breaks workflow references (breaking changes require explicit confirmation; active/paused runs are guarded).
 
-**Tests:** 413 backend tests passing (`python -m pytest -q`, as of 2026-09-02, incl. registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+**Tests:** 423 backend tests passing (`python -m pytest -q`, as of 2026-09-03, incl. registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
 
 ---
 
@@ -322,6 +322,7 @@ Base URL: `http://127.0.0.1:3000`
 | `POST` | `/api/workflows/{id}/validate` | Static validation (returns issues + warnings) |
 | `GET` | `/api/runs/{runId}` | Get run status + result (polling) |
 | `POST` | `/api/runs/{runId}/resume` | Resume a paused run with human input |
+| `POST` | `/api/runs/{runId}/cancel` | Cancel a running or paused run (paused: immediate; running: stops after the current step) |
 | `WS` | `/api/runs/{runId}/events` | Live execution event stream (replays past events, then streams) |
 | `GET` | `/api/secrets` | List secret names + source (values are never returned) |
 | `PUT` | `/api/secrets` | Upsert a secret |
@@ -369,7 +370,7 @@ Base URL: `http://127.0.0.1:3000`
 
 - **`llm` condition type** raises `NotImplementedError`; `json_path` and `regex` work.
 - **Anthropic provider** not implemented (OpenAI-compatible only).
-- **Run history is rebuilt from `checkpoints.db` on startup** — run summaries + full event logs persist there, so completed/failed runs and their traces survive restarts; paused runs are additionally recovered with their timeouts re-armed.
+- **Run history is rebuilt from `checkpoints.db` on startup** — run summaries + full event logs persist there, so completed/failed/cancelled runs and their traces survive restarts; paused runs are additionally recovered with their timeouts re-armed (cancelled runs delete their checkpoint thread, so they never resurrect).
 
 ---
 

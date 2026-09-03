@@ -31,7 +31,7 @@ Key directories:
 - `backend/app/sandbox/` — RestrictedPython execution
 - `frontend/src/pages/` — WorkflowEditor (React Flow canvas + editor shell), EmptyState
 - `frontend/src/components/layout/` — AppLayout route shell, WorkflowSidebar (list/create/delete/search)
-- `frontend/src/components/flow/` — ConfigPanel, RunPanel (+ inline human-input form), ModelsPanel, ToolsPanel, SecretsPanel, FlowNode (custom React Flow node)
+- `frontend/src/components/flow/` — ConfigPanel, RunPanel (+ inline human-input form + cancel), ResourcesPanel (tools/models modal), ToolForm, ModelForm, SecretsPanel, FlowNode (custom React Flow node)
 - `frontend/src/lib/` — api.ts (axios + WS stream), graphTransform.ts, workflowTypes.ts
 
 ## Gotchas
