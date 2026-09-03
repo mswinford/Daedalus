@@ -4,7 +4,33 @@ import { Ban, CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X } f
 import type { WorkflowRun, HumanInterruptField } from '@/lib/api'
 import type { NodeType } from '@/lib/workflowTypes'
 import type { FlowNodeType } from '@/lib/graphTransform'
-import { summarize, groupExecutions, regionStats } from '@/lib/runEvents'
+import { summarize, groupExecutions, regionStats, type ToolCallView } from '@/lib/runEvents'
+
+function ToolCallList({ calls }: { calls: ToolCallView[] }) {
+  return (
+    <div className="mb-1 ml-4 space-y-0.5 border-l border-zinc-800 pl-2">
+      {calls.map((c, i) => (
+        <div key={i} className="rounded-md px-1.5 py-0.5 text-xs">
+          <span className="flex items-center gap-1.5">
+            {c.success === true ? (
+              <CheckCircle2 size={12} className="shrink-0 text-emerald-400" />
+            ) : c.success === false ? (
+              <XCircle size={12} className="shrink-0 text-red-400" />
+            ) : (
+              <Timer size={12} className="shrink-0 animate-pulse text-zinc-500" />
+            )}
+            <span className="font-medium text-zinc-300">{c.name}</span>
+          </span>
+          {c.args != null && (
+            <pre className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-zinc-800 bg-zinc-900/60 p-1.5 text-[11px] text-zinc-500">
+              {typeof c.args === 'string' ? c.args : JSON.stringify(c.args, null, 2)}
+            </pre>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function fmtMs(ms?: number): string {
   if (ms == null) return ''
@@ -286,6 +312,11 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                           {tokensIn}→{tokensOut} tok · {llmCalls} call{llmCalls === 1 ? '' : 's'}
                         </span>
                       ) : null}
+                      {ex.toolCalls && ex.toolCalls.length > 0 && (
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
+                          {ex.toolCalls.length} tool call{ex.toolCalls.length === 1 ? '' : 's'}
+                        </span>
+                      )}
                       {durationMs != null && (
                         <span className="text-[11px] text-zinc-500">{fmtMs(durationMs)}</span>
                       )}
@@ -301,6 +332,9 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                     >
                       {body}
                     </pre>
+                  )}
+                  {open && ex.toolCalls && ex.toolCalls.length > 0 && (
+                    <ToolCallList calls={ex.toolCalls} />
                   )}
                   {open && isRegion && (
                     <div className="mb-1 ml-4 space-y-0.5 border-l border-zinc-800 pl-2">
@@ -322,11 +356,19 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                                     {c.tokensIn}→{c.tokensOut} tok · {c.llmCalls} call{c.llmCalls === 1 ? '' : 's'}
                                   </span>
                                 ) : null}
+                                {c.toolCalls && c.toolCalls.length > 0 && (
+                                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                                    {c.toolCalls.length} tool call{c.toolCalls.length === 1 ? '' : 's'}
+                                  </span>
+                                )}
                                 {c.durationMs != null && (
                                   <span className="text-[10px] text-zinc-500">{fmtMs(c.durationMs)}</span>
                                 )}
                               </span>
                             </button>
+                            {cOpen && c.toolCalls && c.toolCalls.length > 0 && (
+                              <ToolCallList calls={c.toolCalls} />
+                            )}
                             {cOpen && cBody !== '' && (
                               <pre
                                 className={`mb-1 ml-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border p-2 text-xs ${

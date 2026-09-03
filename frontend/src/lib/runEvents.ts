@@ -1,6 +1,13 @@
 import type { RunEvent } from '@/lib/api'
 import { NODE_META, type NodeType } from '@/lib/workflowTypes'
 
+export interface ToolCallView {
+  name: string
+  args?: unknown
+  /** Undefined while the call is still in flight. */
+  success?: boolean
+}
+
 export interface NodeExecution {
   nodeId: string
   label: string
@@ -11,6 +18,7 @@ export interface NodeExecution {
   tokensIn?: number
   tokensOut?: number
   llmCalls?: number
+  toolCalls?: ToolCallView[]
 }
 
 /** Inner nodes of an invoke region carry ids of the form `{invoke_id}__{inner}`. */
@@ -57,6 +65,21 @@ export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType
       ex.tokensIn = (ex.tokensIn ?? 0) + (ev.data.tokens_input ?? 0)
       ex.tokensOut = (ex.tokensOut ?? 0) + (ev.data.tokens_output ?? 0)
       ex.llmCalls = (ex.llmCalls ?? 0) + 1
+    } else if (ev.type === 'tool_call') {
+      ex.toolCalls = ex.toolCalls ?? []
+      ex.toolCalls.push({ name: ev.data.name, args: ev.data.args })
+    } else if (ev.type === 'tool_result') {
+      // Results carry no id — resolve the most recent unresolved call of the
+      // same name (the runtime emits start/complete pairs in order).
+      const calls = ex.toolCalls
+      if (calls) {
+        for (let i = calls.length - 1; i >= 0; i--) {
+          if (calls[i].name === ev.data.name && calls[i].success === undefined) {
+            calls[i].success = Boolean(ev.data.success)
+            break
+          }
+        }
+      }
     }
   }
 

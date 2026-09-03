@@ -56,6 +56,31 @@ describe('summarize', () => {
     const out = summarize(events, new Map([['x', 'start']]))
     expect(out[0].label).toBe('Start')
   })
+
+  it('folds tool_call/tool_result pairs into per-node lists', () => {
+    const events = [
+      ev({ type: 'tool_call', node_id: 'c', data: { name: 'run_shell_command', args: { command: 'git ls-remote …' } } }),
+      ev({ type: 'tool_result', node_id: 'c', data: { name: 'run_shell_command', success: true } }),
+      ev({ type: 'tool_call', node_id: 'c', data: { name: 'read_file', args: { path: '/tmp/a' } } }),
+      // No result yet — in flight.
+    ]
+    const out = summarize(events, new Map())
+    expect(out[0].toolCalls).toEqual([
+      { name: 'run_shell_command', args: { command: 'git ls-remote …' }, success: true },
+      { name: 'read_file', args: { path: '/tmp/a' } },
+    ])
+  })
+
+  it('resolves repeated same-name calls in order (last unresolved wins)', () => {
+    const events = [
+      ev({ type: 'tool_call', node_id: 'c', data: { name: 'shell', args: 1 } }),
+      ev({ type: 'tool_call', node_id: 'c', data: { name: 'shell', args: 2 } }),
+      ev({ type: 'tool_result', node_id: 'c', data: { name: 'shell', success: false } }),
+      ev({ type: 'tool_result', node_id: 'c', data: { name: 'shell', success: true } }),
+    ]
+    const out = summarize(events, new Map())
+    expect(out[0].toolCalls?.map((t) => t.success)).toEqual([false, true])
+  })
 })
 
 describe('groupExecutions', () => {
