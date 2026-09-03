@@ -12,6 +12,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ROOT/.dev"
 mkdir -p "$LOG_DIR"
 
+# Prefer the repo venv; fall back to whatever python is on PATH.
+PY="python"
+[ -x "$ROOT/.venv/bin/python" ] && PY="$ROOT/.venv/bin/python"
+
+if ! "$PY" -c 'import fastapi, langgraph' >/dev/null 2>&1; then
+  echo "Python dependencies missing (checked with $PY)." >&2
+  echo "Run ./scripts/setup.sh first." >&2
+  exit 1
+fi
+if [ ! -d "$ROOT/frontend/node_modules" ]; then
+  echo "Frontend dependencies missing (no frontend/node_modules)." >&2
+  echo "Run ./scripts/setup.sh first." >&2
+  exit 1
+fi
+
 declare -a pids=()
 names=()
 
@@ -53,8 +68,8 @@ start() {
   names+=("$name")
 }
 
-start backend  "$ROOT"            "python backend/cli.py"
-start registry "$ROOT"            "python -m registry.cli serve"
+start backend  "$ROOT"            "'$PY' backend/cli.py"
+start registry "$ROOT"            "'$PY' -m registry.cli serve"
 start frontend "$ROOT/frontend"   "npm run dev"
 
 echo "AI Forge dev stack starting (logs in .dev/):"
