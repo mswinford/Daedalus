@@ -236,6 +236,14 @@ export const ALL_NODE_TYPES: GenNodeType[] = [
   'invoke',
 ]
 
+/** Palette grouping — the order users build a workflow in. */
+export const PALETTE_GROUPS: Array<{ label: string; types: GenNodeType[] }> = [
+  { label: 'Structure', types: ['start', 'end'] },
+  { label: 'Compute', types: ['agent', 'transform', 'custom_function'] },
+  { label: 'Control flow', types: ['conditional', 'invoke'] },
+  { label: 'Human', types: ['human_in_loop'] },
+]
+
 export function defaultConfig(type: GenNodeType): NodeConfig {
   switch (type) {
     case 'start':

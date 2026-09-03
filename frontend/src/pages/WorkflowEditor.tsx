@@ -19,6 +19,7 @@ import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, K
 import { workflowsApi, streamRunEvents, apiErrorMessage, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
   ALL_NODE_TYPES,
+  PALETTE_GROUPS,
   NODE_META,
   defaultConfig,
   type NodeType,
@@ -90,6 +91,8 @@ function WorkflowEditorInner() {
   const [dirty, setDirty] = useState(false)
   // Local override for the workflow-level live-ref flag (the query data is read-only).
   const [wfTrackOverride, setWfTrackOverride] = useState<boolean | null>(null)
+  // Local override for the name while editing (query data is read-only).
+  const [nameOverride, setNameOverride] = useState<string | null>(null)
 
   const { data: workflow, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['workflow', id],
@@ -146,7 +149,7 @@ function WorkflowEditorInner() {
     if (!workflow || !id) return null
     return {
       id: workflow.id,
-      name: workflow.name,
+      name: nameOverride ?? workflow.name,
       description: workflow.description ?? null,
       schema_version: workflow.schema_version,
       nodes: rfToNodes(nodes),
@@ -160,7 +163,7 @@ function WorkflowEditorInner() {
       source_version: workflow.source_version ?? null,
       track_latest: wfTrackOverride ?? workflow.track_latest ?? false,
     }
-  }, [workflow, id, nodes, edges, tools, models, wfTrackOverride])
+  }, [workflow, id, nodes, edges, tools, models, wfTrackOverride, nameOverride])
 
   useEffect(() => {
     latestPayloadRef.current = buildPayload()
@@ -674,7 +677,12 @@ function WorkflowEditorInner() {
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
         <div className="flex items-center gap-2">
-          <h1 className="font-medium">{workflow.name}</h1>
+          <input
+            value={nameOverride ?? workflow.name}
+            onChange={(e) => { setNameOverride(e.target.value); setDirty(true) }}
+            aria-label="Workflow name"
+            className="w-56 rounded-md border border-transparent bg-transparent px-1.5 py-0.5 font-medium outline-none hover:border-zinc-700 focus:border-zinc-600 focus:bg-zinc-900"
+          />
           {wfUpdate && (
             <CapabilityVersionBadge current={wfUpdate.currentVersion} latest={wfUpdate.latestVersion} breaking={wfUpdate.isBreaking} tracking={!!(wfTrackOverride ?? workflow.track_latest)} />
           )}
@@ -808,22 +816,27 @@ function WorkflowEditorInner() {
         {/* Left: node palette (draggable) */}
         <aside className="w-48 border-r border-zinc-800 p-3">
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Add nodes</p>
-          <div className="space-y-1">
-            {ALL_NODE_TYPES.map((t) => (
-              <div
-                key={t}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/reactflow', t)
-                  e.dataTransfer.effectAllowed = 'move'
-                }}
-                className="flex cursor-grab items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-1.5 text-sm text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 active:cursor-grabbing"
-              >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_META[t].color }} />
-                {NODE_META[t].label}
+          {PALETTE_GROUPS.map((g) => (
+            <div key={g.label} className="mb-2.5">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">{g.label}</p>
+              <div className="space-y-1">
+                {g.types.map((t) => (
+                  <div
+                    key={t}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/reactflow', t)
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    className="flex cursor-grab items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-1.5 text-sm text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 active:cursor-grabbing"
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_META[t].color }} />
+                    {NODE_META[t].label}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
           <p className="mt-3 text-[11px] leading-relaxed text-zinc-600">Drag onto canvas to add. Click a node to edit. Delete key removes selection.</p>
         </aside>
 
