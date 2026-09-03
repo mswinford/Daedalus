@@ -10,6 +10,17 @@ from schema.models import Node, CopilotAgentNodeConfig, RunEvent
 from app.engine.copilot import create_copilot_runtime
 from app.engine.nodes.base import AgentState, NodeContext, _render_template
 
+# Appended to every task: unauthenticated GitHub API calls 404 on private
+# repos, which agents misread as "repository not found". Point them at the
+# authenticated paths (gh api / $GITHUB_TOKEN, set by the runtime when auth
+# is configured or a signed-in gh CLI is available).
+_GITHUB_ENV_NOTE = (
+    "\n\nEnvironment notes: GitHub is available in this workspace. For GitHub "
+    'API access use `gh api <path>` or add the header -H "Authorization: Bearer $GITHUB_TOKEN" '
+    "(the variable is set when auth is configured). Unauthenticated requests to "
+    "private repositories return 404 — do not treat that as the repository missing."
+)
+
 
 class CopilotAgentHandler:
     def __init__(self, runtime_factory=None):
@@ -22,7 +33,7 @@ class CopilotAgentHandler:
         factory = self._runtime_factory or create_copilot_runtime
 
         async def run(state: AgentState) -> AgentState:
-            task = _render_template(config.task, state)
+            task = _render_template(config.task, state) + _GITHUB_ENV_NOTE
             working_dir = _resolve_workdir(config, ctx, node.id)
             os.makedirs(working_dir, exist_ok=True)
 

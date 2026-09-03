@@ -84,7 +84,8 @@ def test_happy_path(fake_runtime):
     assert out["data"]["final_message"] == "Done."
 
     call = fake_runtime.calls[0]
-    assert call["task"] == "Do the thing"
+    assert call["task"].startswith("Do the thing")
+    assert "GITHUB_TOKEN" in call["task"]  # environment note appended
     assert call["model"] is None
     assert call["permission_policy"] == "safe_only"
     assert call["timeout_seconds"] is None
@@ -95,7 +96,7 @@ def test_task_template_rendering(fake_runtime):
     fake_runtime.result = _result()
     run_workflow_sync(_wf(task="Score is {{data.score}}. Verdict: {{data.verdict}}"),
                       {"score": 87, "verdict": "pass"})
-    assert fake_runtime.calls[0]["task"] == "Score is 87. Verdict: pass"
+    assert fake_runtime.calls[0]["task"].startswith("Score is 87. Verdict: pass")
 
 
 def test_output_fields_mapping(fake_runtime):
@@ -258,3 +259,41 @@ def test_approve_all_returns_sdk_handler(tmp_path):
     from copilot.session import PermissionHandler
 
     assert build_permission_handler("approve_all", str(tmp_path)) is PermissionHandler.approve_all
+
+
+def test_runtime_env_ambient_returns_none():
+    from app.engine.copilot.runtime import _runtime_env
+
+    assert _runtime_env(None) is None
+    assert _runtime_env("") is None
+
+
+def test_runtime_env_injects_git_credentials_for_token():
+    from app.engine.copilot.runtime import _runtime_env
+
+    env = _runtime_env("ghp_test123")
+    assert env is not None
+    assert env["GITHUB_TOKEN"] == "ghp_test123"
+    assert env["GH_TOKEN"] == "ghp_test123"
+    # git credential helper via GIT_CONFIG_* — github.com-scoped, token served
+    # from the process env (never written to a config file).
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "credential.https://github.com.helper"
+    assert "$GITHUB_TOKEN" in env["GIT_CONFIG_VALUE_0"]
+    # Inherits the surrounding environment (SDK replaces, not merges).
+    assert env.get("PATH") == os.environ.get("PATH")
+
+
+def test_ambient_gh_token_absent_returns_none(monkeypatch):
+    from app.engine.copilot import runtime as rt
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    assert asyncio.run(rt._ambient_gh_token()) is None
+
+
+def test_ambient_gh_token_reads_fake_gh(tmp_path, monkeypatch):
+    from app.engine.copilot import runtime as rt
+    fake = tmp_path / "gh"
+    fake.write_text("#!/bin/sh\necho gho_fake123\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    assert asyncio.run(rt._ambient_gh_token()) == "gho_fake123"

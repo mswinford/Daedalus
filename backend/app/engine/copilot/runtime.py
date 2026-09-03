@@ -81,6 +81,59 @@ def create_copilot_runtime() -> CopilotRuntime:
     return SdkCopilotRuntime()
 
 
+def _runtime_env(github_token: Optional[str]) -> Optional[dict]:
+    """Process env for the runtime when a token is supplied.
+
+    The SDK already hands the token to the CLI itself (COPILOT_SDK_AUTH_TOKEN),
+    but shell commands inside the session do not read it — `git clone` of a
+    private repo would fall back to the OS keychain and 404 ("repository not
+    found"). So we also export GITHUB_TOKEN/GH_TOKEN (for gh and friends) and
+    inject a github.com-scoped credential helper via GIT_CONFIG_* (git >= 2.31)
+    that serves the token from the process env. The token never touches disk or
+    prompts. Returns None for ambient auth so the runtime inherits the normal
+    environment unchanged.
+    """
+    if not github_token:
+        return None
+    import os
+    env = dict(os.environ)
+    env["GITHUB_TOKEN"] = github_token
+    env["GH_TOKEN"] = github_token
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "credential.https://github.com.helper"
+    env["GIT_CONFIG_VALUE_0"] = (
+        '!f() { echo "username=x-access-token"; '
+        'echo "password=$GITHUB_TOKEN"; }; f'
+    )
+    return env
+
+
+async def _ambient_gh_token() -> Optional[str]:
+    """Best-effort signed-in `gh` CLI token for ambient auth mode.
+
+    The SDK authenticates the CLI's own chat service with the logged-in user,
+    but shell commands inside the session have no token at all — so API calls
+    404 on private repos even though the user clearly has access. Surfaces the
+    same account's token into the runtime env (GITHUB_TOKEN/GH_TOKEN) so `gh`
+    and header-based curl both work. Returns None when gh is absent or fails;
+    ambient mode then degrades to exactly today's behavior.
+    """
+    import shutil
+    if not shutil.which("gh"):
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gh", "auth", "token",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        tok = out.decode().strip()
+        return tok or None
+    except Exception:
+        return None
+
+
 class SdkCopilotRuntime:
     """Real implementation over github-copilot-sdk (lazy import — optional dep)."""
 
@@ -112,7 +165,22 @@ class SdkCopilotRuntime:
 
         from app.engine.copilot.permissions import build_permission_handler
 
-        client = CopilotClient(working_directory=working_dir, github_token=github_token)
+        if github_token:
+            env = _runtime_env(github_token)
+        else:
+            ambient = await _ambient_gh_token()
+            if ambient:
+                import os
+                env = dict(os.environ)
+                env["GITHUB_TOKEN"] = ambient
+                env["GH_TOKEN"] = ambient
+            else:
+                env = None
+        client = CopilotClient(
+            working_directory=working_dir,
+            github_token=github_token,
+            env=env,
+        )
         await client.start()
         try:
             kwargs: dict[str, Any] = {
