@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Plus, Trash2, AlertTriangle, ArrowUpCircle } from 'lucide-react'
 import type { Edge } from '@xyflow/react'
+
+import { secretsApi } from '@/lib/api'
 
 import {
   type WorkflowNode,
@@ -485,6 +488,13 @@ function HumanInLoopEditor({ config, set }: { config: HumanInLoopNodeConfig; set
 }
 
 function CopilotAgentEditor({ config, set }: { config: CopilotAgentNodeConfig; set: (c: CopilotAgentNodeConfig) => void }) {
+  const { data: secrets } = useQuery({ queryKey: ['secrets'], queryFn: secretsApi.list })
+  const secretNames = (secrets ?? []).map((s) => s.name)
+  // Keep a value that isn't listed (e.g. an env-only secret) selectable so it
+  // is never silently cleared by the dropdown.
+  if (config.auth_ref && !secretNames.includes(config.auth_ref)) {
+    secretNames.push(config.auth_ref)
+  }
   return (
     <div className="space-y-3">
       <Field label="Task">
@@ -545,12 +555,16 @@ function CopilotAgentEditor({ config, set }: { config: CopilotAgentNodeConfig; s
           />
         </Field>
         <Field label="Auth secret">
-          <input
+          <select
             className={inputCls}
             value={config.auth_ref ?? ''}
-            placeholder="ambient"
             onChange={(e) => set({ ...config, auth_ref: e.target.value || null })}
-          />
+          >
+            <option value="">ambient (signed-in user)</option>
+            {secretNames.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
         </Field>
       </div>
       <ListField value={config.output_fields} onChange={(v) => set({ ...config, output_fields: v })} placeholder="e.g. final_message" />
