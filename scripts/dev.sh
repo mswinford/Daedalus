@@ -16,8 +16,10 @@ mkdir -p "$LOG_DIR"
 PY="python"
 [ -x "$ROOT/.venv/bin/python" ] && PY="$ROOT/.venv/bin/python"
 
-if ! "$PY" -c 'import fastapi, langgraph' >/dev/null 2>&1; then
-  echo "Python dependencies missing (checked with $PY)." >&2
+# Import the real app module (what uvicorn loads) so ANY missing dependency is
+# caught here with a clear hint instead of crashing mid-startup.
+if ! "$PY" -c 'import sys; sys.path[:0] = ["backend", "."]; import app.main' >/dev/null 2>&1; then
+  echo "Python dependencies missing or incomplete (checked with $PY)." >&2
   echo "Run ./scripts/setup.sh first." >&2
   exit 1
 fi
@@ -30,9 +32,21 @@ fi
 declare -a pids=()
 names=()
 
+HAS_SETSID=0
+command -v setsid >/dev/null 2>&1 && HAS_SETSID=1
+
 stop_all() {
   for i in "${!pids[@]}"; do
-    kill -- "-${pids[$i]}" 2>/dev/null || kill "${pids[$i]}" 2>/dev/null || true
+    local pid="${pids[$i]}"
+    if [ "$HAS_SETSID" = 1 ]; then
+      # setsid made the service a session leader: kill its whole process group.
+      kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    else
+      # No setsid (macOS): kill direct children first (e.g. vite under npm),
+      # then the service itself.
+      pkill -P "$pid" 2>/dev/null || true
+      kill "$pid" 2>/dev/null || true
+    fi
   done
   wait 2>/dev/null || true
 }
@@ -61,9 +75,15 @@ trap on_exit EXIT
 
 start() {
   local name="$1" dir="$2" cmd="$3"
-  # setsid gives each service its own process group so we can kill the whole
-  # tree (npm -> vite, uvicorn reload workers) with one signal.
-  setsid bash -c "cd '$dir' && exec $cmd" >>"$LOG_DIR/$name.log" 2>&1 &
+  # With setsid (Linux) each service gets its own process group so the whole
+  # tree (npm -> vite, uvicorn reload workers) dies with one signal. Without it
+  # (macOS) we fall back to a plain background launch; stop_all cleans up
+  # children via pkill -P.
+  if [ "$HAS_SETSID" = 1 ]; then
+    setsid bash -c "cd '$dir' && exec $cmd" >>"$LOG_DIR/$name.log" 2>&1 &
+  else
+    bash -c "cd '$dir' && exec $cmd" >>"$LOG_DIR/$name.log" 2>&1 &
+  fi
   pids+=("$!")
   names+=("$name")
 }
