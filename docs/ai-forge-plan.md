@@ -27,8 +27,14 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > registry imports stamp provenance on models/tools, every run snapshots its capability usage,
 > and on each terminal transition participation-level aggregates (success rate, duration p50/p95,
 > avg cost) are pushed to the registry per capability version; the Capabilities view shows them
-> and search ranking blends the success rate in.
-> Next up: live refs + upgrade automation, SQLite → Postgres (ROADMAP.md R2 remainder).
+> and search ranking blends the success rate in. Also shipped: **upgrade automation for existing
+> imports** — provenance is stamped on all five import kinds (tools, model profiles, prompts, skill
+> attachments, agent nodes), the editor detects newer versions ("Check for updates" + version badges,
+> breaking majors in red), and upgrades apply in place with a per-field drift diff that preserves
+> local edits and never breaks workflow references (composite upgrades re-inline nested tools/models
+> into the workflow pools by id); breaking changes require explicit confirmation and active/paused
+> runs trigger a warning + mandatory ack.
+> Next up: live refs (opt-in `latest` tracking), remote invocation over HTTP, SQLite → Postgres (ROADMAP.md R2 remainder).
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
 
@@ -119,7 +125,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: backend suite green as of 2026-09-02 (388 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 64 Vitest tests + typecheck/build clean.
+- **Tests**: backend suite green as of 2026-09-02 (390 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

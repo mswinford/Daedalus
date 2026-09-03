@@ -22,7 +22,7 @@ The genuinely new work is narrow — **identity, versioning, ownership, lifecycl
 | Component | What it is | Status | Plan |
 |---|---|---|---|
 | **AI Forge** | Workflow authoring + execution engine (LangGraph); tools, models, secrets, HIL, observability | Shipped (Phase 3) | [ai-forge-plan.md](./ai-forge-plan.md) |
-| **Capability Registry** | Identity · versioning · ownership · lifecycle · search · packaging. A thin layer *above* AI Forge; git (provenance) + SQLite→Postgres index | R1 complete (steps 1–8 shipped); R2 in progress — publish-time governance checks, invoke node, and run metrics → `evaluation` scores shipped | [capability-registry-plan.md](./capability-registry-plan.md) |
+| **Capability Registry** | Identity · versioning · ownership · lifecycle · search · packaging. A thin layer *above* AI Forge; git (provenance) + SQLite→Postgres index | R1 complete (steps 1–8 shipped); R2 in progress — publish-time governance checks, invoke node, run metrics → `evaluation` scores, and upgrade automation for existing imports shipped | [capability-registry-plan.md](./capability-registry-plan.md) |
 | **`schema` package** | Shared Pydantic models — the Capability Manifest contract + all node/tool/workflow types | Shipped; extended with the Capability Manifest (R1 step 1) | in both |
 
 ## Everything is a capability
@@ -46,7 +46,8 @@ From "here's a thing you can use" to "declare it and the platform runs/resolves 
 - ✅ `invoke` node in the AI Forge engine — call a registered capability by `name@version` with mapped I/O; tool kind executes directly, workflow kind expands into the parent graph at build time behind a call frame (per-run version pinning, HIL/resume/recovery work unmodified, parent-side error catch via synthetic error edges). Remote invocation over HTTP still to come.
 - ✅ Declared-dependency resolution at publish + automated per-kind breaking-change detection (`registry/publish_checks.py` — refs must resolve with import-time semantics, kind changes across versions rejected, breaking changes require a major bump).
 - ✅ Feed real run metrics into `evaluation` scores — provenance stamped on registry imports, per-run capability-usage snapshots, participation-level aggregates (success rate, duration p50/p95, avg cost) pushed to the registry on every terminal run; displayed in the Capabilities view and blended into search ranking.
-- Live refs + upgrade automation for existing imports.
+- ✅ Upgrade automation for existing imports — provenance stamped on all import kinds, "check for updates" with version badges (breaking majors in red), one-click in-place upgrades with per-field drift diff (local edits preserved, workflow references never broken), explicit breaking-change confirmation, and a guard + ack against active/paused runs.
+- Live refs for existing imports (opt-in `latest` tracking at build time — the invoke node already resolves at run time).
 - Define the `eval_suite` kind (runnable suites / publish gating — Phase 4 territory).
 - Graduate SQLite → Postgres (+ pgvector, row-level security).
 
@@ -77,6 +78,6 @@ Agents discover and compose capabilities themselves.
 ## Documentation map
 - `docs/ROADMAP.md` — this file (platform-level).
 - `docs/ai-forge-plan.md` — AI Forge application plan & status.
-- `docs/capability-registry-plan.md` — registry component plan (R1 complete; R2 in progress — publish-time governance checks, invoke node, and run metrics → `evaluation` scores shipped).
+- `docs/capability-registry-plan.md` — registry component plan (R1 complete; R2 in progress — publish-time governance checks, invoke node, run metrics → `evaluation` scores, and upgrade automation for existing imports shipped).
 - `docs/data-flow.md` — engine data-flow reference.
 - `docs/concepts/` — original vision docs: `enterprise-foundry-overview.md`, `capabilities.md`, `capability-registry.md`.
