@@ -10,14 +10,22 @@ Resolution is injected — (name, version) -> (resolved_version, use_response) �
 so tests stub it and production wires the registry client. Resolved versions
 are pinned per run by prepare_workflow_for_run(), so every rebuild (resume,
 restart recovery) produces an identical structure that matches checkpoints.
+
+Live refs: pool entries with track_latest are re-resolved from the registry at
+run start (newest published version within the same major as the stamped one)
+and swapped into a run-scoped copy; the saved workflow JSON is never mutated.
 """
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
+from schema.capability import semver_key
 from schema.models import (
+    AgentNodeConfig,
+    AgentSkill,
     Edge,
     InvokeExitNodeConfig,
     InvokeNodeConfig,
+    ModelConfig,
     Node,
     NodePosition,
     ToolDefinition,
@@ -63,26 +71,296 @@ def prepare_workflow_for_run(
     pins: dict[str, str] | None = None,
     client=None,
 ):
-    """Resolve invoke refs for a run and expand.
+    """Resolve capability refs for a run and expand.
 
-    Returns (expanded_workflow, invocations, pins). Pins map capability name →
-    resolved version; stored on the run so resume/restart re-expand identically.
-    A workflow without invoke nodes passes through untouched.
+    Returns (expanded_workflow, invocations, pins, notices). Pins map capability
+    name → resolved version; stored on the run so resume/restart re-expand
+    identically. Live-tracked entries (track_latest) are re-resolved from the
+    registry at run start — newest published version within the same major as
+    the stamped one — and swapped into a run-scoped copy of the workflow; the
+    saved JSON is never mutated. A tracked workflow-kind stamp swaps the whole
+    graph (before invoke expansion, so invokes inside the swapped-in graph are
+    expanded too); tracked agent nodes and skills get their inlined content
+    re-projected into the pools by id; tracked pool entries are replaced in
+    place. Every tracked entry gets a pin recorded (resolved or fallback), so
+    resume fetches exactly what the run started with. Notices are human-readable
+    lines for entries that resolved away from their stamp or fell back to the
+    inlined copy. A workflow without invoke nodes and without tracked entries
+    passes through untouched.
     """
-    if not any(n.type == "invoke" for n in workflow.nodes):
-        return workflow, {}, dict(pins or {})
+    pins = dict(pins or {})
+    notices: list[str] = []
+
+    # Workflow-kind live ref — wholesale graph swap; must precede invoke
+    # expansion so invokes inside the swapped-in graph get expanded too.
+    if workflow.track_latest and workflow.source_capability and workflow.source_version:
+        from app.capability_client import CapabilityClient
+
+        client = client or CapabilityClient()
+        workflow = _track_workflow(workflow, pins, client, notices)
+
+    has_invoke = any(n.type == "invoke" for n in workflow.nodes)
+    tracked = _tracked_entries(workflow)
+    if not has_invoke and not tracked:
+        return workflow, {}, pins, notices
+
     from app.capability_client import CapabilityClient
 
-    pins = dict(pins or {})
     client = client or CapabilityClient()
+    invocations: dict[str, InvocationInfo] = {}
 
-    def resolve(name: str, version: str) -> tuple[str, dict]:
-        use = client.use(name, pins.get(name) or version)
-        pins[name] = use["version"]
-        return use["version"], use
+    # Invoke expansion runs before entry tracking so an explicit invoke version
+    # wins over tracking when the same capability is used both ways; the
+    # expanded result is already a deep copy that tracking may mutate.
+    if has_invoke:
+        def resolve(name: str, version: str) -> tuple[str, dict]:
+            use = client.use(name, pins.get(name) or version)
+            pins[name] = use["version"]
+            return use["version"], use
 
-    result = expand_workflow(workflow, resolve)
-    return result.workflow, result.invocations, pins
+        result = expand_workflow(workflow, resolve)
+        workflow = result.workflow
+        invocations = result.invocations
+    elif tracked:
+        workflow = workflow.model_copy(deep=True)
+
+    if tracked:
+        _apply_tracking(workflow, tracked, pins, client, notices)
+
+    return workflow, invocations, pins, notices
+
+
+def _tracked_entries(workflow: Workflow):
+    """Tracking targets on a workflow, as (kind, where, skill_name, target):
+    ('pool', pool_attr, None, entry) | ('agent', node_id, None, agent_config) |
+    ('skill', node_id, skill_name, skill_entry)."""
+    # Composites first, pools last: a pool entry that is both individually
+    # tracked and projected by a composite swap keeps the individual resolution
+    # (the explicit local opt-in wins over the inherited binding).
+    out = []
+    for node in workflow.nodes:
+        if node.type != "agent" or not isinstance(node.config, AgentNodeConfig):
+            continue
+        cfg = node.config
+        if cfg.track_latest and cfg.source_capability and cfg.source_version:
+            out.append(("agent", node.id, None, cfg))
+        for skill in cfg.skills:
+            if (skill.name is not None and skill.track_latest
+                    and skill.source_capability and skill.source_version):
+                out.append(("skill", node.id, skill.name, skill))
+    for attr in ("tools", "models", "prompts"):
+        for entry in getattr(workflow, attr):
+            if entry.track_latest and entry.source_capability and entry.source_version:
+                out.append(("pool", attr, None, entry))
+    return out
+
+
+def _major(version: str) -> str:
+    return version.split(".", 1)[0]
+
+
+def _tracking_target(versions: list[dict], current: str) -> str | None:
+    """Newest published version strictly newer than `current` within the same
+    major, or None. Major jumps are skipped by design (a breaking change must
+    go through the explicit upgrade flow)."""
+    major = _major(current)
+    candidates = [
+        v["version"] for v in versions
+        if v.get("stage") == "published" and _major(v["version"]) == major
+    ]
+    if not candidates:
+        return None
+    best = max(candidates, key=semver_key)
+    return best if semver_key(best) > semver_key(current) else None
+
+
+def _resolve_fresh(name: str, current: str, pinned: str | None, pins: dict,
+                   client, notices: list[str], inline: bool = False) -> dict | None:
+    """Resolve a tracked capability for a fresh run. Returns the registry use
+    response, or None when falling back to the inlined copy — a pin + notice are
+    recorded either way. A pre-existing pin (resume/restart, or a sibling invoke
+    node) fetches exactly that version and fails loudly if it is missing."""
+    from app.capability_client import CapabilityFetchError
+
+    if pinned is not None:
+        return client.use(name, pinned, inline=inline)
+    try:
+        versions = client.list_versions(name)
+    except CapabilityFetchError as exc:
+        pins[name] = current
+        notices.append(f"{name}: registry unavailable ({exc}); using inlined {current}")
+        return None
+    target = _tracking_target(versions, current)
+    if target is None:
+        pins[name] = current
+        newest = max(
+            (v["version"] for v in versions if v.get("stage") == "published"),
+            key=semver_key,
+            default=None,
+        )
+        if newest is not None and _major(newest) != _major(current):
+            notices.append(
+                f"{name}: newest published {newest} is a major jump; keeping inlined {current}"
+            )
+        return None
+    try:
+        use = client.use(name, target, inline=inline)
+    except CapabilityFetchError as exc:
+        pins[name] = current
+        notices.append(f"{name}: could not fetch {target} ({exc}); using inlined {current}")
+        return None
+    pins[name] = use["version"]
+    notices.append(f"{name}: tracked {current} -> {use['version']}")
+    return use
+
+
+def _track_workflow(workflow: Workflow, pins, client, notices) -> Workflow:
+    """Wholesale graph swap for a tracked workflow-kind stamp. Returns the
+    swapped-in workflow (local id preserved — the run belongs to the saved
+    workflow's identity) or the original on fallback."""
+    name, current = workflow.source_capability, workflow.source_version
+    use = _resolve_fresh(name, current, pins.get(name), pins, client, notices)
+    if use is None:
+        return workflow
+    artifact = use.get("artifact")
+    if isinstance(artifact, dict) and artifact.get("workflow_ref"):
+        # Published as a workflow_ref — the graph lives in git, nothing to swap.
+        notices.append(f"{name}: published artifact uses workflow_ref; keeping saved copy")
+        return workflow
+    fresh = Workflow.model_validate(artifact)
+    fresh.id = workflow.id
+    return fresh
+
+
+def _apply_tracking(workflow, tracked, pins, client, notices) -> None:
+    """Swap fresh registry content into the run-scoped workflow for tracked entries.
+
+    `workflow` must be a run-scoped copy (never the saved one). Every tracked
+    entry gets a pin recorded — resolved or fallback — so resume/restart fetches
+    exactly what this run started with. Composite swaps (agent, skill) project
+    into the pools by id; an individual tracking pass on the same pool entry
+    runs afterwards and wins over projected content (explicit local opt-in).
+    """
+    for kind, where, skill_name, target in tracked:
+        name, current = target.source_capability, target.source_version
+        use = _resolve_fresh(
+            name, current, pins.get(name), pins, client, notices,
+            inline=(kind in ("skill", "agent")),
+        )
+        if use is None:
+            continue
+        if kind == "pool":
+            pool = getattr(workflow, where)
+            idx = next(i for i, e in enumerate(pool) if e.id == target.id)
+            _swap_entry(pool, idx, use.get("artifact"))
+        elif kind == "agent":
+            node = next(n for n in workflow.nodes if n.id == where)
+            _swap_agent(workflow, node, use)
+        else:  # skill
+            node = next(n for n in workflow.nodes if n.id == where)
+            skills = node.config.skills
+            idx = next(i for i, s in enumerate(skills) if s.name == skill_name)
+            _swap_skill(workflow, skills, idx, use)
+
+
+def _swap_entry(pool: list, idx: int, artifact: dict | None) -> None:
+    """Replace pool[idx]'s content with the registry artifact, keeping id and
+    provenance fields so references by id stay valid."""
+    local = pool[idx]
+    data = local.model_dump()
+    for key, value in (artifact or {}).items():
+        if key in ("id", "source_capability", "source_version", "track_latest"):
+            continue
+        data[key] = value
+    pool[idx] = type(local).model_validate(data)
+
+
+def _upsert_tool(pool: list[ToolDefinition], tool: dict, cap_name: str, version: str) -> str:
+    """Upsert a tool definition into the pool by id — existing entries get their
+    content replaced in place, new ones are appended stamped with the composite's
+    origin. Returns the pool id."""
+    for i, e in enumerate(pool):
+        if e.id == tool.get("id"):
+            _swap_entry(pool, i, tool)
+            return e.id
+    pool.append(ToolDefinition.model_validate(
+        {**tool, "source_capability": cap_name, "source_version": version}))
+    return tool["id"]
+
+
+def _upsert_model(pool: list[ModelConfig], model: dict | None, cap_name: str,
+                  version: str) -> str | None:
+    """Upsert a model profile into the pool by id; returns the pool id (or None
+    when the artifact carries no model)."""
+    if not model or "id" not in model:
+        return None
+    for i, e in enumerate(pool):
+        if e.id == model["id"]:
+            _swap_entry(pool, i, model)
+            return e.id
+    pool.append(ModelConfig.model_validate(
+        {**model, "source_capability": cap_name, "source_version": version}))
+    return model["id"]
+
+
+def _swap_skill(workflow: Workflow, skills: list[AgentSkill], idx: int, use: dict) -> None:
+    """Project an inlined skill artifact ({name, prompt, tools}) onto a skill
+    attachment: nested tools upserted into the pool by id, prompt + tool_ids
+    replaced; name, stamps and track flag kept."""
+    art = use.get("artifact") or {}
+    entry = skills[idx]
+    ids = [_upsert_tool(workflow.tools, t, entry.source_capability, use["version"])
+           for t in art.get("tools", [])]
+    data = entry.model_dump()
+    data["prompt"] = art.get("prompt") or ""
+    data["tool_ids"] = ids
+    skills[idx] = AgentSkill.model_validate(data)
+
+
+def _swap_agent(workflow: Workflow, node: Node, use: dict) -> None:
+    """Project an inlined agent artifact ({model, prompt, tools, skills}) onto
+    an agent node: model + tools upserted into the pools by id, skills matched
+    by name (local-only skills kept, new ones added), system_prompt replaced.
+    model_id is only re-pointed when it dangles (e.g. the user deleted the
+    imported profile) — a deliberate user choice is never overridden."""
+    art = use.get("artifact") or {}
+    cap, version = node.config.source_capability, use["version"]
+    cfg = node.config
+    model_id = _upsert_model(workflow.models, art.get("model"), cap, version)
+    cfg.tool_ids = [_upsert_tool(workflow.tools, t, cap, version)
+                    for t in art.get("tools", [])]
+    cfg.system_prompt = art.get("prompt") or ""
+    cfg.skills = _project_skills(cfg.skills, art.get("skills", []), cap, version, workflow.tools)
+    if model_id and cfg.model_id not in {m.id for m in workflow.models}:
+        cfg.model_id = model_id
+
+
+def _project_skills(local: list[AgentSkill], art_skills: list[dict], cap: str,
+                    version: str, tool_pool: list[ToolDefinition]) -> list[AgentSkill]:
+    """Match artifact skills onto local attachments by name; local-only skills
+    are kept untouched, new ones appended stamped with the agent's origin."""
+    out = []
+    matched = set()
+    for s in local:
+        art = next((a for a in art_skills if a.get("name") == s.name), None)
+        if art is None:
+            out.append(s)
+            continue
+        matched.add(s.name)
+        ids = [_upsert_tool(tool_pool, t, cap, version) for t in art.get("tools", [])]
+        data = s.model_dump()
+        data["prompt"] = art.get("prompt") or ""
+        data["tool_ids"] = ids
+        out.append(AgentSkill.model_validate(data))
+    for a in art_skills:
+        if a.get("name") not in matched:
+            out.append(AgentSkill(
+                name=a["name"], prompt=a.get("prompt") or "",
+                tool_ids=[_upsert_tool(tool_pool, t, cap, version)
+                          for t in a.get("tools", [])],
+                source_capability=cap, source_version=version,
+            ))
+    return out
 
 
 def _entry_node(sub: Workflow) -> Node | None:

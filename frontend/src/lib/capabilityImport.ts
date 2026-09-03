@@ -111,7 +111,13 @@ export function applyCapability(
     case 'prompt': {
       const base = capName.split('/').pop() ?? capName
       if (isCapabilityPresent(wf, 'prompt', capName)) return { wf, added: false }
-      prompts.push({ id: base, name: base, text: artifact.text })
+      prompts.push({
+        id: base,
+        name: base,
+        text: artifact.text,
+        source_capability: capName,
+        source_version: sourceVersion ?? null,
+      })
       break
     }
     case 'skill': {
@@ -127,7 +133,13 @@ export function applyCapability(
       const toolIds = (artifact.tools as ToolDefinition[]).map(addTool)
       cfg.skills = [
         ...(cfg.skills ?? []),
-        { name: artifact.name, prompt: artifact.prompt, tool_ids: toolIds },
+        {
+          name: artifact.name,
+          prompt: artifact.prompt,
+          tool_ids: toolIds,
+          source_capability: capName,
+          source_version: sourceVersion ?? null,
+        },
       ]
       next.nodes[idx] = { ...(node as AgentNode), config: cfg }
       break
@@ -150,6 +162,8 @@ export function applyCapability(
           max_iterations: 5,
           prompt_ref: null,
           skills,
+          source_capability: capName,
+          source_version: sourceVersion ?? null,
         },
       })
       break

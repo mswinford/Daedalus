@@ -14,7 +14,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X } from 'lucide-react'
 
 import { workflowsApi, streamRunEvents, apiErrorMessage, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
@@ -41,7 +41,21 @@ import type { CapabilityKind } from '@/lib/registryApi'
 import RunPanel from '@/components/flow/RunPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
-import type { AgentNodeConfig, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
+import CapabilityVersionBadge from '@/components/flow/CapabilityVersionBadge'
+import TrackToggle from '@/components/flow/TrackToggle'
+import { useCapabilityUpdates } from '@/lib/useCapabilityUpdates'
+import type { UpdateStatus } from '@/lib/capabilityUpdates'
+import UpgradeCapabilityModal from '@/components/flow/UpgradeCapabilityModal'
+import {
+  agentArtifactView,
+  agentView,
+  runGuardWarning,
+  skillArtifactView,
+  skillView,
+  upsertModel,
+  upsertTools,
+} from '@/lib/capabilityUpgrade'
+import type { AgentNodeConfig, AgentSkill, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
 
@@ -54,6 +68,7 @@ const nodeTypes = {
   human_in_loop: FlowNode,
   custom_function: FlowNode,
   invoke: FlowNode,
+  copilot_agent: FlowNode,
 }
 
 function WorkflowEditorInner() {
@@ -74,11 +89,22 @@ function WorkflowEditorInner() {
   const [showSecrets, setShowSecrets] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // Local override for the workflow-level live-ref flag (the query data is read-only).
+  const [wfTrackOverride, setWfTrackOverride] = useState<boolean | null>(null)
 
   const { data: workflow, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['workflow', id],
     queryFn: () => workflowsApi.get(id!),
   })
+  const updates = useCapabilityUpdates(workflow ?? null)
+  const { data: pausedRuns } = useQuery({ queryKey: ['runs', 'paused'], queryFn: () => workflowsApi.listPausedRuns() })
+  const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false)
+  const [configUpgrading, setConfigUpgrading] = useState<UpdateStatus | null>(null)
+  const upgradeArtifactRef = useRef<Record<string, any> | null>(null)
+  const emptyEntryRef = useRef({})
+  useEffect(() => {
+    if (updates.error) setUpdateNoticeDismissed(false)
+  }, [updates.error])
   const navigate = useNavigate()
 
   const syncedIdRef = useRef<string | null>(null)
@@ -98,6 +124,7 @@ function WorkflowEditorInner() {
     setSelectedId(null)
     setValidation(null)
     setDirty(false)
+    setWfTrackOverride(null)
     syncedIdRef.current = workflow.id
     syncedJsonRef.current = json
   }, [workflow])
@@ -129,8 +156,12 @@ function WorkflowEditorInner() {
       models,
       prompts: workflow.prompts ?? [],
       state_schema: workflow.state_schema ?? null,
+      // Top-level provenance must round-trip or autosave would wipe the stamp.
+      source_capability: workflow.source_capability ?? null,
+      source_version: workflow.source_version ?? null,
+      track_latest: wfTrackOverride ?? workflow.track_latest ?? false,
     }
-  }, [workflow, id, nodes, edges, tools, models])
+  }, [workflow, id, nodes, edges, tools, models, wfTrackOverride])
 
   useEffect(() => {
     latestPayloadRef.current = buildPayload()
@@ -199,6 +230,101 @@ function WorkflowEditorInner() {
       )
     }
     setDirty(true)
+  }
+
+  // ─── Capability upgrades (skill attachments + agent nodes) ─────────────────
+
+  const openConfigUpgrade = (where: string) => {
+    const s = updates.statuses.find((x) => x.where === where && x.hasUpdate)
+    if (!s) return
+    upgradeArtifactRef.current = null
+    setConfigUpgrading(s)
+  }
+
+  const projectForUpgrade = useCallback(
+    (oldA: Record<string, any> | null, newA: Record<string, any>) => {
+      const s = configUpgrading
+      if (!s) throw new Error('No upgrade in progress')
+      upgradeArtifactRef.current = newA
+      const nodeId = s.where.split(' ')[0].slice(5)
+      const node = nodes.find((n) => n.id === nodeId)
+      if (!node || node.data.nodeType !== 'agent') throw new Error('Agent node no longer exists')
+      const cfg = node.data.config as AgentNodeConfig
+      const wfTools = tools as unknown as Array<Record<string, unknown>>
+      if (s.kind === 'skill') {
+        const skills = cfg.skills ?? []
+        const si = skills.findIndex((sk) => sk.source_capability === s.capabilityName)
+        if (si < 0) throw new Error('Skill no longer attached to this agent')
+        return {
+          local: skillView(skills[si] as unknown as Record<string, unknown>, wfTools),
+          old: oldA ? skillArtifactView(oldA) : null,
+          new: skillArtifactView(newA),
+        }
+      }
+      const wfModels = models as unknown as Array<Record<string, unknown>>
+      return {
+        local: agentView(cfg as unknown as Record<string, unknown>, wfModels, wfTools),
+        old: oldA ? agentArtifactView(oldA) : null,
+        new: agentArtifactView(newA),
+      }
+    },
+    [configUpgrading, nodes, tools, models],
+  )
+
+  const applyConfigUpgrade = async (merged: Record<string, unknown>, choices: Record<string, 'local' | 'upstream'>) => {
+    const s = configUpgrading
+    if (!s) return
+    const artifact = upgradeArtifactRef.current
+    const nodeId = s.where.split(' ')[0].slice(5)
+    const node = nodes.find((n) => n.id === nodeId)
+    if (!node || node.data.nodeType !== 'agent') throw new Error('Agent node no longer exists')
+    const cfg = { ...(node.data.config as AgentNodeConfig) }
+
+    let nextTools: Array<Record<string, unknown>> | null = null
+    const upsertIntoPool = (defs: ToolDefinition[]) => {
+      if (defs.length === 0) return
+      const base = nextTools ?? (tools as unknown as Array<Record<string, unknown>>)
+      const defsAny = defs as unknown as Array<Record<string, unknown>>
+      nextTools = upsertTools(base, defsAny, s.capabilityName, s.latestVersion!)
+    }
+
+    if (s.kind === 'skill') {
+      const skills = cfg.skills ?? []
+      const si = skills.findIndex((sk) => sk.source_capability === s.capabilityName)
+      if (si < 0) throw new Error('Skill no longer attached to this agent')
+      let toolIds = skills[si].tool_ids
+      if (choices.tools === 'upstream' && artifact) upsertIntoPool((artifact.tools as ToolDefinition[]) ?? [])
+      if (choices.tools === 'upstream' && artifact) toolIds = ((artifact.tools as ToolDefinition[]) ?? []).map((t) => t.id)
+      const skill: AgentSkill = { ...skills[si], prompt: merged.prompt as string, tool_ids: toolIds, source_version: s.latestVersion! }
+      cfg.skills = skills.map((sk, i) => (i === si ? skill : sk))
+    } else {
+      if (choices.model === 'upstream' && artifact?.model) {
+        const r = upsertModel(models as unknown as Array<Record<string, unknown>>, artifact.model as Record<string, any>, s.capabilityName, s.latestVersion!)
+        handleModelsChange(r.pool as unknown as ModelConfig[])
+        cfg.model_id = r.id
+      }
+      cfg.system_prompt = merged.system_prompt as string
+      if (choices.tools === 'upstream' && artifact) {
+        upsertIntoPool((artifact.tools as ToolDefinition[]) ?? [])
+        cfg.tool_ids = ((artifact.tools as ToolDefinition[]) ?? []).map((t) => t.id)
+      }
+      if (choices.skills === 'upstream' && artifact) {
+        const nested: Array<{ name: string; prompt: string; tools?: ToolDefinition[] }> = (artifact.skills as any) ?? []
+        upsertIntoPool(nested.flatMap((sk) => sk.tools ?? []))
+        cfg.skills = nested.map((sk) => ({
+          name: sk.name,
+          prompt: sk.prompt,
+          tool_ids: (sk.tools ?? []).map((t) => t.id),
+          source_capability: s.capabilityName,
+          source_version: s.latestVersion!,
+        }))
+      }
+      cfg.source_version = s.latestVersion!
+    }
+
+    if (nextTools) handleToolsChange(nextTools as unknown as ToolDefinition[])
+    handleConfigChange(nodeId, cfg)
+    setConfigUpgrading(null)
   }
 
   // ─── Node creation (drag from palette) ─────────────────────────────────────
@@ -371,6 +497,13 @@ function WorkflowEditorInner() {
   const runLastSeqRef = useRef(0)
   const runFinishedRef = useRef(false)
 
+  // Paused runs rebuild their graph from the saved workflow on resume, so
+  // upgrading capabilities mid-flight can break them.
+  const runWarning = useMemo(() => {
+    const pausedCount = (pausedRuns ?? []).filter((r) => r.workflow_id === id).length
+    return runGuardWarning(run?.status, pausedCount)
+  }, [pausedRuns, id, run])
+
   const streamEvents = (runId: string): (() => void) => {
     let close: () => void = () => {}
     close = streamRunEvents(
@@ -379,7 +512,7 @@ function WorkflowEditorInner() {
         if (ev.seq != null && ev.seq <= runLastSeqRef.current) return
         if (ev.seq != null) runLastSeqRef.current = ev.seq
         setRun((r) => (r ? { ...r, events: [...r.events, ev] } : r))
-        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || (ev.type === 'node_error' && !!ev.data?.fatal)
+        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || ev.type === 'run_cancelled' || (ev.type === 'node_error' && !!ev.data?.fatal)
         if (terminal || ev.type === 'human_request') {
           runFinishedRef.current = true
           workflowsApi.getRun(runId).then(setRun).catch(() => {})
@@ -429,6 +562,19 @@ function WorkflowEditorInner() {
       runCloseRef.current = close
     } catch (err) {
       setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!run?.id) return
+    try {
+      await workflowsApi.cancelRun(run.id)
+      // Paused runs are terminal immediately; running runs get the terminal
+      // `run_cancelled` event over the existing stream. Either way a fresh
+      // fetch keeps the panel in sync.
+      workflowsApi.getRun(run.id).then(setRun).catch(() => {})
+    } catch {
+      workflowsApi.getRun(run.id).then(setRun).catch(() => {})
     }
   }
 
@@ -496,6 +642,10 @@ function WorkflowEditorInner() {
   }, [id])
 
   if (isLoading) return <div className="p-6 text-zinc-500">Loading...</div>
+  const updateCount = updates.statuses.filter((s) => s.hasUpdate).length
+  const hasBreakingUpdate = updates.statuses.some((s) => s.hasUpdate && s.isBreaking)
+  const wfUpdate = updates.statuses.find((s) => s.kind === 'workflow')
+
   if (isError || !workflow)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950 p-6 text-center">
@@ -524,8 +674,14 @@ function WorkflowEditorInner() {
     <div className="flex h-full flex-col bg-zinc-950">
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <h1 className="font-medium">{workflow.name}</h1>
+          {wfUpdate && (
+            <CapabilityVersionBadge current={wfUpdate.currentVersion} latest={wfUpdate.latestVersion} breaking={wfUpdate.isBreaking} tracking={!!(wfTrackOverride ?? workflow.track_latest)} />
+          )}
+          {workflow.source_capability && (
+            <TrackToggle checked={!!(wfTrackOverride ?? workflow.track_latest)} onChange={(v) => { setWfTrackOverride(v); setDirty(true) }} />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -542,6 +698,22 @@ function WorkflowEditorInner() {
             <PackagePlus size={14} />
             Add capability
           </button>
+          {updates.statuses.length > 0 && (
+            <button
+              onClick={updates.check}
+              disabled={updates.checking}
+              title="Check for capability updates"
+              className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={updates.checking ? 'animate-spin' : ''} />
+              Updates
+              {updateCount > 0 && (
+                <span className={`rounded-full px-1.5 text-xs font-semibold ${hasBreakingUpdate ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                  {updateCount}
+                </span>
+              )}
+            </button>
+          )}
           <button
             onClick={() => setShowSecrets(true)}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
@@ -603,6 +775,15 @@ function WorkflowEditorInner() {
           </button>
         </div>
       </header>
+
+      {updates.error && !updateNoticeDismissed && (
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-800 bg-amber-950/20 px-4 py-1.5">
+          <p className="text-xs text-amber-400">Couldn't check for capability updates — {updates.error}</p>
+          <button onClick={() => setUpdateNoticeDismissed(true)} className="shrink-0 text-zinc-500 hover:text-zinc-300">
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       {showInput && (
         <div className="border-b border-zinc-800 bg-zinc-950 px-4 py-2">
@@ -701,15 +882,33 @@ function WorkflowEditorInner() {
             onErrorHandlingChange={handleErrorToggle}
             onDeleteNode={handleDeleteNode}
             edges={edges}
+            updates={updates.statuses}
+            onUpgradeOrigin={openConfigUpgrade}
           />
         </aside>
       </div>
+
+      {/* Upgrade modal for skill attachments / agent nodes */}
+      {configUpgrading && (
+        <UpgradeCapabilityModal
+          status={configUpgrading}
+          localEntry={emptyEntryRef.current}
+          project={projectForUpgrade}
+          runWarning={runWarning}
+          onClose={() => setConfigUpgrading(null)}
+          onApply={applyConfigUpgrade}
+        />
+      )}
 
       {/* Resources panel (tools + models) */}
       {showResources && (
         <ResourcesPanel
           tools={tools}
           models={models}
+          prompts={workflow?.prompts ?? []}
+          wfId={id ?? undefined}
+          updates={updates.statuses}
+          runWarning={runWarning}
           onToolsChange={handleToolsChange}
           onModelsChange={handleModelsChange}
           onOpenRegistry={(kind) => { setShowResources(false); setPickerKind(kind); setShowPicker(true) }}
@@ -732,7 +931,7 @@ function WorkflowEditorInner() {
       )}
 
       {/* Bottom: run log / debug panel */}
-      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} />}
+      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} onCancel={handleCancel} />}
     </div>
   )
 }

@@ -9,7 +9,8 @@
 | Frontend typecheck | `cd frontend && npx tsc --noEmit` |
 | Frontend build | `cd frontend && npm run build` |
 | Frontend tests | `cd frontend && npm run test` (Vitest, no jsdom — pure functions only; config in `vitest.config.ts` reusing the `@` alias) |
-| Full dev stack (one command) | `./scripts/dev.sh` — backend :3000 + registry :3010 + Vite :5173; Ctrl-C stops all, logs in `.dev/` |
+| Fresh-machine setup | `./scripts/setup.sh` (idempotent) — creates `.venv`, installs backend/registry deps (`pip install -e ".[dev]"`) + frontend deps (`npm install`). Pass `copilot` for the optional Copilot SDK extra |
+| Full dev stack (one command) | `./scripts/dev.sh` — backend :3000 + registry :3010 + Vite :5173; Ctrl-C stops all, logs in `.dev/`. Preflights deps (prefers `.venv`) and points at `setup.sh` if missing |
 | Backend dev server | `python backend/cli.py` (uvicorn on 127.0.0.1:3000, auto-reload) |
 | Frontend dev server | `cd frontend && npm run dev` (:5173, proxies /api → :3000) |
 | After editing `schema/models.py` | `PYTHONPATH=. python scripts/generate_schema.py` (repo root) **and** `cd frontend && npm run generate:types` — the first rewrites `schema/*.json`, the second rewrites `frontend/src/lib/workflowTypes.generated.ts` (DO-NOT-EDIT; hand layer in `workflowTypes.ts` keeps only React Flow wrappers + frontend-only fields) |
@@ -31,7 +32,7 @@ Key directories:
 - `backend/app/sandbox/` — RestrictedPython execution
 - `frontend/src/pages/` — WorkflowEditor (React Flow canvas + editor shell), EmptyState
 - `frontend/src/components/layout/` — AppLayout route shell, WorkflowSidebar (list/create/delete/search)
-- `frontend/src/components/flow/` — ConfigPanel, RunPanel (+ inline human-input form), ModelsPanel, ToolsPanel, SecretsPanel, FlowNode (custom React Flow node)
+- `frontend/src/components/flow/` — ConfigPanel, RunPanel (+ inline human-input form + cancel), ResourcesPanel (tools/models modal), ToolForm, ModelForm, SecretsPanel, FlowNode (custom React Flow node)
 - `frontend/src/lib/` — api.ts (axios + WS stream), graphTransform.ts, workflowTypes.ts
 
 ## Gotchas

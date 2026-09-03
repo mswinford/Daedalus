@@ -74,7 +74,7 @@ export interface HumanInterruptValue {
 // without null-checks (required in every response the backend actually sends).
 export type WorkflowRun = GenWorkflowRun & {
   interrupt_value?: HumanInterruptValue
-  invoke_pins?: Record<string, string>
+  capability_pins?: Record<string, string>
   capability_usage?: Record<string, string | null>
   input_data: Record<string, any>
   output_data?: Record<string, any>
@@ -161,6 +161,8 @@ export const workflowsApi = {
   listPausedRuns: () => api.get<PausedRunSummary[]>('/runs/paused').then(r => r.data),
   resumeRun: (runId: string, humanInput: Record<string, any>) =>
     api.post(`/runs/${runId}/resume`, humanInput).then(r => r.data),
+  cancelRun: (runId: string) =>
+    api.post<{ run_id: string; status: string }>(`/runs/${runId}/cancel`).then(r => r.data),
   validate: (id: string, body?: Workflow) =>
     api.post<ValidationResult>(`/workflows/${id}/validate`, body ?? null).then(r => r.data),
 }

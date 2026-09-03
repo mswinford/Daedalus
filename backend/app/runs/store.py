@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS runs (
     total_tokens_input INTEGER NOT NULL DEFAULT 0,
     total_tokens_output INTEGER NOT NULL DEFAULT 0,
     estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
-    invoke_pins TEXT,
+    capability_pins TEXT,
     capability_usage TEXT,
     started_at REAL NOT NULL,
     completed_at REAL
@@ -57,10 +57,14 @@ def _store_connect(path: str) -> sqlite3.Connection:
     secure_owner_only(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_STORE_SCHEMA)
-    # Older DBs predate the invoke_pins column; add it in place.
+    # Older DBs predate the capability_pins column (originally added as
+    # invoke_pins); rename it in place when possible, otherwise add it.
     cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
-    if "invoke_pins" not in cols:
-        conn.execute("ALTER TABLE runs ADD COLUMN invoke_pins TEXT")
+    if "capability_pins" not in cols:
+        if "invoke_pins" in cols:
+            conn.execute("ALTER TABLE runs RENAME COLUMN invoke_pins TO capability_pins")
+        else:
+            conn.execute("ALTER TABLE runs ADD COLUMN capability_pins TEXT")
         conn.commit()
     # Older DBs predate the capability_usage column; add it in place.
     if "capability_usage" not in cols:
@@ -89,7 +93,7 @@ def _write_summary(path: str, fields: tuple) -> None:
             INSERT OR REPLACE INTO runs (
                 run_id, workflow_id, status, input_data, output_data, error,
                 total_tokens_input, total_tokens_output, estimated_cost_usd,
-                invoke_pins, capability_usage, started_at, completed_at
+                capability_pins, capability_usage, started_at, completed_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             fields,
@@ -186,6 +190,22 @@ def _persist_event(run_id: str, seq: int, payload: dict[str, Any]) -> None:
     )
 
 
+def _delete_checkpoint_thread(path: str, thread_id: str) -> None:
+    """Delete a run's graph checkpoints and pending writes.
+
+    Called when a run is cancelled: it will never be resumed, so its thread is
+    dropped from the checkpoint store (startup recovery scans for threads with
+    pending __interrupt__ writes — deletion is what keeps a cancelled paused
+    run from being resurrected on the next restart)."""
+    conn = _store_connect(path)
+    try:
+        conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+        conn.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _load_events(run_id: str) -> list[dict[str, Any]]:
     conn = _store_connect(str(get_settings().checkpoint_db))
     try:
@@ -205,7 +225,7 @@ def _save_run_summary(record: "RunRecord") -> None:
         json.dumps(record.output_data, default=_json_default),
         record.error, record.total_tokens_input,
         record.total_tokens_output, record.estimated_cost_usd,
-        json.dumps(record.invoke_pins, default=_json_default) if record.invoke_pins else None,
+        json.dumps(record.capability_pins, default=_json_default) if record.capability_pins else None,
         json.dumps(record.capability_usage, default=_json_default) if record.capability_usage else None,
         record.started_at, record.completed_at,
     )))
@@ -225,7 +245,7 @@ def _load_finished_summaries() -> list[sqlite3.Row]:
     conn = _store_connect(str(get_settings().checkpoint_db))
     try:
         return conn.execute(
-            "SELECT * FROM runs WHERE status IN ('completed', 'failed')"
+            "SELECT * FROM runs WHERE status IN ('completed', 'failed', 'cancelled')"
         ).fetchall()
     finally:
         conn.close()
@@ -233,6 +253,10 @@ def _load_finished_summaries() -> list[sqlite3.Row]:
 
 def _load_terminal_runs() -> list[sqlite3.Row]:
     """Terminal (completed/failed) run rows for offline aggregation.
+
+    Cancelled runs are deliberately excluded: a user cancelling is not a
+    signal about capability quality, so it must not count against the
+    success-rate score pushed to the registry.
 
     Only the columns the metrics pass needs: run_id, status, started_at,
     completed_at, estimated_cost_usd, capability_usage.
@@ -253,8 +277,8 @@ def _prune_store() -> None:
 
 
 def _is_terminal(event: dict[str, Any]) -> bool:
-    """True for the event that marks a run as finished (success or fatal error)."""
-    if event.get("type") in ("run_end", "human_timeout"):
+    """True for the event that marks a run as finished (success, fatal error, or cancel)."""
+    if event.get("type") in ("run_end", "human_timeout", "run_cancelled"):
         return True
     if event.get("type") == "node_error" and event.get("data", {}).get("fatal"):
         return True

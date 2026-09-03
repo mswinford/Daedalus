@@ -28,16 +28,22 @@ class CapabilityClient:
         ).rstrip("/")
         self.timeout = timeout
 
-    def use(self, name: str, version: str = "latest") -> dict:
-        """GET /capabilities/{name}/use → {name, version (resolved), kind, stage, artifact, manifest}.
+    def use(self, name: str, version: str = "latest", inline: bool = False) -> dict:
+        """GET /capabilities/{name}/use?version=...[&inline=true] → {version, kind, artifact}.
 
-        Raises CapabilityFetchError when the registry is unreachable or the
-        capability/version does not exist (or is unpublished).
+        With inline=True, composite artifacts (skill/agent) come back with all
+        capability refs resolved into self-contained payloads (registry/inline.py).
+
+        Raises CapabilityNotFoundError for 404 (unknown capability/version or
+        unpublished) and CapabilityFetchError when the registry is unreachable.
         """
+        params = {"version": version}
+        if inline:
+            params["inline"] = "true"
         try:
             resp = httpx.get(
                 f"{self.base_url}/registry/capabilities/{name}/use",
-                params={"version": version},
+                params=params,
                 timeout=self.timeout,
             )
         except httpx.HTTPError as exc:
@@ -51,6 +57,29 @@ class CapabilityClient:
                 f"registry error {resp.status_code} for {name}@{version}: {resp.text[:200]}"
             )
         return resp.json()
+
+    def list_versions(self, name: str) -> list[dict]:
+        """GET /capabilities/{name} → all versions (newest first), each with
+        version/kind/stage/... metadata.
+
+        Raises CapabilityNotFoundError for an unknown capability (404) and
+        CapabilityFetchError when the registry is unreachable — same contract
+        as use().
+        """
+        try:
+            resp = httpx.get(
+                f"{self.base_url}/registry/capabilities/{name}",
+                timeout=self.timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise CapabilityFetchError(f"registry unreachable at {self.base_url}: {exc}") from exc
+        if resp.status_code == 404:
+            raise CapabilityNotFoundError(f"capability '{name}' not found")
+        if resp.status_code >= 400:
+            raise CapabilityFetchError(
+                f"registry error {resp.status_code} for {name}: {resp.text[:200]}"
+            )
+        return resp.json().get("versions", [])
 
     def write_evaluation(self, name: str, version: str, payload: dict) -> dict:
         """PUT /capabilities/{name}/versions/{version}/evaluation → the registry's response.

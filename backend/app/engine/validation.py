@@ -3,6 +3,7 @@
 Mirrors the structural rules the GraphBuilder applies at build time so the
 editor's "Validate" button can surface problems before a run is attempted.
 """
+import os
 import re
 from typing import Optional
 
@@ -180,6 +181,20 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
                                     f"references unknown tool '{tid}'",
                             node_id=n.id,
                         ))
+
+        elif n.type == "copilot_agent":
+            if not cfg.task.strip():
+                errors.append(ValidationIssue(
+                    level="error", code="E_COPILOT_TASK_EMPTY",
+                    message=f"Copilot node '{n.id}' has an empty task",
+                    node_id=n.id,
+                ))
+            if cfg.working_dir != "scratch" and not os.path.isabs(cfg.working_dir):
+                errors.append(ValidationIssue(
+                    level="error", code="E_COPILOT_WORKDIR_RELATIVE",
+                    message=f"Copilot node '{n.id}': working_dir must be 'scratch' or an absolute path",
+                    node_id=n.id,
+                ))
 
         elif n.type == "conditional":
             cond_edges = out_edges.get(n.id, [])

@@ -337,7 +337,7 @@ def test_token_usage_across_region_boundary(invoke_client, monkeypatch):
     assert llm[0]["node_id"] == "inv__agent"
 
 
-# ─── item 6: invoke_pins on finished-run recovery ────────────────────────────
+# ─── item 6: capability_pins on finished-run recovery ────────────────────────────
 
 def test_finished_invoke_run_recovers_pins_after_restart(invoke_client):
     """A completed run's stored pins are rebuilt from the store after a restart,
@@ -348,18 +348,18 @@ def test_finished_invoke_run_recovers_pins_after_restart(invoke_client):
     reg.add("acme/sub", _sub(), "1.0.0")
     run_id = _start_run(client)
     body = _wait_for_status(client, run_id, "completed")
-    assert body["invoke_pins"] == {"acme/sub": "1.0.0"}
+    assert body["capability_pins"] == {"acme/sub": "1.0.0"}
 
     runs_module.flush_store()
     runs_module.RUNS.clear()  # "restart"
     with TestClient(app) as restarted:
         body = restarted.get(f"/api/runs/{run_id}").json()
         assert body["status"] == "completed"
-        assert body["invoke_pins"] == {"acme/sub": "1.0.0"}
+        assert body["capability_pins"] == {"acme/sub": "1.0.0"}
 
 
 def test_finished_run_without_pins_recovers(invoke_client):
-    """A finished run whose store row has NULL invoke_pins recovers without
+    """A finished run whose store row has NULL capability_pins recovers without
     crashing and reports pins as null."""
     client, _reg = invoke_client
     from app import runs as runs_module
@@ -381,11 +381,11 @@ def test_finished_run_without_pins_recovers(invoke_client):
 
     run_id = _start_run(client, wf_id="plain-wf", payload={})
     body = _wait_for_status(client, run_id, "completed")
-    assert body["invoke_pins"] in (None, {})  # no invoke nodes → nothing stored
+    assert body["capability_pins"] in (None, {})  # no invoke nodes → nothing stored
 
     runs_module.flush_store()
     runs_module.RUNS.clear()  # "restart"
     with TestClient(app) as restarted:
         body = restarted.get(f"/api/runs/{run_id}").json()
         assert body["status"] == "completed"
-        assert body["invoke_pins"] is None
+        assert body["capability_pins"] is None

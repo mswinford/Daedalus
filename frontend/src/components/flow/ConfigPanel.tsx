@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, AlertTriangle, ArrowUpCircle } from 'lucide-react'
 import type { Edge } from '@xyflow/react'
 
 import {
@@ -18,8 +18,12 @@ import {
   type FieldMapping,
   type PromptDefinition,
   type AgentSkill,
+  type CopilotAgentNodeConfig,
   type InvokeNodeConfig,
 } from '@/lib/workflowTypes'
+import type { UpdateStatus } from '@/lib/capabilityUpdates'
+import CapabilityVersionBadge from './CapabilityVersionBadge'
+import TrackToggle from './TrackToggle'
 import InvokeCapabilityPicker from './InvokeCapabilityPicker'
 
 interface Props {
@@ -31,6 +35,8 @@ interface Props {
   onErrorHandlingChange: (nodeId: string, enabled: boolean) => void
   onDeleteNode: (nodeId: string) => void
   edges: Edge[]
+  updates?: UpdateStatus[]
+  onUpgradeOrigin?: (where: string) => void
 }
 
 // ─── small form primitives ──────────────────────────────────────────────────
@@ -89,7 +95,20 @@ function EndEditor({ config, set }: { config: EndNodeConfig; set: (c: EndNodeCon
   )
 }
 
-function AgentEditor({ config, set, models, tools, prompts }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[]; prompts: PromptDefinition[] }) {
+function UpgradeLink({ status, onClick }: { status: UpdateStatus; onClick(): void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+        status.isBreaking ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25' : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+      }`}
+    >
+      <ArrowUpCircle size={12} /> Upgrade
+    </button>
+  )
+}
+
+function AgentEditor({ config, set, models, tools, prompts, nodeId, updates, onUpgradeOrigin }: { config: AgentNodeConfig; set: (c: AgentNodeConfig) => void; models: ModelConfig[]; tools: ToolDefinition[]; prompts: PromptDefinition[]; nodeId: string; updates?: UpdateStatus[]; onUpgradeOrigin?: (where: string) => void }) {
   const skills = config.skills ?? []
 
   const toggleTool = (id: string) => {
@@ -166,40 +185,48 @@ function AgentEditor({ config, set, models, tools, prompts }: { config: AgentNod
           {skills.length === 0 && (
             <p className="text-xs text-zinc-600">None — skills fold extra prompt + tools into this agent.</p>
           )}
-          {skills.map((s, i) => (
-            <div key={i} className="space-y-1.5 rounded-md border border-zinc-800 p-2">
-              <div className="flex items-center gap-1.5">
-                <input
-                  className={inputCls}
-                  placeholder={`skill_${i + 1}`}
-                  value={s.name ?? ''}
-                  onChange={(e) => updateSkill(i, { name: e.target.value || null })}
-                />
-                <button
-                  onClick={() => set({ ...config, skills: skills.filter((_, j) => j !== i) })}
-                  className="text-red-400 hover:text-red-300"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <textarea
-                className={`${inputCls} min-h-[60px] font-mono text-xs`}
-                placeholder="Skill prompt (appended to the system prompt)"
-                value={s.prompt}
-                onChange={(e) => updateSkill(i, { prompt: e.target.value })}
-              />
-              {tools.length > 0 && (
-                <div className="space-y-1">
-                  {tools.map((t) => (
-                    <label key={t.id} className="flex items-center gap-2 text-sm text-zinc-300">
-                      <input type="checkbox" checked={s.tool_ids.includes(t.id)} onChange={() => toggleSkillTool(i, t.id)} />
-                      {t.name}
-                    </label>
-                  ))}
+          {skills.map((s, i) => {
+            const su = updates?.find((u) => u.kind === 'skill' && u.where === `node:${nodeId} skill:${s.name ?? i}`)
+            return (
+              <div key={i} className="space-y-1.5 rounded-md border border-zinc-800 p-2">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    className={inputCls}
+                    placeholder={`skill_${i + 1}`}
+                    value={s.name ?? ''}
+                    onChange={(e) => updateSkill(i, { name: e.target.value || null })}
+                  />
+                  {su && <CapabilityVersionBadge current={su.currentVersion} latest={su.latestVersion} breaking={su.isBreaking} tracking={!!s.track_latest} />}
+                  {s.source_capability && (
+                    <TrackToggle checked={!!s.track_latest} onChange={(v) => updateSkill(i, { track_latest: v })} />
+                  )}
+                  {su?.hasUpdate && onUpgradeOrigin && <UpgradeLink status={su} onClick={() => onUpgradeOrigin(su.where)} />}
+                  <button
+                    onClick={() => set({ ...config, skills: skills.filter((_, j) => j !== i) })}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
+                <textarea
+                  className={`${inputCls} min-h-[60px] font-mono text-xs`}
+                  placeholder="Skill prompt (appended to the system prompt)"
+                  value={s.prompt}
+                  onChange={(e) => updateSkill(i, { prompt: e.target.value })}
+                />
+                {tools.length > 0 && (
+                  <div className="space-y-1">
+                    {tools.map((t) => (
+                      <label key={t.id} className="flex items-center gap-2 text-sm text-zinc-300">
+                        <input type="checkbox" checked={s.tool_ids.includes(t.id)} onChange={() => toggleSkillTool(i, t.id)} />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -457,6 +484,80 @@ function HumanInLoopEditor({ config, set }: { config: HumanInLoopNodeConfig; set
   )
 }
 
+function CopilotAgentEditor({ config, set }: { config: CopilotAgentNodeConfig; set: (c: CopilotAgentNodeConfig) => void }) {
+  return (
+    <div className="space-y-3">
+      <Field label="Task">
+        <textarea
+          className={`${inputCls} min-h-[90px] font-mono text-xs`}
+          value={config.task}
+          placeholder="Summarize the file in data.path and write a report"
+          onChange={(e) => set({ ...config, task: e.target.value })}
+        />
+        <p className="mt-0.5 text-[11px] text-zinc-600">
+          {'{{data.field}}'} placeholders resolve from run state (inputs live under data.*).
+        </p>
+      </Field>
+      <Field label="Model">
+        <input
+          className={inputCls}
+          value={config.model ?? ''}
+          placeholder="auto"
+          onChange={(e) => set({ ...config, model: e.target.value || null })}
+        />
+        <p className="mt-0.5 text-[11px] text-zinc-600">Copilot model id (e.g. gpt-5); empty = auto routing.</p>
+      </Field>
+      <Field label="Working directory">
+        <input
+          className={inputCls}
+          value={config.working_dir}
+          placeholder="scratch"
+          onChange={(e) => set({ ...config, working_dir: e.target.value })}
+        />
+        <p className="mt-0.5 text-[11px] text-zinc-600">
+          'scratch' for a per-run private directory, or an absolute path (kept after the run).
+        </p>
+      </Field>
+      <Field label="Permission policy">
+        <select
+          className={inputCls}
+          value={config.permission_policy}
+          onChange={(e) => set({ ...config, permission_policy: e.target.value as 'safe_only' | 'approve_all' })}
+        >
+          <option value="safe_only">safe_only — file writes in workdir only, no shell</option>
+          <option value="approve_all">approve_all — everything the runtime permits</option>
+        </select>
+        {config.permission_policy === 'approve_all' && (
+          <p className="mt-0.5 text-[11px] text-amber-400">
+            The agent can run shell commands and write anywhere under your account. Use with care.
+          </p>
+        )}
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Timeout (s)">
+          <input
+            className={inputCls}
+            type="number"
+            min={1}
+            value={config.timeout_seconds ?? ''}
+            placeholder="none"
+            onChange={(e) => set({ ...config, timeout_seconds: e.target.value ? Number(e.target.value) : null })}
+          />
+        </Field>
+        <Field label="Auth secret">
+          <input
+            className={inputCls}
+            value={config.auth_ref ?? ''}
+            placeholder="ambient"
+            onChange={(e) => set({ ...config, auth_ref: e.target.value || null })}
+          />
+        </Field>
+      </div>
+      <ListField value={config.output_fields} onChange={(v) => set({ ...config, output_fields: v })} placeholder="e.g. final_message" />
+    </div>
+  )
+}
+
 function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: InvokeNodeConfig) => void }) {
   const [picking, setPicking] = useState(false)
 
@@ -547,7 +648,7 @@ function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: Invo
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges }: Props) {
+export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges, updates, onUpgradeOrigin }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -555,17 +656,28 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
   }
 
   const set = (config: NodeConfig) => onConfigChange(node.id, config)
+  const agentStatus = node.type === 'agent' ? updates?.find((u) => u.kind === 'agent' && u.where === `node:${node.id}`) : undefined
 
   return (
     <div className="space-y-3">
       <div className="border-b border-zinc-800 pb-2">
         <p className="text-xs text-zinc-500">Editing node</p>
-        <p className="font-mono text-sm text-zinc-200">{node.id}</p>
+        <p className="flex items-center gap-1.5 font-mono text-sm text-zinc-200">
+          <span className="truncate">{node.id}</span>
+          {agentStatus && (
+            <CapabilityVersionBadge current={agentStatus.currentVersion} latest={agentStatus.latestVersion} breaking={agentStatus.isBreaking} tracking={node.type === 'agent' ? !!(node.config as AgentNodeConfig).track_latest : false} />
+          )}
+          {node.type === 'agent' && (node.config as AgentNodeConfig).source_capability && (
+            <TrackToggle checked={!!(node.config as AgentNodeConfig).track_latest} onChange={(v) => onConfigChange(node.id, { ...(node.config as AgentNodeConfig), track_latest: v })} />
+          )}
+          {agentStatus?.hasUpdate && onUpgradeOrigin && <UpgradeLink status={agentStatus} onClick={() => onUpgradeOrigin(agentStatus.where)} />}
+        </p>
       </div>
 
       {node.type === 'start' && <StartEditor config={node.config} set={set} />}
       {node.type === 'end' && <EndEditor config={node.config} set={set} />}
-      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} />}
+      {node.type === 'agent' && <AgentEditor config={node.config} set={set} models={models} tools={tools} prompts={prompts} nodeId={node.id} updates={updates} onUpgradeOrigin={onUpgradeOrigin} />}
+      {node.type === 'copilot_agent' && <CopilotAgentEditor config={node.config} set={(c) => onConfigChange(node.id, c)} />}
       {node.type === 'conditional' && <ConditionalEditor config={node.config} set={set} nodeId={node.id} edges={edges} />}
       {node.type === 'transform' && <TransformEditor config={node.config} set={set} />}
       {node.type === 'custom_function' && <CustomFunctionEditor config={node.config} set={set} />}

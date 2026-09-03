@@ -1,6 +1,7 @@
 """In-memory run records: RunRecord, the RUNS registry, and pruning."""
 import asyncio
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,9 +27,10 @@ class RunRecord:
     total_tokens_input: int = 0
     total_tokens_output: int = 0
     estimated_cost_usd: float = 0.0
-    # capability name → resolved semver, for workflows with invoke nodes;
-    # resume/restart re-expands with these pins so the graph structure is stable.
-    invoke_pins: dict[str, str] | None = None
+    # capability name → resolved semver, for invoke nodes and live-tracked imports;
+    # resume/restart re-resolves with these pins so the expanded graph and artifact
+    # content are stable for the run's lifetime.
+    capability_pins: dict[str, str] | None = None
     # capability name → version snapshot taken at run start (invoke pins ∪
     # model/tool provenance); persisted with the run for registry evaluation.
     capability_usage: dict[str, str | None] | None = None
@@ -36,6 +38,9 @@ class RunRecord:
     completed_at: float | None = None
     subscribers: set[asyncio.Queue] = field(default_factory=set)
     timeout_task: asyncio.Task | None = field(default=None, repr=False)
+    # Set by POST /runs/{id}/cancel while the graph is running; the engine
+    # checks it between super-steps and stops after the current step.
+    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _seq: int = 0
     _loop: asyncio.AbstractEventLoop | None = None
 

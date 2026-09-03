@@ -4,7 +4,7 @@ import json
 from app.config import Settings
 from app.persistence import workflows as wf_module
 from app.persistence.workflows import WorkflowStore, load_workflow
-from schema.models import ModelConfig, ToolDefinition
+from schema.models import AgentNodeConfig, AgentSkill, ModelConfig, PromptDefinition, ToolDefinition
 
 
 def _stamped_dict() -> dict:
@@ -95,3 +95,54 @@ def test_models_accept_provenance_fields():
     )
     assert model.source_capability == "ns/m"
     assert model.source_version == "1.0.0"
+
+
+def test_prompt_skill_agent_and_workflow_accept_provenance_fields():
+    prompt = PromptDefinition(
+        id="p", text="t", source_capability="ns/p", source_version="1.0.0",
+    )
+    assert prompt.source_capability == "ns/p"
+    assert prompt.source_version == "1.0.0"
+
+    skill = AgentSkill(
+        name="sk", prompt="p", tool_ids=[],
+        source_capability="ns/sk", source_version="2.0.0",
+    )
+    assert skill.source_capability == "ns/sk"
+    assert skill.source_version == "2.0.0"
+
+    agent = AgentNodeConfig(
+        model_id="m", system_prompt="s",
+        source_capability="ns/ag", source_version="3.0.0",
+    )
+    assert agent.source_capability == "ns/ag"
+    assert agent.source_version == "3.0.0"
+
+    wf = load_workflow({**_stamped_dict(), "source_capability": "ns/wf", "source_version": "4.0.0"})
+    assert wf.source_capability == "ns/wf"
+    assert wf.source_version == "4.0.0"
+
+
+def test_legacy_entries_without_new_provenance_load_as_none():
+    data = _stamped_dict()
+    data["prompts"] = [{"id": "p", "name": "p", "text": "t"}]
+    data["nodes"].append(
+        {
+            "id": "ag1", "type": "agent", "position": {"x": 0, "y": 0},
+            "config": {
+                "model_id": "m1", "system_prompt": "s",
+                "skills": [{"name": "sk", "prompt": "p", "tool_ids": []}],
+            },
+        }
+    )
+    wf = load_workflow(data)
+    assert wf.source_capability is None
+    assert wf.source_version is None
+    assert wf.prompts[0].source_capability is None
+    assert wf.prompts[0].source_version is None
+    agent = next(n for n in wf.nodes if n.type == "agent")
+    cfg = agent.config
+    assert cfg.source_capability is None
+    assert cfg.source_version is None
+    assert cfg.skills[0].source_capability is None
+    assert cfg.skills[0].source_version is None

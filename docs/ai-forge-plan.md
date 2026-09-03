@@ -11,7 +11,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Current Status (Phase 3 complete + post-Phase 3 increments)
 
-> Last updated: 2026-09-02. Human-in-loop nodes are implemented end-to-end: LangGraph
+> Last updated: 2026-09-03. Human-in-loop nodes are implemented end-to-end: LangGraph
 > `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
 > survive restarts and are recovered on startup), and the frontend shows a paused state with an
 > input form + resume button. The editor is a sidebar / master-detail layout with debounced
@@ -27,8 +27,18 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > registry imports stamp provenance on models/tools, every run snapshots its capability usage,
 > and on each terminal transition participation-level aggregates (success rate, duration p50/p95,
 > avg cost) are pushed to the registry per capability version; the Capabilities view shows them
-> and search ranking blends the success rate in.
-> Next up: live refs + upgrade automation, SQLite → Postgres (ROADMAP.md R2 remainder).
+> and search ranking blends the success rate in. Also shipped: **upgrade automation for existing
+> imports** — provenance is stamped on all five import kinds (tools, model profiles, prompts, skill
+> attachments, agent nodes), the editor detects newer versions ("Check for updates" + version badges,
+> breaking majors in red), and upgrades apply in place with a per-field drift diff that preserves
+> local edits and never breaks workflow references (composite upgrades re-inline nested tools/models
+> into the workflow pools by id); breaking changes require explicit confirmation and active/paused
+> runs trigger a warning + mandatory ack.
+> Also shipped: **run cancellation** (`POST /runs/{id}/cancel`) — a paused run terminates
+> immediately and its checkpoint thread is deleted (indefinite HIL waits can no longer accumulate
+> as zombie approvals across restarts); a running run stops at the next super-step boundary;
+> cancelled runs stay inspectable but are excluded from capability metrics aggregation.
+> Next up: `eval_suite` kind, SQLite → Postgres (ROADMAP.md R2 remainder). Remote invocation settled by design (2026-09-03) — workflows are always embedded; remote services are invoked as opaque `http` tools. Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
 
@@ -38,7 +48,8 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Node types wired in the builder**: `agent` (with tool-calling loop), `conditional`,
   `transform` (`template` + `mapping` + `custom_function` modes), `custom_function`
   (RestrictedPython sandbox), `invoke` (registry capability invocation — tool kind
-  executes directly; workflow kind expands into a call frame at build time).
+  executes directly; workflow kind expands into a call frame at build time),
+  `copilot_agent` (delegates an atomic agentic step to the GitHub Copilot SDK runtime).
 - **Agent node**: reads `state["data"]` as user message (if no prior messages), calls LLM
   with system prompt, supports tool-calling loop. Output lands in `state["output"]`,
   `state["messages"]`, and `_node_outputs[<id>].content`.
@@ -114,12 +125,32 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 - **Human-in-loop nodes**: `interrupt()` in builder pauses the graph; SQLite checkpointer
   (`AsyncSqliteSaver`, one connection per run on the shared file) with `thread_id` preserves state
   across restarts — startup recovery rebuilds paused runs from checkpoints and re-arms timeouts;
-  `POST /runs/{id}/resume` sends human input via `Command(resume=...)`. Frontend: RunPanel shows
-  paused state (purple indicator) with a dynamic
+   `POST /runs/{id}/resume` sends human input via `Command(resume=...)`;
+   `POST /runs/{id}/cancel` abandons the run (paused: immediate terminal + checkpoint-thread
+   deletion so it never resurrects; running: stops at the next super-step — the runner drives
+   graphs via `astream(stream_mode="values")` and checks a per-run cancel flag between steps).
+   Frontend: RunPanel shows
+   paused state (purple indicator) with a dynamic
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: backend suite green as of 2026-09-02 (388 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 64 Vitest tests + typecheck/build clean.
+- **Copilot agent node**: `copilot_agent` hands an atomic agentic step (planning, tool
+  calls, file edits) to the GitHub Copilot SDK runtime — one stdio runtime process per run
+  behind a thin `CopilotRuntime` seam (`engine/copilot/`), so a shared external server can be
+  swapped in later without touching the node. The node never pauses mid-step: it is one
+  super-step from the graph's point of view (no internal HIL, no session checkpointing).
+  Config: task template (`{{data.*}}` placeholders), optional model id (auto routing when
+  empty), working dir (per-run scratch under `~/.ai-forge/runs/{run_id}/copilot-{node}`, kept
+  after the run, or an explicit absolute path), permission policy — `safe_only` by default
+  (file writes confined to the working dir, no shell, no URL access; `approve_all` is an
+  explicit per-node opt-in) — wall-clock timeout, and output-field mapping into `data`.
+  Failure rules: idle without an assistant message → deterministic auth/subscription error
+  (the runtime fails silently otherwise); session error events → failure; timeout → failure.
+  The SDK is an optional dependency (`pip install ai-forge[copilot]`); auth is ambient
+  (logged-in user or `COPILOT_GITHUB_TOKEN`) or a secret-backed token via `auth_ref`.
+  Phases 2/3 (OAuth app flow with connect button; workflow-tool → SDK custom-tool mapping,
+  HIL permission bridge) are pending.
+- **Tests**: backend suite green as of 2026-09-03 (440 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

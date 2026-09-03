@@ -27,10 +27,23 @@ export interface Workflow {
      */
     schema_version?: number;
     /**
+     * Registry capability name this workflow was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * Explicit state schema (auto-inferred if not set)
      */
     state_schema?: null | StateSchema;
     tools?:        ToolDefinition[];
+    /**
+     * Live ref: at run start, re-resolve this workflow from the registry (newest published
+     * version within the same major) instead of using the saved copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -127,6 +140,11 @@ export interface ModelConfig {
      * Whether to track token costs for this model
      */
     track_cost?: boolean;
+    /**
+     * Live ref: at run start, re-resolve this entry from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -169,6 +187,9 @@ export interface Node {
  *
  * Configuration for an Agent node.
  *
+ * Configuration for a Copilot agent node (delegates an atomic agentic step
+ * to the GitHub Copilot SDK runtime: planning, tool calls, file edits).
+ *
  * Configuration for a Conditional node.
  *
  * Configuration for a Transform node.
@@ -198,6 +219,8 @@ export interface Config {
     /**
      * Fields that the workflow produces as output
      *
+     * Result keys to copy into data[] (default: final_message)
+     *
      * State fields to write with human input
      *
      * State fields the function writes
@@ -224,6 +247,14 @@ export interface Config {
      */
     skills?: AgentSkill[];
     /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * System prompt for the agent
      */
     system_prompt?: string;
@@ -235,6 +266,42 @@ export interface Config {
      * References to ToolDefinitions this agent can use
      */
     tool_ids?: string[];
+    /**
+     * Live ref: at run start, re-resolve this agent node from the registry (newest published
+     * version within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
+    /**
+     * Secret name holding a GitHub token; None = ambient auth (logged-in user or environment
+     * token)
+     */
+    auth_ref?: null | string;
+    /**
+     * Copilot model id (e.g. 'gpt-5'); None = auto routing
+     */
+    model?: null | string;
+    /**
+     * safe_only: file writes inside the working dir only, no shell; approve_all: everything the
+     * runtime permits
+     */
+    permission_policy?: PermissionPolicy;
+    /**
+     * Task prompt; {{path}} placeholders resolve against run state
+     */
+    task?: string;
+    /**
+     * Wall-clock cap for the whole session
+     *
+     * If set, the run auto-fails when no human input arrives within this many seconds. None =
+     * wait indefinitely.
+     *
+     * Execution timeout
+     */
+    timeout_seconds?: number | null;
+    /**
+     * 'scratch' for a per-run private directory, or an absolute path
+     */
+    working_dir?: string;
     /**
      * Conditions that determine which branch to take
      */
@@ -273,13 +340,6 @@ export interface Config {
      * If true, the human must approve/reject before continuing
      */
     approval_required?: boolean;
-    /**
-     * If set, the run auto-fails when no human input arrives within this many seconds. None =
-     * wait indefinitely.
-     *
-     * Execution timeout
-     */
-    timeout_seconds?: number | null;
     /**
      * Python code to execute (sandboxed)
      */
@@ -358,6 +418,12 @@ export type HumanInputFieldType = "text" | "textarea" | "select" | "boolean";
 export type Mode = "template" | "mapping" | "custom_function";
 
 /**
+ * safe_only: file writes inside the working dir only, no shell; approve_all: everything the
+ * runtime permits
+ */
+export type PermissionPolicy = "safe_only" | "approve_all";
+
+/**
  * Retry configuration for a node.
  */
 export interface RetryConfig {
@@ -395,9 +461,22 @@ export interface AgentSkill {
      */
     prompt: string;
     /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * References to workflow ToolDefinitions this skill uses
      */
     tool_ids?: string[];
+    /**
+     * Live ref: at run start, re-resolve this skill from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -411,7 +490,7 @@ export interface NodePosition {
 /**
  * Node type
  */
-export type NodeType = "start" | "end" | "agent" | "conditional" | "transform" | "human_in_loop" | "custom_function" | "invoke" | "invoke_exit";
+export type NodeType = "start" | "end" | "agent" | "conditional" | "transform" | "human_in_loop" | "custom_function" | "invoke" | "invoke_exit" | "copilot_agent";
 
 /**
  * A named prompt template stored at workflow level (`prompts[]`), referenced by agent nodes.
@@ -426,9 +505,22 @@ export interface PromptDefinition {
      */
     name?: null | string;
     /**
+     * Registry capability name this entry was imported from (provenance)
+     */
+    source_capability?: null | string;
+    /**
+     * Capability version it was imported at
+     */
+    source_version?: null | string;
+    /**
      * Template with {{var}} placeholders resolved from state data at runtime
      */
     text: string;
+    /**
+     * Live ref: at run start, re-resolve this entry from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
     /**
      * Declared {{var}} placeholders
      */
@@ -508,6 +600,11 @@ export interface ToolDefinition {
      * Capability version it was imported at
      */
     source_version?: null | string;
+    /**
+     * Live ref: at run start, re-resolve this entry from the registry (newest published version
+     * within the same major) instead of using the inlined copy
+     */
+    track_latest?: boolean;
 }
 
 /**
@@ -570,6 +667,6 @@ export interface RunEvent {
     type:      EventType;
 }
 
-export type EventType = "run_start" | "run_end" | "node_start" | "node_end" | "node_error" | "llm_call" | "llm_token" | "tool_call" | "tool_result" | "human_request" | "human_respond" | "human_timeout" | "retry";
+export type EventType = "run_start" | "run_end" | "node_start" | "node_end" | "node_error" | "llm_call" | "llm_token" | "tool_call" | "tool_result" | "human_request" | "human_respond" | "human_timeout" | "run_cancelled" | "retry" | "capability_notice";
 
-export type RunStatus = "pending" | "running" | "completed" | "failed" | "paused";
+export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "paused";

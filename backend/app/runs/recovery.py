@@ -143,9 +143,13 @@ async def recover_paused_runs() -> int:
                 continue
             workflow_id = str(payload.get("workflow_id") or "")
             summary = _load_run_summary(thread_id)
+            if summary is not None and summary["status"] != "paused":
+                # Terminal (e.g. cancelled): its thread should already be gone;
+                # skip anything left behind by a crash mid-cancellation.
+                continue
             pins = (
-                json.loads(summary["invoke_pins"])
-                if summary is not None and summary["invoke_pins"]
+                json.loads(summary["capability_pins"])
+                if summary is not None and summary["capability_pins"]
                 else None
             )
             usage = _parse_json_dict(summary["capability_usage"]) if summary is not None else None
@@ -163,7 +167,7 @@ async def recover_paused_runs() -> int:
                     try:
                         # Checkpoints were written against the expanded graph;
                         # rebuild it identically from the stored pins.
-                        workflow, invocations, _ = prepare_workflow_for_run(workflow, pins=pins)
+                        workflow, invocations, _, _ = prepare_workflow_for_run(workflow, pins=pins)
                     except CapabilityNotFoundError as exc:
                         # A pinned version was deleted from the registry: the
                         # checkpointed graph can never be rebuilt. Fail loudly.
@@ -239,9 +243,9 @@ async def recover_finished_runs() -> int:
             continue
         events = _load_events(row["run_id"])
         pins = None
-        if row["invoke_pins"]:
+        if row["capability_pins"]:
             try:
-                pins = json.loads(row["invoke_pins"])
+                pins = json.loads(row["capability_pins"])
             except (TypeError, ValueError):
                 pins = None
         usage = _parse_json_dict(row["capability_usage"])
@@ -257,7 +261,7 @@ async def recover_finished_runs() -> int:
             total_tokens_input=row["total_tokens_input"],
             total_tokens_output=row["total_tokens_output"],
             estimated_cost_usd=row["estimated_cost_usd"],
-            invoke_pins=pins,
+            capability_pins=pins,
             capability_usage=usage,
             started_at=float(row["started_at"]),
             completed_at=row["completed_at"],

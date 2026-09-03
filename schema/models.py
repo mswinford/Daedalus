@@ -72,6 +72,11 @@ class ModelConfig(BaseModel):
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
     )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this entry from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
+    )
 
 
 # ─── Tool Definition ────────────────────────────────────────────────────────
@@ -105,6 +110,11 @@ class ToolDefinition(BaseModel):
     source_version: Optional[str] = Field(
         None, description="Capability version it was imported at"
     )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this entry from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
+    )
 
 
 class ToolImplementation(BaseModel):
@@ -124,6 +134,17 @@ class PromptDefinition(BaseModel):
     text: str = Field(..., description="Template with {{var}} placeholders resolved from state data at runtime")
     variables: list[str] = Field(
         default_factory=list, description="Declared {{var}} placeholders"
+    )
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this entry from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
     )
 
 
@@ -169,6 +190,17 @@ class AgentSkill(BaseModel):
     tool_ids: list[str] = Field(
         default_factory=list, description="References to workflow ToolDefinitions this skill uses"
     )
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this skill from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
+    )
 
 
 class AgentNodeConfig(BaseModel):
@@ -187,6 +219,49 @@ class AgentNodeConfig(BaseModel):
     )
     skills: list[AgentSkill] = Field(
         default_factory=list, description="Inlined skills folded into this agent at runtime"
+    )
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this entry was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this agent node from the registry "
+                    "(newest published version within the same major) instead of using the inlined copy",
+    )
+
+
+class CopilotAgentNodeConfig(BaseModel):
+    """Configuration for a Copilot agent node (delegates an atomic agentic step
+    to the GitHub Copilot SDK runtime: planning, tool calls, file edits)."""
+    task: str = Field(
+        ..., description="Task prompt; {{path}} placeholders resolve against run state"
+    )
+    model: Optional[str] = Field(
+        None, description="Copilot model id (e.g. 'gpt-5'); None = auto routing"
+    )
+    working_dir: str = Field(
+        "scratch",
+        description="'scratch' for a per-run private directory, or an absolute path",
+    )
+    permission_policy: Literal["safe_only", "approve_all"] = Field(
+        "safe_only",
+        description="safe_only: file writes inside the working dir only, no shell; "
+                    "approve_all: everything the runtime permits",
+    )
+    timeout_seconds: Optional[int] = Field(
+        None, ge=1, description="Wall-clock cap for the whole session"
+    )
+    output_fields: list[str] = Field(
+        default_factory=list,
+        description="Result keys to copy into data[] (default: final_message)",
+    )
+    auth_ref: Optional[str] = Field(
+        None,
+        description="Secret name holding a GitHub token; None = ambient auth "
+                    "(logged-in user or environment token)",
     )
 
 
@@ -329,12 +404,14 @@ NodeType = Literal[
     "custom_function",
     "invoke",
     "invoke_exit",
+    "copilot_agent",
 ]
 
 NodeConfig = Union[
     StartNodeConfig,
     EndNodeConfig,
     AgentNodeConfig,
+    CopilotAgentNodeConfig,
     ConditionalNodeConfig,
     TransformNodeConfig,
     HumanInLoopNodeConfig,
@@ -395,6 +472,17 @@ class Workflow(BaseModel):
         default_factory=list, description="Named prompt templates referenced by agent nodes"
     )
     state_schema: Optional[StateSchema] = Field(None, description="Explicit state schema (auto-inferred if not set)")
+    source_capability: Optional[str] = Field(
+        None, description="Registry capability name this workflow was imported from (provenance)"
+    )
+    source_version: Optional[str] = Field(
+        None, description="Capability version it was imported at"
+    )
+    track_latest: bool = Field(
+        False,
+        description="Live ref: at run start, re-resolve this workflow from the registry "
+                    "(newest published version within the same major) instead of using the saved copy",
+    )
 
 
 # ─── Run Types ───────────────────────────────────────────────────────────────
@@ -404,6 +492,7 @@ class RunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"  # Cancelled by the user (not a capability failure)
     PAUSED = "paused"  # Human-in-loop waiting
 
 
@@ -423,7 +512,9 @@ class RunEvent(BaseModel):
         "human_request",
         "human_respond",
         "human_timeout",
+        "run_cancelled",
         "retry",
+        "capability_notice",
     ]
     node_id: Optional[str] = None
     data: dict[str, Any] = Field(default_factory=dict)

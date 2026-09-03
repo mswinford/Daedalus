@@ -22,7 +22,9 @@
             "human_request",
             "human_respond",
             "human_timeout",
-            "retry"
+            "run_cancelled",
+            "retry",
+            "capability_notice"
           ],
           "title": "Type",
           "type": "string"
@@ -58,6 +60,7 @@
         "running",
         "completed",
         "failed",
+        "cancelled",
         "paused"
       ],
       "title": "RunStatus",
