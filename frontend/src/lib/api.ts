@@ -161,6 +161,8 @@ export const workflowsApi = {
   listPausedRuns: () => api.get<PausedRunSummary[]>('/runs/paused').then(r => r.data),
   resumeRun: (runId: string, humanInput: Record<string, any>) =>
     api.post(`/runs/${runId}/resume`, humanInput).then(r => r.data),
+  cancelRun: (runId: string) =>
+    api.post<{ run_id: string; status: string }>(`/runs/${runId}/cancel`).then(r => r.data),
   validate: (id: string, body?: Workflow) =>
     api.post<ValidationResult>(`/workflows/${id}/validate`, body ?? null).then(r => r.data),
 }

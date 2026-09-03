@@ -143,6 +143,10 @@ async def recover_paused_runs() -> int:
                 continue
             workflow_id = str(payload.get("workflow_id") or "")
             summary = _load_run_summary(thread_id)
+            if summary is not None and summary["status"] != "paused":
+                # Terminal (e.g. cancelled): its thread should already be gone;
+                # skip anything left behind by a crash mid-cancellation.
+                continue
             pins = (
                 json.loads(summary["capability_pins"])
                 if summary is not None and summary["capability_pins"]

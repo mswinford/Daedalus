@@ -1,4 +1,5 @@
 """Execute workflows using LangGraph."""
+import threading
 from typing import Any, Callable
 
 import aiosqlite
@@ -9,6 +10,22 @@ from schema.models import Workflow, StateFieldType, RunEvent
 from app.config import get_settings
 from app.engine.builder import GraphBuilder
 from app.sqlite_util import secure_owner_only
+
+
+async def _invoke_with_cancel(graph: Any, payload: Any, config: dict[str, Any],
+                              cancel_event: threading.Event | None) -> dict | None:
+    """Drive the graph super-step by super-step, checking for cancellation
+    between steps. Returns the final state, or None if a cancel was requested
+    (the in-flight step finishes first; no further steps run)."""
+    # stream_mode="values" (explicit: the default yields per-node updates, not
+    # full state snapshots). The final snapshot matches ainvoke's result,
+    # including the __interrupt__ key when a human_in_loop node pauses.
+    result = None
+    async for chunk in graph.astream(payload, config=config, stream_mode="values"):
+        result = chunk
+        if cancel_event is not None and cancel_event.is_set():
+            return None
+    return result
 
 
 async def _open_checkpointer() -> AsyncSqliteSaver:
@@ -95,6 +112,7 @@ def run_workflow_sync(
     on_event: Callable[[RunEvent], None] | None = None,
     thread_id: str | None = None,
     invocations: dict[str, Any] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Execute a workflow (blocking).
 
@@ -107,6 +125,9 @@ def run_workflow_sync(
     If the workflow contains a human_in_loop node, execution pauses and the
     return dict includes `{"paused": True, "interrupt_value": ...}`. The caller
     should then use `resume_workflow` to continue.
+
+    If `cancel_event` is set while the graph runs, execution stops after the
+    current super-step and the return dict is `{"cancelled": True}`.
     """
     import asyncio
 
@@ -124,11 +145,16 @@ def run_workflow_sync(
     try:
         checkpointer = loop.run_until_complete(_open_checkpointer())
         graph = builder.build(checkpointer=checkpointer)
-        result = loop.run_until_complete(graph.ainvoke(initial_state, config=config))
+        result = loop.run_until_complete(
+            _invoke_with_cancel(graph, initial_state, config, cancel_event)
+        )
     finally:
         if checkpointer is not None:
             loop.run_until_complete(checkpointer.conn.close())
         loop.close()
+
+    if result is None:
+        return {"cancelled": True}
 
     if "__interrupt__" in result:
         interrupt_obj = result["__interrupt__"][0]
@@ -158,12 +184,14 @@ def resume_workflow(
     trace: list | None = None,
     on_event: Callable[[RunEvent], None] | None = None,
     invocations: dict[str, Any] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Resume a paused workflow with human-provided input.
 
     Rebuilds the same graph (same node structure) and invokes it with
     `Command(resume=...)` so LangGraph continues from the checkpoint.
-    Returns the same shape as `run_workflow_sync`.
+    Returns the same shape as `run_workflow_sync` (including its
+    `{"cancelled": True}` behavior when `cancel_event` is set mid-run).
     """
     import asyncio
 
@@ -194,12 +222,15 @@ def resume_workflow(
         else:
             resume_value = human_input
         result = loop.run_until_complete(
-            graph.ainvoke(Command(resume=resume_value), config=config)
+            _invoke_with_cancel(graph, Command(resume=resume_value), config, cancel_event)
         )
     finally:
         if checkpointer is not None:
             loop.run_until_complete(checkpointer.conn.close())
         loop.close()
+
+    if result is None:
+        return {"cancelled": True}
 
     if "__interrupt__" in result:
         interrupt_obj = result["__interrupt__"][0]

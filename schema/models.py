@@ -458,6 +458,7 @@ class RunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"  # Cancelled by the user (not a capability failure)
     PAUSED = "paused"  # Human-in-loop waiting
 
 
@@ -477,6 +478,7 @@ class RunEvent(BaseModel):
         "human_request",
         "human_respond",
         "human_timeout",
+        "run_cancelled",
         "retry",
         "capability_notice",
     ]

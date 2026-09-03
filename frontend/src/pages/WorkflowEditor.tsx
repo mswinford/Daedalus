@@ -511,7 +511,7 @@ function WorkflowEditorInner() {
         if (ev.seq != null && ev.seq <= runLastSeqRef.current) return
         if (ev.seq != null) runLastSeqRef.current = ev.seq
         setRun((r) => (r ? { ...r, events: [...r.events, ev] } : r))
-        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || (ev.type === 'node_error' && !!ev.data?.fatal)
+        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || ev.type === 'run_cancelled' || (ev.type === 'node_error' && !!ev.data?.fatal)
         if (terminal || ev.type === 'human_request') {
           runFinishedRef.current = true
           workflowsApi.getRun(runId).then(setRun).catch(() => {})
@@ -561,6 +561,19 @@ function WorkflowEditorInner() {
       runCloseRef.current = close
     } catch (err) {
       setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!run?.id) return
+    try {
+      await workflowsApi.cancelRun(run.id)
+      // Paused runs are terminal immediately; running runs get the terminal
+      // `run_cancelled` event over the existing stream. Either way a fresh
+      // fetch keeps the panel in sync.
+      workflowsApi.getRun(run.id).then(setRun).catch(() => {})
+    } catch {
+      workflowsApi.getRun(run.id).then(setRun).catch(() => {})
     }
   }
 
@@ -917,7 +930,7 @@ function WorkflowEditorInner() {
       )}
 
       {/* Bottom: run log / debug panel */}
-      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} />}
+      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} onCancel={handleCancel} />}
     </div>
   )
 }

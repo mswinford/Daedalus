@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X } from 'lucide-react'
+import { Ban, CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X } from 'lucide-react'
 
 import type { WorkflowRun, HumanInterruptField } from '@/lib/api'
 import type { NodeType } from '@/lib/workflowTypes'
@@ -56,6 +56,7 @@ interface RunPanelProps {
   run: WorkflowRun
   nodes: FlowNodeType[]
   onResume?: (input: Record<string, any>) => void
+  onCancel?: () => void
 }
 
 function HumanInputForm({
@@ -144,7 +145,7 @@ function HumanInputForm({
   )
 }
 
-export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
+export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const nodeTypeById = useMemo(() => {
@@ -173,7 +174,8 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
 
   const isRunning = run.status === 'running'
   const isPaused = run.status === 'paused'
-  const failed = run.status !== 'completed' && !isRunning && !isPaused
+  const isCancelled = run.status === 'cancelled'
+  const failed = run.status !== 'completed' && !isRunning && !isPaused && !isCancelled
 
   // Deadline for the pending human input, if the node has a timeout configured.
   const deadlineMs =
@@ -187,8 +189,8 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
     <div className="border-t border-zinc-800 bg-zinc-950">
       {/* Header metrics */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-xs">
-        <span className={`flex items-center gap-1 font-medium ${isRunning ? 'text-amber-400' : isPaused ? 'text-purple-400' : failed ? 'text-red-400' : 'text-emerald-400'}`}>
-          {isRunning ? <Timer size={14} /> : isPaused ? <PauseCircle size={14} /> : failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
+        <span className={`flex items-center gap-1 font-medium ${isRunning ? 'text-amber-400' : isPaused ? 'text-purple-400' : isCancelled ? 'text-zinc-400' : failed ? 'text-red-400' : 'text-emerald-400'}`}>
+          {isRunning ? <Timer size={14} /> : isPaused ? <PauseCircle size={14} /> : isCancelled ? <Ban size={14} /> : failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
           {run.status}
         </span>
         {totalMs != null && (
@@ -209,7 +211,18 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
             ${run.estimated_cost_usd.toFixed(4)}
           </span>
         )}
-        <span className="ml-auto text-zinc-600">{run.id}</span>
+        <span className="ml-auto flex items-center gap-2">
+          {(isRunning || isPaused) && onCancel && (
+            <button
+              onClick={onCancel}
+              className="flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:border-red-800 hover:bg-red-950/40 hover:text-red-300"
+            >
+              <Ban size={12} />
+              Cancel
+            </button>
+          )}
+          <span className="text-zinc-600">{run.id}</span>
+        </span>
       </div>
 
       {/* Body: execution timeline + output */}
@@ -234,7 +247,7 @@ export default function RunPanel({ run, nodes, onResume }: RunPanelProps) {
               )}
             </div>
           )}
-          {run.error && (
+          {run.error && !isCancelled && (
             <pre className="mb-2 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-red-900/50 bg-red-950/30 p-2 text-xs text-red-300">
               {run.error}
             </pre>

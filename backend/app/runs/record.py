@@ -1,6 +1,7 @@
 """In-memory run records: RunRecord, the RUNS registry, and pruning."""
 import asyncio
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,6 +38,9 @@ class RunRecord:
     completed_at: float | None = None
     subscribers: set[asyncio.Queue] = field(default_factory=set)
     timeout_task: asyncio.Task | None = field(default=None, repr=False)
+    # Set by POST /runs/{id}/cancel while the graph is running; the engine
+    # checks it between super-steps and stops after the current step.
+    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _seq: int = 0
     _loop: asyncio.AbstractEventLoop | None = None
 

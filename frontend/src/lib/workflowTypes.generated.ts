@@ -632,6 +632,6 @@ export interface RunEvent {
     type:      EventType;
 }
 
-export type EventType = "run_start" | "run_end" | "node_start" | "node_end" | "node_error" | "llm_call" | "llm_token" | "tool_call" | "tool_result" | "human_request" | "human_respond" | "human_timeout" | "retry" | "capability_notice";
+export type EventType = "run_start" | "run_end" | "node_start" | "node_end" | "node_error" | "llm_call" | "llm_token" | "tool_call" | "tool_result" | "human_request" | "human_respond" | "human_timeout" | "run_cancelled" | "retry" | "capability_notice";
 
-export type RunStatus = "pending" | "running" | "completed" | "failed" | "paused";
+export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "paused";

@@ -190,6 +190,22 @@ def _persist_event(run_id: str, seq: int, payload: dict[str, Any]) -> None:
     )
 
 
+def _delete_checkpoint_thread(path: str, thread_id: str) -> None:
+    """Delete a run's graph checkpoints and pending writes.
+
+    Called when a run is cancelled: it will never be resumed, so its thread is
+    dropped from the checkpoint store (startup recovery scans for threads with
+    pending __interrupt__ writes — deletion is what keeps a cancelled paused
+    run from being resurrected on the next restart)."""
+    conn = _store_connect(path)
+    try:
+        conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+        conn.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _load_events(run_id: str) -> list[dict[str, Any]]:
     conn = _store_connect(str(get_settings().checkpoint_db))
     try:
@@ -229,7 +245,7 @@ def _load_finished_summaries() -> list[sqlite3.Row]:
     conn = _store_connect(str(get_settings().checkpoint_db))
     try:
         return conn.execute(
-            "SELECT * FROM runs WHERE status IN ('completed', 'failed')"
+            "SELECT * FROM runs WHERE status IN ('completed', 'failed', 'cancelled')"
         ).fetchall()
     finally:
         conn.close()
@@ -237,6 +253,10 @@ def _load_finished_summaries() -> list[sqlite3.Row]:
 
 def _load_terminal_runs() -> list[sqlite3.Row]:
     """Terminal (completed/failed) run rows for offline aggregation.
+
+    Cancelled runs are deliberately excluded: a user cancelling is not a
+    signal about capability quality, so it must not count against the
+    success-rate score pushed to the registry.
 
     Only the columns the metrics pass needs: run_id, status, started_at,
     completed_at, estimated_cost_usd, capability_usage.
@@ -257,8 +277,8 @@ def _prune_store() -> None:
 
 
 def _is_terminal(event: dict[str, Any]) -> bool:
-    """True for the event that marks a run as finished (success or fatal error)."""
-    if event.get("type") in ("run_end", "human_timeout"):
+    """True for the event that marks a run as finished (success, fatal error, or cancel)."""
+    if event.get("type") in ("run_end", "human_timeout", "run_cancelled"):
         return True
     if event.get("type") == "node_error" and event.get("data", {}).get("fatal"):
         return True
