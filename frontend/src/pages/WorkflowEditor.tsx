@@ -68,6 +68,7 @@ const nodeTypes = {
   human_in_loop: FlowNode,
   custom_function: FlowNode,
   invoke: FlowNode,
+  copilot_agent: FlowNode,
 }
 
 function WorkflowEditorInner() {
