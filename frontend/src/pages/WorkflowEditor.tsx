@@ -60,6 +60,8 @@ import type { AgentNodeConfig, AgentSkill, ModelConfig, ToolDefinition } from '@
 
 import '@xyflow/react/dist/style.css'
 
+const GRID = 16
+
 const nodeTypes = {
   start: FlowNode,
   end: FlowNode,
@@ -336,7 +338,8 @@ function WorkflowEditorInner() {
       e.preventDefault()
       const type = e.dataTransfer.getData('application/reactflow') as NodeType
       if (!type || !ALL_NODE_TYPES.includes(type)) return
-      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const raw = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const position = { x: Math.round(raw.x / GRID) * GRID, y: Math.round(raw.y / GRID) * GRID }
       const newId = crypto.randomUUID()
       const config = defaultConfig(type)
       const newNode: FlowNodeType = {
@@ -859,6 +862,8 @@ function WorkflowEditorInner() {
             onEdgeClick={() => setSelectedId(null)}
             onPaneClick={() => setSelectedId(null)}
             deleteKeyCode="Delete"
+            snapToGrid
+            snapGrid={[GRID, GRID]}
             fitView
           >
             <Background color="#27272a" gap={16} />
