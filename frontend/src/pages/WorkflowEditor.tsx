@@ -6,6 +6,7 @@ import {
   ReactFlowProvider,
   Background,
   Controls,
+  MiniMap,
   useNodesState,
   useEdgesState,
   useReactFlow,
@@ -14,7 +15,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X, MousePointerClick } from 'lucide-react'
 
 import { workflowsApi, streamRunEvents, apiErrorMessage, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
@@ -919,7 +920,21 @@ function WorkflowEditorInner() {
           >
             <Background color="#27272a" gap={16} />
             <Controls className="!bg-zinc-900 !border-zinc-800" />
+            <MiniMap
+              className="!bg-zinc-900 !border-zinc-800"
+              style={{ width: 140, height: 90 }}
+              nodeColor={(n) => NODE_META[(n as FlowNodeType).data.nodeType].color}
+            />
           </ReactFlow>
+
+          {nodes.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-2 text-zinc-600">
+                <MousePointerClick size={20} />
+                <p className="text-sm">Drag a Start node from the palette to begin</p>
+              </div>
+            </div>
+          )}
 
           {/* Validation issue list */}
           {validation && [...validation.errors, ...validation.warnings].length > 0 && (
