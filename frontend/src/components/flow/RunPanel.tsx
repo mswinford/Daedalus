@@ -62,6 +62,13 @@ export function remainingSeconds(deadlineMs: number, now: number): number {
   return Math.max(0, Math.ceil((deadlineMs - now) / 1000))
 }
 
+/** Labels of required fields whose value is missing or whitespace-only. */
+export function missingRequiredFields(fields: HumanInterruptField[], values: Record<string, string>): string[] {
+  return fields
+    .filter((f) => f.required && (values[f.name] ?? '').trim() === '')
+    .map((f) => f.label)
+}
+
 function TimeoutCountdown({ deadlineMs, now }: { deadlineMs: number; now: number }) {
   const remaining = remainingSeconds(deadlineMs, now)
   if (remaining === 0) {
@@ -83,6 +90,7 @@ interface RunPanelProps {
   nodes: FlowNodeType[]
   onResume?: (input: Record<string, any>) => void
   onCancel?: () => void
+  onClose?: () => void
 }
 
 function HumanInputForm({
@@ -95,8 +103,19 @@ function HumanInputForm({
   onSubmit: (input: Record<string, any>) => void
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
+  const [error, setError] = useState<string | null>(null)
+
+  const updateValue = (name: string, value: string) => {
+    setValues((v) => ({ ...v, [name]: value }))
+    if (error) setError(null)
+  }
 
   const handleSubmit = () => {
+    const missing = missingRequiredFields(fields, values)
+    if (missing.length > 0) {
+      setError(`Please fill in: ${missing.join(', ')}`)
+      return
+    }
     const input: Record<string, any> = {}
     for (const f of fields) {
       const raw = values[f.name] ?? ''
@@ -121,7 +140,7 @@ function HumanInputForm({
               <select
                 className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
                 value={values[f.name] ?? ''}
-                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                onChange={(e) => updateValue(f.name, e.target.value)}
               >
                 <option value="">—</option>
                 {f.options.map((o) => (
@@ -132,7 +151,7 @@ function HumanInputForm({
               <select
                 className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
                 value={values[f.name] ?? ''}
-                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                onChange={(e) => updateValue(f.name, e.target.value)}
               >
                 <option value="">—</option>
                 <option value="true">Yes</option>
@@ -143,12 +162,13 @@ function HumanInputForm({
                 type={f.type === 'number' ? 'number' : 'text'}
                 className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
                 value={values[f.name] ?? ''}
-                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                onChange={(e) => updateValue(f.name, e.target.value)}
               />
             )}
           </label>
         ))}
       </div>
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={handleSubmit}
@@ -171,7 +191,7 @@ function HumanInputForm({
   )
 }
 
-export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelProps) {
+export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: RunPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [logExpanded, setLogExpanded] = useState(false)
 
@@ -247,6 +267,16 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
           >
             {logExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              title="Close run panel"
+              aria-label="Close run panel"
+              className="rounded-md border border-zinc-700 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              <X size={12} />
+            </button>
+          )}
           {(isRunning || isPaused) && onCancel && (
             <button
               onClick={onCancel}

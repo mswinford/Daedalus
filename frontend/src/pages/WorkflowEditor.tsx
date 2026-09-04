@@ -502,6 +502,8 @@ function WorkflowEditorInner() {
   })
 
   const [run, setRun] = useState<WorkflowRun | null>(null)
+  const [runBlocked, setRunBlocked] = useState<string | null>(null)
+  const [validatingForRun, setValidatingForRun] = useState(false)
   const runCloseRef = useRef<(() => void) | null>(null)
   const runLastSeqRef = useRef(0)
   const runFinishedRef = useRef(false)
@@ -554,6 +556,26 @@ function WorkflowEditorInner() {
     }
     setInputError(null)
 
+    // The run endpoint never validates — check the current payload first so
+    // errors surface up front instead of mid-stream.
+    setRunBlocked(null)
+    setValidatingForRun(true)
+    try {
+      const payload = buildPayload()
+      if (!payload) throw new Error('Workflow not loaded')
+      const result = await workflowsApi.validate(id!, payload)
+      setValidation(result)
+      if (result.errors.length > 0) {
+        setRunBlocked(`Run blocked — ${result.errors.length} validation error${result.errors.length === 1 ? '' : 's'}`)
+        return
+      }
+    } catch (err) {
+      setRunBlocked(apiErrorMessage(err))
+      return
+    } finally {
+      setValidatingForRun(false)
+    }
+
     runCloseRef.current?.()
     runCloseRef.current = null
     runLastSeqRef.current = 0
@@ -570,7 +592,7 @@ function WorkflowEditorInner() {
       const close = streamEvents(run_id)
       runCloseRef.current = close
     } catch (err) {
-      setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+      setRun((r) => (r ? { ...r, status: 'failed', error: apiErrorMessage(err) } : r))
     }
   }
 
@@ -582,8 +604,8 @@ function WorkflowEditorInner() {
       // `run_cancelled` event over the existing stream. Either way a fresh
       // fetch keeps the panel in sync.
       workflowsApi.getRun(run.id).then(setRun).catch(() => {})
-    } catch {
-      workflowsApi.getRun(run.id).then(setRun).catch(() => {})
+    } catch (err) {
+      setRun((r) => (r ? { ...r, error: apiErrorMessage(err) } : r))
     }
   }
 
@@ -599,7 +621,7 @@ function WorkflowEditorInner() {
       const close = streamEvents(run.id)
       runCloseRef.current = close
     } catch (err) {
-      setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+      setRun((r) => (r ? { ...r, status: 'failed', error: apiErrorMessage(err) } : r))
     }
   }
 
@@ -631,6 +653,20 @@ function WorkflowEditorInner() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, pendingRunId])
+
+  // Dismiss the local panel only — the server-side run keeps going (paused
+  // runs stay reachable from the sidebar).
+  const handleRunClose = () => {
+    runCloseRef.current?.()
+    runCloseRef.current = null
+    setRun(null)
+    if (searchParams.get('run')) {
+      const next = new URLSearchParams(searchParams.toString())
+      next.delete('run')
+      const qs = next.toString()
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
+    }
+  }
 
   // Debounced auto-save: persist ~800ms after the last edit while dirty.
   useEffect(() => {
@@ -784,9 +820,15 @@ function WorkflowEditorInner() {
             <Braces size={14} />
             Input
           </button>
+          {runBlocked && (
+            <span className="mr-1 flex max-w-[280px] items-center gap-1 text-xs text-red-400" title={runBlocked}>
+              <AlertTriangle size={13} className="shrink-0" />
+              <span className="truncate">{runBlocked}</span>
+            </span>
+          )}
           <button
             onClick={handleRun}
-            disabled={run?.status === 'running'}
+            disabled={run?.status === 'running' || validatingForRun}
             className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
           >
             <Play size={14} />
@@ -957,7 +999,7 @@ function WorkflowEditorInner() {
       )}
 
       {/* Bottom: run log / debug panel */}
-      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} onCancel={handleCancel} />}
+      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} onCancel={handleCancel} onClose={handleRunClose} />}
     </div>
   )
 }
