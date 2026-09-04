@@ -1,4 +1,4 @@
-# AI Forge — Agent Instructions
+# Daedalus — Agent Instructions
 
 ## Commands
 
@@ -48,5 +48,5 @@ Key directories:
 - Node types are plain string literals (`"start"`, `"agent"`, `"human_in_loop"`, …), not enums.
 - Frontend: React Query for data fetching, TailwindCSS for styling, lucide-react for icons.
 - Backend: no DI framework; routers are registered in `app/main.py`.
-- Workflow persistence: one JSON file per workflow in `~/.ai-forge/workflows/`.
-- Secrets: `~/.ai-forge/secrets.json` (chmod 600), env vars take precedence over file.
+- Workflow persistence: one JSON file per workflow in `~/.daedalus/workflows/`.
+- Secrets: `~/.daedalus/secrets.json` (chmod 600), env vars take precedence over file.

@@ -836,7 +836,7 @@
     },
     "InterfaceType": {
       "enum": [
-        "ai_forge_workflow",
+        "daedalus_workflow",
         "mcp",
         "http"
       ],

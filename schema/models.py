@@ -1,5 +1,5 @@
 """
-AI Forge — Workflow Schema
+Daedalus — Workflow Schema
 
 Pydantic models that define the structure of a workflow.
 These are the single source of truth for the JSON format persisted to disk.

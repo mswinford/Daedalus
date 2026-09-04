@@ -1,6 +1,6 @@
 """SQLite persistence layer for run metadata and event logs.
 
-Run metadata and event logs persist in SQLite (~/.ai-forge/checkpoints.db)
+Run metadata and event logs persist in SQLite (~/.daedalus/checkpoints.db)
 alongside the graph checkpoints, so runs survive process restarts. emit() runs
 on the event-loop thread while the graph executes, so writes must never block
 it: they are queued and applied by a dedicated writer thread using short-lived

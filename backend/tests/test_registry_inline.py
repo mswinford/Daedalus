@@ -5,8 +5,8 @@ from registry.cli import SAMPLES_DIR, _publish
 
 
 def _client(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_FORGE_REGISTRY_DB", str(tmp_path / "registry.db"))
-    monkeypatch.setenv("AI_FORGE_CAPABILITIES_REPO", str(tmp_path / "caps"))
+    monkeypatch.setenv("DAEDALUS_REGISTRY_DB", str(tmp_path / "registry.db"))
+    monkeypatch.setenv("DAEDALUS_CAPABILITIES_REPO", str(tmp_path / "caps"))
     from registry.main import app
     return TestClient(app)
 

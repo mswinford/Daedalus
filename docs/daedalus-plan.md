@@ -1,4 +1,4 @@
-# AI Forge — Plan & Architecture Document
+# Daedalus — Plan & Architecture Document
 
 ## Overview
 
@@ -126,7 +126,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   (name/type/required), and implementation (`builtin` / `custom_function` / `http`, each with its
   own config fields). Accessible via "Tools" button in top bar. Agent nodes select tools from this
   list (checkbox). Save persists tools to workflow JSON. Frontend-only; no backend change needed.
-- **Secrets store**: `~/.ai-forge/secrets.json` (flat JSON, chmod 600) with env-var precedence
+- **Secrets store**: `~/.daedalus/secrets.json` (flat JSON, chmod 600) with env-var precedence
   (`os.environ` > file). Resolved via `get_secret(name)` — available in sandboxed custom functions
   and `${NAME}` placeholders in http tool headers. REST API: GET list (names + source only), PUT
   upsert, DELETE. Frontend: "Secrets" button opens a modal panel for CRUD. Accessible via "Secrets"
@@ -179,7 +179,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   pane, debounced auto-save with unmount flush. See "Sidebar / master-detail editor — Design".
 - [x] **Async execution** *(done 2026-08-28)* — POST /run returns 202 + runId immediately; WebSocket
   streams per-node events live (with seq-based replay/dedup); GET /runs/:id for polling fallback.
-- [x] **Secrets store** *(done 2026-08-28)* — `~/.ai-forge/secrets.json` + env-var precedence;
+- [x] **Secrets store** *(done 2026-08-28)* — `~/.daedalus/secrets.json` + env-var precedence;
   `get_secret()` in sandbox; `${NAME}` in http headers; REST API + frontend panel.
 - [x] **Per-agent message isolation** *(done 2026-08-28)* — `messages_by_node` dict in state;
   sequential agents get fresh conversations, share only `data`. Unblocks multi-repo Option B.
@@ -195,7 +195,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
    via `?run=<id>` (reconnects to the event stream, so the approval form works).
 - [x] **SQLite checkpointing** *(done 2026-08-29)* — replaced `MemorySaver` with
   `langgraph-checkpoint-sqlite`; each run opens its own `AsyncSqliteSaver` connection on the shared
-  file (`~/.ai-forge/checkpoints.db`, WAL mode) because aiosqlite connections bind to one event loop.
+  file (`~/.daedalus/checkpoints.db`, WAL mode) because aiosqlite connections bind to one event loop.
   The HIL interrupt payload now carries `workflow_id`; on startup `recover_paused_runs()` finds
   threads whose latest checkpoint still has an `__interrupt__` write, rebuilds the record from the
   real graph's state snapshot, and re-arms the timeout (failing immediately if the deadline passed
@@ -278,7 +278,7 @@ Design decisions:
 
 Gaps to close first:
 - [x] **URL templating for `http` tools** — done (see "Harden the http tool" above).
-- [x] **Secrets store** — done; GitHub token stored in `~/.ai-forge/secrets.json`, referenced via
+- [x] **Secrets store** — done; GitHub token stored in `~/.daedalus/secrets.json`, referenced via
   `${GITHUB_TOKEN}` in headers or `get_secret("GITHUB_TOKEN")` in sandbox.
 - [x] **`github_*` builtins** — done: `github_create_branch`, `github_read_file`, `github_write_file`,
   `github_create_pr` registered via `@register_builtin` in `backend/app/engine/tools.py`
@@ -483,7 +483,7 @@ Estimate ~1 day.
 - **SQLite checkpointer** — Workflow state persisted for crash recovery and human-in-loop pauses
 
 ### Secrets & API Keys *(implemented)*
-- **Env vars + config file** — `~/.ai-forge/secrets.json` (chmod 600), env vars take precedence
+- **Env vars + config file** — `~/.daedalus/secrets.json` (chmod 600), env vars take precedence
 - **`get_secret()` helper** — Available in sandboxed custom function nodes and `${NAME}` in http headers
 - **UI panel** — "Secrets" button in editor top bar; list (name + source), add/update, delete
 
@@ -531,9 +531,9 @@ Estimate ~1 day.
 - **Run ID labels** — Each pending task labeled with run ID and timestamp
 
 ### Deployment
-- **pip install** — `pip install ai-forge`, then `ai-forge serve --port 3000`
-- **Docker** — `docker run -p 3000:3000 ai-forge`
-- JSON workflows stored in `~/.ai-forge/workflows/`
+- **pip install** — `pip install daedalus`, then `daedalus serve --port 3000`
+- **Docker** — `docker run -p 3000:3000 daedalus`
+- JSON workflows stored in `~/.daedalus/workflows/`
 
 ### Observability
 - **Internal dashboard** — Run trends, slow nodes, error hotspots, token usage
@@ -554,7 +554,7 @@ Estimate ~1 day.
 - Sandboxing via RestrictedPython or container-based isolation
 
 ### Persistence
-- Each workflow = one JSON file in `~/.ai-forge/workflows/`
+- Each workflow = one JSON file in `~/.daedalus/workflows/`
 - Schema includes version number for migrations
 - Export/import workflow as JSON
 - Optional git integration (the workflows directory can be a git repo)

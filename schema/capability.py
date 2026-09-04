@@ -1,9 +1,9 @@
 """
-AI Forge — Capability Manifest Schema
+Daedalus — Capability Manifest Schema
 
 Pydantic models defining the Capability Package contract: identity + kind spec
 + interface + governance + versioning. Single source of truth shared by the
-registry service and AI Forge (see docs/capability-registry-plan.md).
+registry service and Daedalus (see docs/capability-registry-plan.md).
 
 `kind` says what a capability *is* (semantic); `interface` says how it is
 *invoked* (protocol). The two are orthogonal. Only `tool` and `workflow`
@@ -39,7 +39,7 @@ class CapabilityKind(str, Enum):
 
 
 class InterfaceType(str, Enum):
-    AI_FORGE_WORKFLOW = "ai_forge_workflow"
+    DAEDALUS_WORKFLOW = "daedalus_workflow"
     MCP = "mcp"
     HTTP = "http"
 

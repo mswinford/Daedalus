@@ -10,7 +10,7 @@ from app import runs
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    print(f"AI Forge starting on {settings.host}:{settings.port}")
+    print(f"Daedalus starting on {settings.host}:{settings.port}")
     print(f"Data directory: {settings.data_dir}")
     recovered = await runs.recover_paused_runs()
     if recovered:
@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AI Forge",
+    title="Daedalus",
     version="0.1.0",
     lifespan=lifespan,
 )

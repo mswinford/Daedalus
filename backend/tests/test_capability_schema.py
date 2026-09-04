@@ -54,7 +54,7 @@ def _manifest(kind, spec, **overrides) -> dict:
 
 
 def _interface() -> dict:
-    return {"type": "ai_forge_workflow", "input_schema": {}, "output_schema": {}}
+    return {"type": "daedalus_workflow", "input_schema": {}, "output_schema": {}}
 
 
 # ─── Parsing per kind ────────────────────────────────────────────────────────

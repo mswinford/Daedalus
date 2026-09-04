@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_FORGE_REGISTRY_DB", str(tmp_path / "registry.db"))
-    monkeypatch.setenv("AI_FORGE_CAPABILITIES_REPO", str(tmp_path / "capabilities"))
+    monkeypatch.setenv("DAEDALUS_REGISTRY_DB", str(tmp_path / "registry.db"))
+    monkeypatch.setenv("DAEDALUS_CAPABILITIES_REPO", str(tmp_path / "capabilities"))
     from registry.main import app
     with TestClient(app) as c:
         yield c

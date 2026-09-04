@@ -1,4 +1,4 @@
-"""Secrets storage: ~/.ai-forge/secrets.json with env-var precedence.
+"""Secrets storage: ~/.daedalus/secrets.json with env-var precedence.
 
 Resolution order for a given name:
   1. Process environment variable (os.environ)

@@ -56,7 +56,7 @@ def _manifest(name="acme/wf", version="1.0.0"):
         "description": "demo workflow",
         "tags": ["demo"], "kind": "workflow",
         "spec": {"kind": "workflow", "workflow": Workflow(id="w", name="w").model_dump()},
-        "interface": {"type": "ai_forge_workflow"},
+        "interface": {"type": "daedalus_workflow"},
         "governance": {"owner": "acme"},
     }
 
@@ -158,8 +158,8 @@ def test_malformed_capability_usage_is_skipped():
 # ─── CapabilityClient.write_evaluation (real registry app) ──────────────────
 
 def test_write_evaluation_success_and_404(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_FORGE_REGISTRY_DB", str(tmp_path / "registry.db"))
-    monkeypatch.setenv("AI_FORGE_CAPABILITIES_REPO", str(tmp_path / "caps"))
+    monkeypatch.setenv("DAEDALUS_REGISTRY_DB", str(tmp_path / "registry.db"))
+    monkeypatch.setenv("DAEDALUS_CAPABILITIES_REPO", str(tmp_path / "caps"))
     from registry.main import app as registry_app
 
     with TestClient(registry_app) as reg:

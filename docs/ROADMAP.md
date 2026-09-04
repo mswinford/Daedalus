@@ -1,7 +1,7 @@
 # AI Capability Platform — Roadmap
 
 > **Status:** Living top-level plan. Synthesizes the original vision ([`concepts/enterprise-foundry-overview.md`](./concepts/enterprise-foundry-overview.md)) with the architectural reframe settled during design.
-> **Component plans:** [AI Forge](./ai-forge-plan.md) · [Capability Registry](./capability-registry-plan.md).
+> **Component plans:** [Daedalus](./daedalus-plan.md) · [Capability Registry](./capability-registry-plan.md).
 
 ## The goal
 
@@ -11,18 +11,18 @@ The unit of delivery is the **Capability Package**: manifest + artifact + interf
 
 ## Key reframe
 
-The original 7-phase plan treats this as greenfield. In reality, **AI Forge already ships most of the "operating environment"**: workflow authoring + execution (LangGraph), tools, model config, secrets, sandboxing, human-approval gates, and run observability/cost. So we do **not** rebuild a runtime.
+The original 7-phase plan treats this as greenfield. In reality, **Daedalus already ships most of the "operating environment"**: workflow authoring + execution (LangGraph), tools, model config, secrets, sandboxing, human-approval gates, and run observability/cost. So we do **not** rebuild a runtime.
 
 The genuinely new work is narrow — **identity, versioning, ownership, lifecycle, search/discovery, and the packaging contract.** That is the registry's real job.
 
-> **Consequence:** the platform is **AI Forge (runtime) + Capability Registry (system-of-record & discovery)**, sharing one `schema` package. The source doc's "Execution Broker / Gateway" are largely already inside AI Forge — they get *extended*, not rebuilt.
+> **Consequence:** the platform is **Daedalus (runtime) + Capability Registry (system-of-record & discovery)**, sharing one `schema` package. The source doc's "Execution Broker / Gateway" are largely already inside Daedalus — they get *extended*, not rebuilt.
 
 ## Components
 
 | Component | What it is | Status | Plan |
 |---|---|---|---|
-| **AI Forge** | Workflow authoring + execution engine (LangGraph); tools, models, secrets, HIL, observability | Shipped (Phase 3) | [ai-forge-plan.md](./ai-forge-plan.md) |
-| **Capability Registry** | Identity · versioning · ownership · lifecycle · search · packaging. A thin layer *above* AI Forge; git (provenance) + SQLite→Postgres index | R1 complete (steps 1–8 shipped); R2 in progress — publish-time governance checks, invoke node, run metrics → `evaluation` scores, upgrade automation for existing imports, and live refs (`latest` tracking) shipped | [capability-registry-plan.md](./capability-registry-plan.md) |
+| **Daedalus** | Workflow authoring + execution engine (LangGraph); tools, models, secrets, HIL, observability | Shipped (Phase 3) | [daedalus-plan.md](./daedalus-plan.md) |
+| **Capability Registry** | Identity · versioning · ownership · lifecycle · search · packaging. A thin layer *above* Daedalus; git (provenance) + SQLite→Postgres index | R1 complete (steps 1–8 shipped); R2 in progress — publish-time governance checks, invoke node, run metrics → `evaluation` scores, upgrade automation for existing imports, and live refs (`latest` tracking) shipped | [capability-registry-plan.md](./capability-registry-plan.md) |
 | **`schema` package** | Shared Pydantic models — the Capability Manifest contract + all node/tool/workflow types | Shipped; extended with the Capability Manifest (R1 step 1) | in both |
 
 ## Everything is a capability
@@ -38,12 +38,12 @@ Prove the #1 value: **reuse rate** — do new AI projects consume an existing ca
 - ✅ Capability Manifest schema + all core `kind` specs (`schema/capability.py`).
 - ✅ Registry service: git-backed store, SQLite index (FTS5), immutable versions, lifecycle state machine.
 - ✅ Publish (git commit + index) + search + use APIs; offline CLI (`publish` / `seed`) with eleven sample capabilities in `registry/samples/`.
-- ✅ AI Forge **Capabilities** view: browse/search → detail → one-click **Use** (inline import into a target workflow; name-based secret/model remapping), plus per-kind "Use in…" import affordances on agent nodes (`prompt_ref` + `skills[]`).
+- ✅ Daedalus **Capabilities** view: browse/search → detail → one-click **Use** (inline import into a target workflow; name-based secret/model remapping), plus per-kind "Use in…" import affordances on agent nodes (`prompt_ref` + `skills[]`).
 - **KPI:** % of new workflows that reuse a registered capability.
 
 ### R2 — Govern & Compose
 From "here's a thing you can use" to "declare it and the platform runs/resolves it."
-- ✅ `invoke` node in the AI Forge engine — call a registered capability by `name@version` with mapped I/O; tool kind executes directly, workflow kind expands into the parent graph at build time behind a call frame (per-run version pinning, HIL/resume/recovery work unmodified, parent-side error catch via synthetic error edges). Remote invocation settled by design (2026-09-03): workflows are always embedded locally — a remote service is invoked as an `http` tool, an opaque black-box call whose internals AI Forge does not model; cross-instance workflow composition, if ever needed, is R3+ territory alongside MCP adapters.
+- ✅ `invoke` node in the Daedalus engine — call a registered capability by `name@version` with mapped I/O; tool kind executes directly, workflow kind expands into the parent graph at build time behind a call frame (per-run version pinning, HIL/resume/recovery work unmodified, parent-side error catch via synthetic error edges). Remote invocation settled by design (2026-09-03): workflows are always embedded locally — a remote service is invoked as an `http` tool, an opaque black-box call whose internals Daedalus does not model; cross-instance workflow composition, if ever needed, is R3+ territory alongside MCP adapters.
 - ✅ Declared-dependency resolution at publish + automated per-kind breaking-change detection (`registry/publish_checks.py` — refs must resolve with import-time semantics, kind changes across versions rejected, breaking changes require a major bump).
 - ✅ Feed real run metrics into `evaluation` scores — provenance stamped on registry imports, per-run capability-usage snapshots, participation-level aggregates (success rate, duration p50/p95, avg cost) pushed to the registry on every terminal run; displayed in the Capabilities view and blended into search ranking.
 - ✅ Upgrade automation for existing imports — provenance stamped on all import kinds, "check for updates" with version badges (breaking majors in red), one-click in-place upgrades with per-field drift diff (local edits preserved, workflow references never broken), explicit breaking-change confirmation, and a guard + ack against active/paused runs.
@@ -55,7 +55,7 @@ From "here's a thing you can use" to "declare it and the platform runs/resolves 
 Agents discover and compose capabilities themselves.
 - Semantic/intent search (hybrid FTS + vector).
 - Agent discovery API (`search` / `describe` / `resolve`).
-- MCP adapter (expose capabilities as MCP servers + an MCP node in AI Forge).
+- MCP adapter (expose capabilities as MCP servers + an MCP node in Daedalus).
 - Enforcement gateway: ACL, credential brokerage, audit — built on the governance metadata recorded since R1.
 
 ## Mapping to the original phases
@@ -77,7 +77,7 @@ Agents discover and compose capabilities themselves.
 
 ## Documentation map
 - `docs/ROADMAP.md` — this file (platform-level).
-- `docs/ai-forge-plan.md` — AI Forge application plan & status.
+- `docs/daedalus-plan.md` — Daedalus application plan & status.
 - `docs/capability-registry-plan.md` — registry component plan (R1 complete; R2 in progress — publish-time governance checks, invoke node, run metrics → `evaluation` scores, upgrade automation for existing imports, and live refs shipped).
 - `docs/data-flow.md` — engine data-flow reference.
 - `docs/concepts/` — original vision docs: `enterprise-foundry-overview.md`, `capabilities.md`, `capability-registry.md`.

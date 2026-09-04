@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ai-forge"
+name = "daedalus"
 version = "0.1.0"
 description = "Visual workflow builder for AI agents using LangGraph"
 requires-python = ">=3.11"
@@ -27,11 +27,11 @@ dev = [
 ]
 
 [project.scripts]
-ai-forge = "ai_forge.cli:main"
-ai-forge-registry = "registry.cli:main"
+daedalus = "daedalus.cli:main"
+daedalus-registry = "registry.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend/app", "schema", "ai_forge", "registry"]
+packages = ["backend/app", "schema", "daedalus", "registry"]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]

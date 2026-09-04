@@ -95,7 +95,7 @@ export default function SecretsPanel({ onClose }: Props) {
         </div>
 
         <p className="mb-3 text-xs leading-relaxed text-zinc-500">
-          Secrets are stored in <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">~/.ai-forge/secrets.json</code>.
+          Secrets are stored in <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">~/.daedalus/secrets.json</code>.
           Reference them in http tool headers or custom functions via{' '}
           <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">{'${NAME}'}</code> or{' '}
           <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">get_secret('NAME')</code>.

@@ -10,7 +10,7 @@ How a workflow run flows from HTTP request to response, and what each node type 
 POST /api/workflows/{id}/run  {"request": "...", "score": 95, ...}
         │
         ▼
-_load_workflow()          loads ~/.ai-forge/workflows/{id}.json, validates against Pydantic schema
+_load_workflow()          loads ~/.daedalus/workflows/{id}.json, validates against Pydantic schema
         │
         ▼
 RunRecord created         in-memory run store (status=running), run_id = uuid4
@@ -27,7 +27,7 @@ GET /api/runs/{id}        poll for status + result   ·   WS /api/runs/{id}/even
 POST /api/runs/{id}/resume  resume a paused run with Command(resume=human_input)
 ```
 
-Runs are **asynchronous**: `POST .../run` returns `202` + `run_id` and the graph executes in a worker thread (`asyncio.to_thread`). Events stream over WebSocket; the finished `WorkflowRun` is retrievable by polling. A human-in-loop node pauses the run (LangGraph `interrupt()`); it is resumed later via `POST /api/runs/{id}/resume`, which calls `runner.resume_workflow` with a `Command(resume=...)` against the SQLite checkpointer (`~/.ai-forge/checkpoints.db`, one connection per run). A run can be cancelled at any non-terminal point via `POST /api/runs/{id}/cancel`: a paused run is terminated immediately and its checkpoint thread is deleted (so restart-recovery can never resurrect it); a running run stops at the next super-step boundary — the runner drives the graph with `astream(stream_mode="values")` and checks a per-run cancel flag between steps, so the in-flight node's work finishes first.
+Runs are **asynchronous**: `POST .../run` returns `202` + `run_id` and the graph executes in a worker thread (`asyncio.to_thread`). Events stream over WebSocket; the finished `WorkflowRun` is retrievable by polling. A human-in-loop node pauses the run (LangGraph `interrupt()`); it is resumed later via `POST /api/runs/{id}/resume`, which calls `runner.resume_workflow` with a `Command(resume=...)` against the SQLite checkpointer (`~/.daedalus/checkpoints.db`, one connection per run). A run can be cancelled at any non-terminal point via `POST /api/runs/{id}/cancel`: a paused run is terminated immediately and its checkpoint thread is deleted (so restart-recovery can never resurrect it); a running run stops at the next super-step boundary — the runner drives the graph with `astream(stream_mode="values")` and checks a per-run cancel flag between steps, so the in-flight node's work finishes first.
 
 The workflow JSON is translated into a LangGraph `StateGraph` once per run (`builder.py`). Every node is an async function that receives the shared state and returns the parts of the state it changed. Each node is wrapped by `_instrument`, which emits `node_start` / `node_end` (with duration + summarized output) events and re-raises LangGraph's `GraphInterrupt` untouched. Any other exception becomes a fatal `node_error` event — **unless** the node owns an error edge (`error_handling` opt-in), in which case the exception is converted into the `_error_info` state marker instead so the router can take the error path (see §4). Before that failure path runs, nodes with an enabled `RetryConfig` (agent / transform / custom_function) get re-invoked on transient failures: `engine/retry.py` classifies the exception as `rate_limit`, `timeout`, or `server_error` (conservative — logic errors are never retryable), and if the category is in `retry_on` and attempts remain, the wrapper sleeps `backoff_base × 2^n` (capped at 30s) and retries. Each attempt emits a `retry` event; `node_end.duration_ms` covers all attempts. Node functions return new state without mutating it, so every attempt starts clean — but side effects inside node code do re-execute, so retried code should be idempotent.
 
@@ -125,7 +125,7 @@ Available builtins are restricted to safe ones (`safe_builtins` + list/dict/set/
 
 ### human_in_loop (`builder.py`)
 
-Pauses the run using LangGraph's `interrupt()`, emitting a `human_request` event with a structured payload (node id, message, declared `input_fields`, and `approval_required`). The graph is checkpointed to SQLite (`~/.ai-forge/checkpoints.db`, one connection per run); the run's status becomes `paused`.
+Pauses the run using LangGraph's `interrupt()`, emitting a `human_request` event with a structured payload (node id, message, declared `input_fields`, and `approval_required`). The graph is checkpointed to SQLite (`~/.daedalus/checkpoints.db`, one connection per run); the run's status becomes `paused`.
 
 On resume (`POST /api/runs/{id}/resume`), the human's response arrives via `Command(resume=...)`:
 

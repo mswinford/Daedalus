@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Boot the full AI Forge dev stack in one terminal:
+# Boot the full Daedalus dev stack in one terminal:
 #   backend   127.0.0.1:3000   (FastAPI, auto-reload)
 #   registry  127.0.0.1:3010   (capability registry, auto-reload)
 #   frontend  127.0.0.1:5173   (Vite; proxies /api and /registry)
@@ -92,7 +92,7 @@ start backend  "$ROOT"            "'$PY' backend/cli.py"
 start registry "$ROOT"            "'$PY' -m registry.cli serve"
 start frontend "$ROOT/frontend"   "npm run dev"
 
-echo "AI Forge dev stack starting (logs in .dev/):"
+echo "Daedalus dev stack starting (logs in .dev/):"
 echo "  backend    http://127.0.0.1:3000   .dev/backend.log"
 echo "  registry   http://127.0.0.1:3010   .dev/registry.log"
 echo "  frontend   http://127.0.0.1:5173   .dev/frontend.log"
