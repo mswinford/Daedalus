@@ -1,4 +1,5 @@
 """Translate workflow JSON into a LangGraph StateGraph."""
+import asyncio
 import json
 import time
 from typing import Any, Callable
@@ -6,10 +7,11 @@ from langgraph.errors import GraphInterrupt
 from langgraph.graph import StateGraph, START, END
 
 from schema.models import (
-    Workflow, Node, Edge, ConditionalNodeConfig, RunEvent,
+    Workflow, Node, Edge, ConditionalNodeConfig, RunEvent, RetryConfig,
 )
 from app.engine.llm import create_provider, LLMProvider
 from app.engine.conditions import evaluate_condition, ConditionError
+from app.engine.retry import classify_error
 from app.secrets import get_secret
 from app.engine.nodes import HANDLERS
 from app.engine.nodes.base import AgentState
@@ -99,7 +101,8 @@ class GraphBuilder:
             },
         ))
 
-    def _instrument(self, node_id: str, func: Callable, catch_error: bool = False) -> Callable:
+    def _instrument(self, node_id: str, func: Callable, catch_error: bool = False,
+                    retry: RetryConfig | None = None) -> Callable:
         """Wrap a node function to emit node_start/node_end (or node_error) with timing.
 
         When `catch_error` is set (the node owns a type='error' edge), an
@@ -107,23 +110,49 @@ class GraphBuilder:
         propagating, so the node's router can send the run down its error
         edge. A successful run clears the marker. GraphInterrupt always
         propagates — it signals a pause, not a failure.
+
+        When `retry` is enabled, transient failures (classified by
+        classify_error and listed in retry_on) are re-invoked with
+        exponential backoff before the failure path runs. Node functions
+        return new state without mutating it, so each attempt starts clean.
         """
+        rc = retry if retry and retry.enabled else None
+        max_attempts = (rc.max_retries + 1) if rc else 1
+
         async def wrapped(state: AgentState) -> AgentState:
             started = time.perf_counter()
             self._emit(RunEvent(type="node_start", node_id=node_id, timestamp=time.time()))
-            try:
-                result = await func(state)
-            except GraphInterrupt:
-                raise
-            except Exception as exc:
-                duration_ms = (time.perf_counter() - started) * 1000
-                self._emit(RunEvent(
-                    type="node_error", node_id=node_id, timestamp=time.time(),
-                    data={"error": str(exc), "duration_ms": round(duration_ms, 2)},
-                ))
-                if not catch_error:
+            attempt = 0
+            while True:
+                try:
+                    result = await func(state)
+                    break
+                except GraphInterrupt:
                     raise
-                return {"_error_info": {"node_id": node_id, "error": str(exc)}}
+                except Exception as exc:
+                    attempt += 1
+                    category = classify_error(exc) if rc else None
+                    if category is None or category not in rc.retry_on or attempt >= max_attempts:
+                        duration_ms = (time.perf_counter() - started) * 1000
+                        self._emit(RunEvent(
+                            type="node_error", node_id=node_id, timestamp=time.time(),
+                            data={"error": str(exc), "duration_ms": round(duration_ms, 2)},
+                        ))
+                        if not catch_error:
+                            raise
+                        return {"_error_info": {"node_id": node_id, "error": str(exc)}}
+                    delay = min(rc.backoff_base * (2 ** (attempt - 1)), 30.0)
+                    self._emit(RunEvent(
+                        type="retry", node_id=node_id, timestamp=time.time(),
+                        data={
+                            "attempt": attempt,
+                            "max_retries": rc.max_retries,
+                            "error": str(exc),
+                            "category": category,
+                            "delay_s": delay,
+                        },
+                    ))
+                    await asyncio.sleep(delay)
             duration_ms = (time.perf_counter() - started) * 1000
             output = result.get("_node_outputs", {}).get(node_id) if isinstance(result, dict) else None
             self._emit(RunEvent(
@@ -284,7 +313,12 @@ class GraphBuilder:
                 continue  # Start and end are handled by edges
             node_func = self._get_node_func(node)
             self.graph.add_node(
-                node.id, self._instrument(node.id, node_func, catch_error=node.id in error_sources)
+                node.id,
+                self._instrument(
+                    node.id, node_func,
+                    catch_error=node.id in error_sources,
+                    retry=getattr(node.config, "retry", None),
+                ),
             )
 
         # Add edges

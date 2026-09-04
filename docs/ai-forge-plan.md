@@ -38,6 +38,21 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > immediately and its checkpoint thread is deleted (indefinite HIL waits can no longer accumulate
 > as zombie approvals across restarts); a running run stops at the next super-step boundary;
 > cancelled runs stay inspectable but are excluded from capability metrics aggregation.
+> Also shipped: **per-node retry** — agent / transform / custom_function nodes carry an optional
+> `RetryConfig` (enabled, max_retries 0–10, backoff_base with exponential doubling, retry_on
+> categories); `_instrument` re-invokes transient failures (classified by `engine/retry.py`:
+> rate_limit / timeout / server_error, conservative heuristics — bare numbers in prose are not
+> status codes) before the normal failure path, emits a `retry` event per attempt (amber badge in
+> the Run panel), and caps each backoff sleep at 30s so cancellation stays responsive.
+> GraphInterrupt is never retried; non-matching errors fail fast. Caveat: retries re-execute side
+> effects, so retried node code should be idempotent. Also shipped: **bounded loops** — back edges
+> (cycles) are legal; `_invoke_with_cancel` counts super-steps per drive segment and raises past
+> MAX_SUPER_STEPS=500 → terminal `iteration_limit` event + failed run (frontend treats it as
+> terminal). Per-segment budget (fresh after each HIL resume); W_CYCLE_DETECTED reworded from
+> "problem" to informational. No E_LOOP_CROSSES_FRAME check is needed: inner region ids are
+> generated at expansion and unreferenceable, so no authored edge can cross an invoke frame —
+> loops around an invoke re-enter the region cleanly each pass. Section-level retry is a loop
+> pattern (back edge from the error path + attempt counter), not a primitive.
 > Next up: `eval_suite` kind, SQLite → Postgres (ROADMAP.md R2 remainder). Remote invocation settled by design (2026-09-03) — workflows are always embedded; remote services are invoked as opaque `http` tools. Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
@@ -133,7 +148,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   `HumanInputForm` (text/textarea/select/boolean fields) + "Approve & Resume" button; on resume the
   event stream reconnects. ConfigPanel has a full editor for HIL nodes (input fields CRUD, approval
   toggle, timeout, output fields list). Validation checks output_fields presence and named inputs.
-- **Tests**: backend suite green as of 2026-09-03 (423 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+- **Tests**: backend suite green as of 2026-09-03 (439 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 138 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads

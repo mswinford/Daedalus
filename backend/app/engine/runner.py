@@ -12,17 +12,37 @@ from app.engine.builder import GraphBuilder
 from app.sqlite_util import secure_owner_only
 
 
+class IterationLimitExceeded(RuntimeError):
+    """Raised when a run exceeds the per-segment super-step cap (loop guard)."""
+
+    def __init__(self, steps: int):
+        super().__init__(f"Run exceeded the {steps}-step limit (possible infinite loop)")
+        self.steps = steps
+
+
+# Hard bound on super-steps per drive segment. Cycles in the graph are legal
+# (loops); this cap guarantees a run can never hang. Counted per segment, so
+# a paused run gets a fresh budget after each resume — pauses are human-paced,
+# and any runaway is still cancellable.
+MAX_SUPER_STEPS = 500
+
+
 async def _invoke_with_cancel(graph: Any, payload: Any, config: dict[str, Any],
                               cancel_event: threading.Event | None) -> dict | None:
     """Drive the graph super-step by super-step, checking for cancellation
     between steps. Returns the final state, or None if a cancel was requested
-    (the in-flight step finishes first; no further steps run)."""
+    (the in-flight step finishes first; no further steps run). Raises
+    IterationLimitExceeded when the step cap is hit."""
     # stream_mode="values" (explicit: the default yields per-node updates, not
     # full state snapshots). The final snapshot matches ainvoke's result,
     # including the __interrupt__ key when a human_in_loop node pauses.
     result = None
+    steps = 0
     async for chunk in graph.astream(payload, config=config, stream_mode="values"):
         result = chunk
+        steps += 1
+        if steps > MAX_SUPER_STEPS:
+            raise IterationLimitExceeded(MAX_SUPER_STEPS)
         if cancel_event is not None and cancel_event.is_set():
             return None
     return result

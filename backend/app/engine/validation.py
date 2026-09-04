@@ -392,7 +392,11 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
     if cycle:
         warnings.append(ValidationIssue(
             level="warning", code="W_CYCLE_DETECTED",
-            message=f"Cycle detected through nodes: {' -> '.join(cycle)}",
+            message=(
+                f"Loop through nodes: {' -> '.join(cycle)} — cycles are allowed "
+                f"(loops), but every run is bounded by the per-run step cap; a loop "
+                f"that never exits fails the run with an iteration_limit event."
+            ),
         ))
 
     return ValidationResult(valid=not errors, errors=errors, warnings=warnings)

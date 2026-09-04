@@ -44,6 +44,17 @@ describe('summarize', () => {
     expect(out[1].error).toBe('timed out')
   })
 
+  it('folds retry events into a per-node counter', () => {
+    const events = [
+      ev({ type: 'node_start', node_id: 'a' }),
+      ev({ type: 'retry', node_id: 'a', data: { attempt: 1, max_retries: 3, error: 'rate limited', category: 'rate_limit', delay_s: 1 } }),
+      ev({ type: 'retry', node_id: 'a', data: { attempt: 2, max_retries: 3, error: 'timed out', category: 'timeout', delay_s: 2 } }),
+      ev({ type: 'node_end', node_id: 'a', data: { duration_ms: 900, output: 'ok' } }),
+    ]
+    const out = summarize(events, new Map())
+    expect(out[0]).toMatchObject({ retries: 2, lastRetryError: 'timed out', durationMs: 900 })
+  })
+
   it('labels expanded inner nodes with their authored inner id', () => {
     const events = [ev({ type: 'node_end', node_id: 'inv1__hil', data: { duration_ms: 1 } })]
     const out = summarize(events, new Map())

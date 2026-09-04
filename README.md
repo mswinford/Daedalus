@@ -13,6 +13,8 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), `invoke` (calls a registry capability by `name@version`), and `human_in_loop` (pause / resume / reject).
 - Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
 - **Error branches** — opt-in per-node error handle (config panel toggle); when a node fails, the run routes down its red-dashed `error` edge if one exists, otherwise the run fails. Human-in-loop pauses are never treated as failures.
+- **Per-node retry** — agent / transform / custom_function nodes can retry transient failures (`rate_limit`, `timeout`, `server_error`) with exponential backoff (config panel); each attempt emits a `retry` event (shown as an amber badge in the Run panel), error edges fire only after the budget is exhausted, and non-transient errors fail fast. Note: retries re-execute side effects — keep retried node code idempotent.
+- **Bounded loops** — back edges (cycles) are legal; every run segment is capped at 500 super-steps, and a loop that never exits fails the run with an `iteration_limit` event instead of hanging. Typical patterns: for-each over `data.items` (index counter in state) and regenerate-until-pass (append feedback to state, branch on a quality check).
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
 - Per-agent message isolation — each agent keeps its own conversation; agents share only structured `data`.
 - Run input validated against the workflow's `state_schema` (if defined) before execution.
@@ -34,7 +36,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
 - **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame), publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage), the run-metrics pipeline (per-run usage snapshots pushed to the registry as capability `evaluation` stats, blended into search ranking), and **upgrade automation** — every import stamps its registry origin, the editor detects newer versions (badges; breaking majors in red) and upgrades in place with a per-field drift diff that preserves local edits and never breaks workflow references (breaking changes require explicit confirmation; active/paused runs are guarded).
 
-**Tests:** 423 backend tests passing (`python -m pytest -q`, as of 2026-09-03, incl. registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+**Tests:** 439 backend tests passing (`python -m pytest -q`, as of 2026-09-03, incl. registry R1–R2); frontend 138 Vitest tests + typecheck/build clean.
 
 ---
 

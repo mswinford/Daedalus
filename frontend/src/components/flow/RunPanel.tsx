@@ -326,6 +326,11 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                           {ex.toolCalls.length} tool call{ex.toolCalls.length === 1 ? '' : 's'}
                         </span>
                       )}
+                      {ex.retries ? (
+                        <span className="rounded bg-amber-950/60 px-1.5 py-0.5 text-[11px] text-amber-300" title={ex.lastRetryError}>
+                          {ex.retries} retr{ex.retries === 1 ? 'y' : 'ies'}
+                        </span>
+                      ) : null}
                       {durationMs != null && (
                         <span className="text-[11px] text-zinc-500">{fmtMs(durationMs)}</span>
                       )}

@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from app.config import get_settings
-from app.engine.runner import run_workflow_sync, resume_workflow
+from app.engine.runner import IterationLimitExceeded, run_workflow_sync, resume_workflow
 from app.runs.metrics import report_run_metrics
 from app.runs.record import _prune_runs
 from app.runs.store import _delete_checkpoint_thread, _prune_store, _save_run_summary
@@ -83,6 +83,15 @@ async def _drive(record, workflow, *, input_data=None, human_input=None, invocat
                     "estimated_cost_usd": record.estimated_cost_usd,
                 },
             }
+    except IterationLimitExceeded as exc:
+        record.status = "failed"
+        record.error = str(exc)
+        terminal = {
+            "type": "iteration_limit",
+            "node_id": None,
+            "timestamp": time.time(),
+            "data": {"error": str(exc), "steps": exc.steps},
+        }
     except Exception as exc:  # noqa: BLE001 - surface any failure to the client
         record.status = "failed"
         record.error = str(exc)

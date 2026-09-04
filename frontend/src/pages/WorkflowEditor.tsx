@@ -514,7 +514,7 @@ function WorkflowEditorInner() {
         if (ev.seq != null && ev.seq <= runLastSeqRef.current) return
         if (ev.seq != null) runLastSeqRef.current = ev.seq
         setRun((r) => (r ? { ...r, events: [...r.events, ev] } : r))
-        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || ev.type === 'run_cancelled' || (ev.type === 'node_error' && !!ev.data?.fatal)
+        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || ev.type === 'run_cancelled' || ev.type === 'iteration_limit' || (ev.type === 'node_error' && !!ev.data?.fatal)
         if (terminal || ev.type === 'human_request') {
           runFinishedRef.current = true
           workflowsApi.getRun(runId).then(setRun).catch(() => {})

@@ -479,6 +479,7 @@ class RunEvent(BaseModel):
         "human_respond",
         "human_timeout",
         "run_cancelled",
+        "iteration_limit",
         "retry",
         "capability_notice",
     ]

@@ -18,6 +18,8 @@ export interface NodeExecution {
   tokensIn?: number
   tokensOut?: number
   llmCalls?: number
+  retries?: number
+  lastRetryError?: string
   toolCalls?: ToolCallView[]
 }
 
@@ -65,6 +67,9 @@ export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType
       ex.tokensIn = (ex.tokensIn ?? 0) + (ev.data.tokens_input ?? 0)
       ex.tokensOut = (ex.tokensOut ?? 0) + (ev.data.tokens_output ?? 0)
       ex.llmCalls = (ex.llmCalls ?? 0) + 1
+    } else if (ev.type === 'retry') {
+      ex.retries = (ex.retries ?? 0) + 1
+      ex.lastRetryError = ev.data.error
     } else if (ev.type === 'tool_call') {
       ex.toolCalls = ex.toolCalls ?? []
       ex.toolCalls.push({ name: ev.data.name, args: ev.data.args })
