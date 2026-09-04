@@ -60,7 +60,7 @@ import {
   upsertModel,
   upsertTools,
 } from '@/lib/capabilityUpgrade'
-import type { AgentNodeConfig, AgentSkill, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
+import type { AgentNodeConfig, AgentSkill, ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
 
@@ -90,6 +90,7 @@ function WorkflowEditorInner() {
   const [inputError, setInputError] = useState<string | null>(null)
   const [models, setModels] = useState<ModelConfig[]>([])
   const [tools, setTools] = useState<ToolDefinition[]>([])
+  const [prompts, setPrompts] = useState<PromptDefinition[]>([])
   const [showResources, setShowResources] = useState(false)
   const [pickerKind, setPickerKind] = useState<CapabilityKind | null>(null)
   const [showSecrets, setShowSecrets] = useState(false)
@@ -130,6 +131,7 @@ function WorkflowEditorInner() {
     setEdges(edgesToRF(workflow.edges))
     setModels(workflow.models)
     setTools(workflow.tools)
+    setPrompts(workflow.prompts ?? [])
     setSelectedId(null)
     setValidation(null)
     setDirty(false)
@@ -163,14 +165,14 @@ function WorkflowEditorInner() {
       edges: rfToEdges(edges),
       tools,
       models,
-      prompts: workflow.prompts ?? [],
+      prompts,
       state_schema: workflow.state_schema ?? null,
       // Top-level provenance must round-trip or autosave would wipe the stamp.
       source_capability: workflow.source_capability ?? null,
       source_version: workflow.source_version ?? null,
       track_latest: wfTrackOverride ?? workflow.track_latest ?? false,
     }
-  }, [workflow, id, nodes, edges, tools, models, wfTrackOverride, nameOverride])
+  }, [workflow, id, nodes, edges, tools, models, prompts, wfTrackOverride, nameOverride])
 
   useEffect(() => {
     latestPayloadRef.current = buildPayload()
@@ -250,6 +252,22 @@ function WorkflowEditorInner() {
           const c = n.data.config as AgentNodeConfig
           if (!removed.includes(c.model_id)) return n
           return { ...n, data: { ...n.data, config: { ...c, model_id: '' } } }
+        }),
+      )
+    }
+    setDirty(true)
+  }
+
+  const handlePromptsChange = (p: PromptDefinition[]) => {
+    setPrompts(p)
+    const removed = prompts.filter((x) => !p.some((y) => y.id === x.id)).map((x) => x.id)
+    if (removed.length > 0) {
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.data.nodeType !== 'agent') return n
+          const c = n.data.config as AgentNodeConfig
+          if (!c.prompt_ref || !removed.includes(c.prompt_ref)) return n
+          return { ...n, data: { ...n.data, config: { ...c, prompt_ref: null } } }
         }),
       )
     }
@@ -986,7 +1004,7 @@ function WorkflowEditorInner() {
             node={selectedNode}
             models={models}
             tools={tools}
-            prompts={workflow?.prompts ?? []}
+            prompts={prompts}
             onConfigChange={handleConfigChange}
             onErrorHandlingChange={handleErrorToggle}
             onDeleteNode={handleDeleteNode}
@@ -1016,12 +1034,12 @@ function WorkflowEditorInner() {
         <ResourcesPanel
           tools={tools}
           models={models}
-          prompts={workflow?.prompts ?? []}
-          wfId={id ?? undefined}
+          prompts={prompts}
           updates={updates.statuses}
           runWarning={runWarning}
           onToolsChange={handleToolsChange}
           onModelsChange={handleModelsChange}
+          onPromptsChange={handlePromptsChange}
           onOpenRegistry={(kind) => { setShowResources(false); setPickerKind(kind); setShowPicker(true) }}
           onClose={() => setShowResources(false)}
         />

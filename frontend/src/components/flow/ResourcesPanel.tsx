@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { ArrowUpCircle, Cpu, Layers, PackagePlus, Plus, ScrollText, Trash2, Wrench, X } from 'lucide-react'
 
 import type { ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workflowTypes'
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
-import { workflowsApi } from '@/lib/api'
 import CapabilityVersionBadge from './CapabilityVersionBadge'
 import TrackToggle from './TrackToggle'
 import ToolForm, { IMPL_LABEL } from './ToolForm'
@@ -15,11 +13,11 @@ interface Props {
   tools: ToolDefinition[]
   models: ModelConfig[]
   prompts?: PromptDefinition[]
-  wfId?: string
   updates?: UpdateStatus[]
   runWarning?: string | null
   onToolsChange: (tools: ToolDefinition[]) => void
   onModelsChange: (models: ModelConfig[]) => void
+  onPromptsChange: (prompts: PromptDefinition[]) => void
   onOpenRegistry: (kind: 'tool' | 'model_profile') => void
   onClose: () => void
 }
@@ -32,15 +30,14 @@ export default function ResourcesPanel({
   tools,
   models,
   prompts = [],
-  wfId,
   updates,
   runWarning,
   onToolsChange,
   onModelsChange,
+  onPromptsChange,
   onOpenRegistry,
   onClose,
 }: Props) {
-  const queryClient = useQueryClient()
   const [editingTool, setEditingTool] = useState<ToolDefinition | null>(null)
   const [addingTool, setAddingTool] = useState(false)
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null)
@@ -71,13 +68,8 @@ export default function ResourcesPanel({
     setAddingModel(false)
   }
 
-  const setPromptTrack = async (p: PromptDefinition, v: boolean) => {
-    if (!wfId) return
-    const fresh = await workflowsApi.get(wfId)
-    const nextPrompts = (fresh.prompts ?? []).map((x) => (x.id === p.id ? { ...x, track_latest: v } : x))
-    await workflowsApi.update(wfId, { ...fresh, prompts: nextPrompts })
-    await queryClient.invalidateQueries({ queryKey: ['workflows'] })
-    await queryClient.invalidateQueries({ queryKey: ['workflow', wfId] })
+  const setPromptTrack = (p: PromptDefinition, v: boolean) => {
+    onPromptsChange(prompts.map((x) => (x.id === p.id ? { ...x, track_latest: v } : x)))
   }
 
   const applyUpgrade = async (upgraded: Record<string, unknown>) => {
@@ -88,15 +80,11 @@ export default function ResourcesPanel({
     } else if (kind === 'model_profile') {
       onModelsChange(models.map((x) => (x.id === upgraded.id ? (upgraded as unknown as ModelConfig) : x)))
     } else if (kind === 'prompt') {
-      if (!wfId) throw new Error('Workflow id unavailable')
-      const fresh = await workflowsApi.get(wfId)
-      const idx = (fresh.prompts ?? []).findIndex((p) => p.id === upgraded.id)
+      const idx = prompts.findIndex((p) => p.id === upgraded.id)
       if (idx < 0) throw new Error('Prompt no longer exists in the workflow')
-      const nextPrompts = [...(fresh.prompts ?? [])]
+      const nextPrompts = [...prompts]
       nextPrompts[idx] = upgraded as unknown as PromptDefinition
-      await workflowsApi.update(wfId, { ...fresh, prompts: nextPrompts })
-      await queryClient.invalidateQueries({ queryKey: ['workflows'] })
-      await queryClient.invalidateQueries({ queryKey: ['workflow', wfId] })
+      onPromptsChange(nextPrompts)
     } else {
       throw new Error(`Cannot upgrade ${kind} here`)
     }
