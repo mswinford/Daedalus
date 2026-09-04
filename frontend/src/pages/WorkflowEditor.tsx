@@ -32,6 +32,7 @@ import {
 import { runInputPlaceholder } from '@/lib/runInput'
 import {
   ERROR_EDGE_STYLE,
+  edgeVisuals,
   nodesToRF,
   edgesToRF,
   rfToNodes,
@@ -41,6 +42,7 @@ import {
 } from '@/lib/graphTransform'
 import FlowNode, { NodeNameContext } from '@/components/flow/FlowNode'
 import ConfigPanel from '@/components/flow/ConfigPanel'
+import EdgeInspector from '@/components/flow/EdgeInspector'
 import ResourcesPanel from '@/components/flow/ResourcesPanel'
 import type { CapabilityKind } from '@/lib/registryApi'
 import RunPanel from '@/components/flow/RunPanel'
@@ -60,7 +62,7 @@ import {
   upsertModel,
   upsertTools,
 } from '@/lib/capabilityUpgrade'
-import type { AgentNodeConfig, AgentSkill, ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workflowTypes'
+import type { AgentNodeConfig, AgentSkill, ConditionConfig, ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
 
@@ -84,6 +86,7 @@ function WorkflowEditorInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeType>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [inputJson, setInputJson] = useState('')
   const [showInput, setShowInput] = useState(false)
@@ -192,6 +195,26 @@ function WorkflowEditorInner() {
   const displayNameById = useMemo(
     () => displayNamesFor(nodes.map((n) => ({ id: n.id, type: n.data.nodeType, label: n.data.label }))),
     [nodes]
+  )
+
+  // Derived, so deleting a selected edge (canvas or via node delete) hides the inspector automatically.
+  const selectedEdge = useMemo(
+    () => (selectedEdgeId ? edges.find((e) => e.id === selectedEdgeId) ?? null : null),
+    [edges, selectedEdgeId],
+  )
+
+  const handleEdgeChange = useCallback(
+    (edgeId: string, patch: { type: 'static' | 'conditional'; condition: ConditionConfig | null }) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId
+            ? { ...e, ...edgeVisuals(patch), data: { semanticType: patch.type, condition: patch.condition } }
+            : e,
+        ),
+      )
+      setDirty(true)
+    },
+    [setEdges],
   )
 
   const startInputFields = useMemo(() => {
@@ -953,9 +976,13 @@ function WorkflowEditorInner() {
             onNodesDelete={handleNodesDelete}
             onEdgesDelete={handleEdgesDelete}
             nodeTypes={nodeTypes}
-            onNodeClick={(_e, n) => setSelectedId(n.id)}
-            onEdgeClick={() => setSelectedId(null)}
-            onPaneClick={() => setSelectedId(null)}
+            onNodeClick={(_e, n) => { setSelectedId(n.id); setSelectedEdgeId(null) }}
+            onEdgeClick={(_e, edge) => {
+              setSelectedId(null)
+              // Error edges are self-evident (red dashed) and stay delete-only.
+              if ((edge.data?.semanticType as string | undefined) !== 'error') setSelectedEdgeId(edge.id)
+            }}
+            onPaneClick={() => { setSelectedId(null); setSelectedEdgeId(null) }}
             deleteKeyCode="Delete"
             snapToGrid
             snapGrid={[GRID, GRID]}
@@ -997,23 +1024,37 @@ function WorkflowEditorInner() {
           )}
         </main>
 
-        {/* Right: config panel */}
+        {/* Right: config panel (node or edge) */}
         <aside className="w-72 overflow-y-auto border-l border-zinc-800 p-3">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Config</p>
-          <ConfigPanel
-            node={selectedNode}
-            models={models}
-            tools={tools}
-            prompts={prompts}
-            onConfigChange={handleConfigChange}
-            onErrorHandlingChange={handleErrorToggle}
-            onDeleteNode={handleDeleteNode}
-            displayName={selectedNode ? displayNameById.get(selectedNode.id) : undefined}
-            onLabelChange={handleLabelChange}
-            edges={edges}
-            updates={updates.statuses}
-            onUpgradeOrigin={openConfigUpgrade}
-          />
+          {selectedEdge ? (
+            <>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Edge</p>
+              <EdgeInspector
+                edge={selectedEdge}
+                sourceName={displayNameById.get(selectedEdge.source) ?? selectedEdge.source}
+                targetName={displayNameById.get(selectedEdge.target) ?? selectedEdge.target}
+                onChange={(patch) => handleEdgeChange(selectedEdge.id, patch)}
+              />
+            </>
+          ) : (
+            <>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Config</p>
+              <ConfigPanel
+                node={selectedNode}
+                models={models}
+                tools={tools}
+                prompts={prompts}
+                onConfigChange={handleConfigChange}
+                onErrorHandlingChange={handleErrorToggle}
+                onDeleteNode={handleDeleteNode}
+                displayName={selectedNode ? displayNameById.get(selectedNode.id) : undefined}
+                onLabelChange={handleLabelChange}
+                edges={edges}
+                updates={updates.statuses}
+                onUpgradeOrigin={openConfigUpgrade}
+              />
+            </>
+          )}
         </aside>
       </div>
 

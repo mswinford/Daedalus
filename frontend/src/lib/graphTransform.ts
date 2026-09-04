@@ -25,6 +25,24 @@ export type FlowNodeType = Node<FlowNodeData>
 export const ERROR_EDGE_STYLE = { stroke: '#ef4444', strokeDasharray: '6 3' } as const
 export const ERROR_HANDLE_STYLE = { background: '#ef4444', borderColor: '#ef4444' } as const
 
+// Styling for type='conditional' edges (amber) and their condition label.
+export const CONDITIONAL_EDGE_STYLE = { stroke: '#f59e0b' } as const
+const EDGE_LABEL_STYLE = { fill: '#d4d4d8', fontSize: 10 } as const
+const EDGE_LABEL_BG = { fill: '#18181b', stroke: '#3f3f46' } as const
+
+/** Visual props for an edge by semantic type. Conditional edges carry their condition as a label. */
+export function edgeVisuals(e: {
+  type?: WorkflowEdge['type']
+  condition?: WorkflowEdge['condition']
+}): Pick<Edge, 'style' | 'label' | 'labelStyle' | 'labelBgStyle'> {
+  if (e.type === 'error') return { style: ERROR_EDGE_STYLE, label: undefined, labelStyle: undefined, labelBgStyle: undefined }
+  if (e.type === 'conditional' && e.condition) {
+    const text = ((e.condition.description ?? '').trim() || e.condition.expression).slice(0, 40)
+    return { style: CONDITIONAL_EDGE_STYLE, label: text, labelStyle: EDGE_LABEL_STYLE, labelBgStyle: EDGE_LABEL_BG }
+  }
+  return { style: undefined, label: undefined, labelStyle: undefined, labelBgStyle: undefined }
+}
+
 // Source handles for a node, in render order. Conditional nodes get one handle per
 // condition (positionally matched to outgoing branch edges) plus the default/fallback.
 // Nodes with error_handling opt in to an extra 'error' handle (never on start/end).
@@ -80,7 +98,7 @@ export function edgesToRF(edges: WorkflowEdge[]): Edge[] {
     sourceHandle: e.source_handle,
     target: e.target_node_id,
     type: 'default',
-    style: e.type === 'error' ? ERROR_EDGE_STYLE : undefined,
+    ...edgeVisuals(e),
     data: { semanticType: e.type, condition: e.condition ?? null },
   }))
 }
