@@ -2,7 +2,7 @@
   "name": "forge/github-create-pr",
   "version": "1.0.0",
   "kind": "tool",
-  "description": "Open a pull request in a GitHub repository from an existing branch. Requires the GITHUB_TOKEN secret and AI Forge's github_create_pr builtin (ships with the backend).",
+  "description": "Open a pull request in a GitHub repository from an existing branch. Requires the GITHUB_TOKEN secret and Daedalus's github_create_pr builtin (ships with the backend).",
   "tags": ["github", "builtin", "vcs"],
   "spec": {
     "kind": "tool",

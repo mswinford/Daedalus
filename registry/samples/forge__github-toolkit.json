@@ -2,7 +2,7 @@
   "name": "forge/github-toolkit",
   "version": "2.0.0",
   "kind": "skill",
-  "description": "The GitHub toolkit: branch creation, file reading, file writing, and pull request opening as one attachable skill. Add it to an agent node once and all four tools land in the workflow's tool pool. Requires the GITHUB_TOKEN secret and AI Forge's github_* builtins (ship with the backend).",
+  "description": "The GitHub toolkit: branch creation, file reading, file writing, and pull request opening as one attachable skill. Add it to an agent node once and all four tools land in the workflow's tool pool. Requires the GITHUB_TOKEN secret and Daedalus's github_* builtins (ship with the backend).",
   "tags": ["github", "composite", "toolkit"],
   "spec": {
     "kind": "skill",
