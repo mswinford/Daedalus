@@ -23,6 +23,7 @@ import {
   PALETTE_GROUPS,
   NODE_META,
   defaultConfig,
+  displayNamesFor,
   type NodeType,
   type WorkflowNode,
   type NodeConfig,
@@ -38,7 +39,7 @@ import {
   sourceHandlesFor,
   type FlowNodeType,
 } from '@/lib/graphTransform'
-import FlowNode from '@/components/flow/FlowNode'
+import FlowNode, { NodeNameContext } from '@/components/flow/FlowNode'
 import ConfigPanel from '@/components/flow/ConfigPanel'
 import ResourcesPanel from '@/components/flow/ResourcesPanel'
 import type { CapabilityKind } from '@/lib/registryApi'
@@ -183,8 +184,13 @@ function WorkflowEditorInner() {
     if (!selectedId) return null
     const n = nodes.find((x) => x.id === selectedId)
     if (!n) return null
-    return { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config, error_handling: n.data.errorHandling ?? false } as WorkflowNode
+    return { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config, error_handling: n.data.errorHandling ?? false, label: n.data.label ?? null } as WorkflowNode
   }, [nodes, selectedId])
+
+  const displayNameById = useMemo(
+    () => displayNamesFor(nodes.map((n) => ({ id: n.id, type: n.data.nodeType, label: n.data.label }))),
+    [nodes]
+  )
 
   const startInputFields = useMemo(() => {
     const start = nodes.find((n) => n.data.nodeType === 'start')
@@ -200,6 +206,11 @@ function WorkflowEditorInner() {
         return { ...n, data: { ...n.data, config, branchHandles: sourceHandlesFor(temp, rfToEdges(edges)) } }
       }),
     )
+  }
+
+  const handleLabelChange = (nodeId: string, label: string | null) => {
+    setDirty(true)
+    setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, label } } : n)))
   }
 
   // Pool removals must also drop the references in agent configs, otherwise
@@ -914,6 +925,7 @@ function WorkflowEditorInner() {
           onDrop={handleDrop}
           onDragOver={handleDragOver}
         >
+          <NodeNameContext.Provider value={displayNameById}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -939,6 +951,7 @@ function WorkflowEditorInner() {
               nodeColor={(n) => NODE_META[(n as FlowNodeType).data.nodeType].color}
             />
           </ReactFlow>
+          </NodeNameContext.Provider>
 
           {nodes.length === 0 && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -977,6 +990,8 @@ function WorkflowEditorInner() {
             onConfigChange={handleConfigChange}
             onErrorHandlingChange={handleErrorToggle}
             onDeleteNode={handleDeleteNode}
+            displayName={selectedNode ? displayNameById.get(selectedNode.id) : undefined}
+            onLabelChange={handleLabelChange}
             edges={edges}
             updates={updates.statuses}
             onUpgradeOrigin={openConfigUpgrade}

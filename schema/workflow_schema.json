@@ -826,6 +826,19 @@
           "description": "Opt in to an error handle so failures can be routed via a type='error' edge",
           "title": "Error Handling",
           "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional display name for canvas and run logs; falls back to the node type name",
+          "title": "Label"
         }
       },
       "required": [

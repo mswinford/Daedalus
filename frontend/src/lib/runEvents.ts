@@ -33,7 +33,7 @@ export function splitInvokeId(nodeId: string): { invokeId: string; innerId: stri
 }
 
 /** Fold the flat event stream into one summary per executed node, in run order. */
-export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>): NodeExecution[] {
+export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>, displayNameById?: Map<string, string>): NodeExecution[] {
   const byId = new Map<string, NodeExecution>()
   const order: string[] = []
 
@@ -42,7 +42,7 @@ export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType
     if (!ex) {
       const type = nodeTypeById.get(nodeId)
       if (type) {
-        ex = { nodeId, label: NODE_META[type].label, color: NODE_META[type].color, startedAt: ts }
+        ex = { nodeId, label: displayNameById?.get(nodeId) ?? NODE_META[type].label, color: NODE_META[type].color, startedAt: ts }
       } else {
         // Expanded inner nodes are not in the parent's node list — fall back to the authored inner id.
         const split = splitInvokeId(nodeId)

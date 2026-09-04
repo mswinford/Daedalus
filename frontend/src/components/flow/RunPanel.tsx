@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Ban, CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X, Maximize2, Minimize2 } from 'lucide-react'
 
 import type { WorkflowRun, HumanInterruptField } from '@/lib/api'
-import type { NodeType } from '@/lib/workflowTypes'
+import { displayNamesFor, type NodeType } from '@/lib/workflowTypes'
 import type { FlowNodeType } from '@/lib/graphTransform'
 import { summarize, groupExecutions, regionStats, type ToolCallView } from '@/lib/runEvents'
 
@@ -224,10 +224,15 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
     return m
   }, [nodes])
 
+  const displayNameById = useMemo(
+    () => displayNamesFor(nodes.map((n) => ({ id: n.id, type: n.data.nodeType, label: n.data.label }))),
+    [nodes]
+  )
+
   const { rows, totalExecutions } = useMemo(() => {
-    const executions = summarize(run.events, nodeTypeById)
+    const executions = summarize(run.events, nodeTypeById, displayNameById)
     return { rows: groupExecutions(executions), totalExecutions: executions.length }
-  }, [run.events, nodeTypeById])
+  }, [run.events, nodeTypeById, displayNameById])
 
   const totalMs =
     run.started_at != null && run.completed_at != null

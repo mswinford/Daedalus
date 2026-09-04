@@ -12,6 +12,7 @@ import {
 export interface FlowNodeData extends Record<string, unknown> {
   nodeType: NodeType
   config: WorkflowNode['config']
+  label?: string | null
   branchHandles?: string[]
   errorHandling?: boolean
   validation?: 'error' | 'warning'
@@ -65,6 +66,7 @@ export function nodesToRF(nodes: WorkflowNode[], edges: WorkflowEdge[]): FlowNod
     data: {
       nodeType: n.type,
       config: n.config,
+      label: n.label ?? null,
       branchHandles: sourceHandlesFor(n, edges),
       errorHandling: n.error_handling ?? false,
     },
@@ -92,6 +94,8 @@ export function rfToNodes(nodes: FlowNodeType[]): WorkflowNode[] {
     position: { x: n.position.x, y: n.position.y },
     config: n.data.config,
     error_handling: n.data.errorHandling ?? false,
+    // Omitted when unset so unlabeled workflows keep their old file shape.
+    ...(n.data.label != null ? { label: n.data.label } : {}),
   })) as WorkflowNode[]
 }
 

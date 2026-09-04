@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Plus, Trash2, AlertTriangle, ArrowUpCircle } from 'lucide-react'
+import { Plus, Trash2, AlertTriangle, ArrowUpCircle, Pencil } from 'lucide-react'
 import type { Edge } from '@xyflow/react'
 
 import {
+  NODE_META,
   type WorkflowNode,
   type NodeConfig,
   type ModelConfig,
@@ -34,9 +35,52 @@ interface Props {
   onConfigChange: (nodeId: string, config: NodeConfig) => void
   onErrorHandlingChange: (nodeId: string, enabled: boolean) => void
   onDeleteNode: (nodeId: string) => void
+  displayName?: string
+  onLabelChange?: (nodeId: string, label: string | null) => void
   edges: Edge[]
   updates?: UpdateStatus[]
   onUpgradeOrigin?: (where: string) => void
+}
+
+// ─── node name (inline rename) ──────────────────────────────────────────────
+
+function NodeNameEditor({ nodeId, name, label, onCommit }: { nodeId: string; name: string; label?: string | null; onCommit?: (nodeId: string, label: string | null) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const commit = () => {
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed !== (label ?? '')) onCommit?.(nodeId, trimmed || null)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => { setDraft(label ?? ''); setEditing(true) }}
+        title="Rename node"
+        className="group flex min-w-0 items-center gap-1.5 text-left text-sm font-medium text-zinc-200 hover:text-white"
+      >
+        <span className="truncate">{name}</span>
+        <Pencil size={12} className="shrink-0 text-zinc-600 group-hover:text-zinc-400" />
+      </button>
+    )
+  }
+
+  return (
+    <input
+      autoFocus
+      value={draft}
+      maxLength={40}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit()
+        else if (e.key === 'Escape') setEditing(false)
+      }}
+      className="w-full rounded border border-zinc-600 bg-zinc-900 px-1.5 py-0.5 text-sm font-medium text-zinc-200 outline-none focus:border-indigo-500"
+    />
+  )
 }
 
 // ─── small form primitives ──────────────────────────────────────────────────
@@ -620,7 +664,7 @@ function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: Invo
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges, updates, onUpgradeOrigin }: Props) {
+export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, displayName, onLabelChange, edges, updates, onUpgradeOrigin }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -634,8 +678,9 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
     <div className="space-y-3">
       <div className="border-b border-zinc-800 pb-2">
         <p className="text-xs text-zinc-500">Editing node</p>
-        <p className="flex items-center gap-1.5 font-mono text-sm text-zinc-200">
-          <span className="truncate">{node.id}</span>
+        <NodeNameEditor nodeId={node.id} name={displayName ?? NODE_META[node.type].label} label={node.label} onCommit={onLabelChange} />
+        <p className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-zinc-600">
+          <span className="truncate" title={node.id}>{node.id}</span>
           {agentStatus && (
             <CapabilityVersionBadge current={agentStatus.currentVersion} latest={agentStatus.latestVersion} breaking={agentStatus.isBreaking} tracking={node.type === 'agent' ? !!(node.config as AgentNodeConfig).track_latest : false} />
           )}

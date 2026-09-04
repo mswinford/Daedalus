@@ -401,6 +401,9 @@ class Node(BaseModel):
     error_handling: bool = Field(
         False, description="Opt in to an error handle so failures can be routed via a type='error' edge"
     )
+    label: Optional[str] = Field(
+        None, description="Optional display name for canvas and run logs; falls back to the node type name"
+    )
 
 
 # ─── Edge Types ──────────────────────────────────────────────────────────────

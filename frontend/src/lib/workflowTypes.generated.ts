@@ -169,6 +169,10 @@ export interface Node {
      */
     id: string;
     /**
+     * Optional display name for canvas and run logs; falls back to the node type name
+     */
+    label?: null | string;
+    /**
      * Position on canvas
      */
     position?: NodePosition;

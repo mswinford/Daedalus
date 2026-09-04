@@ -1,9 +1,12 @@
-import { useEffect } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { Play, Flag, Bot, GitBranch, Shuffle, User, Code2, AlertTriangle, Container, DoorOpen } from 'lucide-react'
 
 import { NODE_META, type NodeType } from '@/lib/workflowTypes'
 import { ERROR_HANDLE_STYLE, type FlowNodeData } from '@/lib/graphTransform'
+
+/** Node id → display name for the current graph; provided by the editor around the canvas. */
+export const NodeNameContext = createContext<Map<string, string> | null>(null)
 
 const ICONS: Record<NodeType, typeof Play> = {
   start: Play,
@@ -48,6 +51,8 @@ function subtitle(nodeType: NodeType, config: FlowNodeData['config']): string {
 
 export default function FlowNode({ data, selected, id }: NodeProps) {
   const d = data as FlowNodeData
+  const names = useContext(NodeNameContext)
+  const name = names?.get(id) ?? NODE_META[d.nodeType].label
   const meta = NODE_META[d.nodeType]
   const Icon = ICONS[d.nodeType]
   const isStart = d.nodeType === 'start'
@@ -94,7 +99,7 @@ export default function FlowNode({ data, selected, id }: NodeProps) {
           <Icon size={14} />
         </span>
         <div className="leading-tight">
-          <p className="text-sm font-medium text-zinc-100">{meta.label}</p>
+          <p className="max-w-[180px] truncate text-sm font-medium text-zinc-100" title={name}>{name}</p>
           <p className="max-w-[180px] truncate text-[11px] text-zinc-500">{subtitle(d.nodeType, d.config)}</p>
         </div>
       </div>
