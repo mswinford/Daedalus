@@ -91,6 +91,7 @@ function WorkflowEditorInner() {
   const [showSecrets, setShowSecrets] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   // Local override for the workflow-level live-ref flag (the query data is read-only).
   const [wfTrackOverride, setWfTrackOverride] = useState<boolean | null>(null)
   // Local override for the name while editing (query data is read-only).
@@ -430,6 +431,7 @@ function WorkflowEditorInner() {
 
   const handleNodesDelete = useCallback(
     (deleted: FlowNodeType[]) => {
+      if (deleted.length > 0 && !window.confirm(`Delete ${deleted.length} node${deleted.length === 1 ? '' : 's'}? Connected edges will be removed too.`)) return
       const ids = new Set(deleted.map((n) => n.id))
       setEdges((eds) => eds.filter((e) => !ids.has(e.source) && !ids.has(e.target)))
       if (selectedId && ids.has(selectedId)) setSelectedId(null)
@@ -469,11 +471,13 @@ function WorkflowEditorInner() {
     },
     onSuccess: (saved) => {
       setDirty(false)
+      setSaveError(null)
       setValidation(null)
       validationRef.current = new Map()
       setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: undefined } })))
       syncedJsonRef.current = JSON.stringify(saved)
     },
+    onError: (err) => setSaveError(apiErrorMessage(err)),
   })
 
   const importMutation = useMutation({
@@ -631,7 +635,7 @@ function WorkflowEditorInner() {
   // Debounced auto-save: persist ~800ms after the last edit while dirty.
   useEffect(() => {
     if (!dirty || !workflow) return
-    const t = setTimeout(() => saveMutation.mutate(), 800)
+    const t = setTimeout(() => { setSaveError(null); saveMutation.mutate() }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, workflow, nodes, edges, tools, models])
@@ -640,7 +644,7 @@ function WorkflowEditorInner() {
   useEffect(() => {
     return () => {
       if (dirtyRef.current && id && latestPayloadRef.current) {
-        workflowsApi.update(id, latestPayloadRef.current).catch(() => {})
+        workflowsApi.update(id, latestPayloadRef.current).catch((err) => setSaveError(apiErrorMessage(err)))
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -747,6 +751,11 @@ function WorkflowEditorInner() {
           </button>
           {saveMutation.isPending ? (
             <span className="mr-1 text-xs text-zinc-400">Saving…</span>
+          ) : saveError ? (
+            <span className="mr-1 flex max-w-[280px] items-center gap-1 text-xs text-red-400" title={saveError}>
+              <AlertTriangle size={13} className="shrink-0" />
+              <span className="truncate">Save failed — {saveError}</span>
+            </span>
           ) : dirty ? (
             <span className="mr-1 flex items-center gap-1.5 text-xs text-amber-400">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
@@ -759,7 +768,7 @@ function WorkflowEditorInner() {
             </span>
           )}
           <button
-            onClick={() => saveMutation.mutate()}
+            onClick={() => { setSaveError(null); saveMutation.mutate() }}
             disabled={saveMutation.isPending}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
           >

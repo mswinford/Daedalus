@@ -681,7 +681,10 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
 
       <div className="border-t border-zinc-800 pt-3">
         <button
-          onClick={() => onDeleteNode(node.id)}
+          onClick={() => {
+            if (!window.confirm(`Delete ${node.type} node "${node.id}"? This cannot be undone.`)) return
+            onDeleteNode(node.id)
+          }}
           className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-900/50 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-950/30"
         >
           <Trash2 size={14} />

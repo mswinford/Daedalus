@@ -160,7 +160,10 @@ export default function ResourcesPanel({
                         {editingTool?.id === t.id ? 'Close' : 'Edit'}
                       </button>
                       <button
-                        onClick={() => onToolsChange(tools.filter((x) => x.id !== t.id))}
+                        onClick={() => {
+                          if (!window.confirm(`Delete tool "${t.name}"? It will also be removed from any agents using it.`)) return
+                          onToolsChange(tools.filter((x) => x.id !== t.id))
+                        }}
                         className="rounded p-1 text-zinc-500 hover:text-red-400"
                       >
                         <Trash2 size={13} />
@@ -229,7 +232,10 @@ export default function ResourcesPanel({
                         {editingModel?.id === m.id ? 'Close' : 'Edit'}
                       </button>
                       <button
-                        onClick={() => onModelsChange(models.filter((x) => x.id !== m.id))}
+                        onClick={() => {
+                          if (!window.confirm(`Delete model "${m.name}"? Agents using it will lose their model selection.`)) return
+                          onModelsChange(models.filter((x) => x.id !== m.id))
+                        }}
                         className="rounded p-1 text-zinc-500 hover:text-red-400"
                       >
                         <Trash2 size={13} />

@@ -124,7 +124,10 @@ export default function SecretsPanel({ onClose }: Props) {
                     Update
                   </button>
                   <button
-                    onClick={() => deleteMut.mutate(s.name)}
+                    onClick={() => {
+                      if (!window.confirm(`Delete secret "${s.name}"? This cannot be undone.`)) return
+                      deleteMut.mutate(s.name)
+                    }}
                     className="rounded p-1 text-zinc-500 hover:text-red-400"
                   >
                     <Trash2 size={13} />
