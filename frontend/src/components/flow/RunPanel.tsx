@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Ban, CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X, Maximize2, Minimize2 } from 'lucide-react'
 
 import type { WorkflowRun, HumanInterruptField } from '@/lib/api'
@@ -48,14 +48,37 @@ function formatOutput(value: unknown): string {
   }
 }
 
-function useNow(active: boolean): number {
+function useNow(active: boolean, intervalMs = 500): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!active) return
-    const id = setInterval(() => setNow(Date.now()), 500)
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
     return () => clearInterval(id)
-  }, [active])
+  }, [active, intervalMs])
   return now
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Pending',
+  running: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  paused: 'Paused',
+}
+
+function statusLabel(status?: string): string | undefined {
+  return status ? (STATUS_LABELS[status] ?? status) : undefined
+}
+
+function fmtClock(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour12: false })
+}
+
+function fmtElapsed(ms: number): string {
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
 }
 
 export function remainingSeconds(deadlineMs: number, now: number): number {
@@ -229,8 +252,30 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
     run.interrupt_value?.timeout_seconds != null && run.interrupt_value.requested_at != null
       ? run.interrupt_value.requested_at * 1000 + run.interrupt_value.timeout_seconds * 1000
       : null
-  const now = useNow(isPaused && deadlineMs != null)
+  const now = useNow(isRunning || (isPaused && deadlineMs != null), isRunning ? 100 : 500)
   const timedOut = deadlineMs != null && now >= deadlineMs
+
+  // Elapsed ticker: prefer the server's started_at, else count from when this
+  // panel first saw the run in a running state.
+  const runStartRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (isRunning) {
+      if (runStartRef.current == null) runStartRef.current = Date.now()
+    } else {
+      runStartRef.current = null
+    }
+  }, [isRunning])
+  const elapsedMs = isRunning
+    ? Math.max(0, now - (run.started_at != null ? run.started_at * 1000 : (runStartRef.current ?? now)))
+    : null
+
+  // Follow new rows only while the user is already near the bottom of the log.
+  const logRef = useRef<HTMLDivElement>(null)
+  const nearBottomRef = useRef(true)
+  useEffect(() => {
+    const el = logRef.current
+    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [rows.length])
 
   return (
     <div className={`border-t border-zinc-800 bg-zinc-950 ${logExpanded ? 'flex h-[70vh] flex-col' : ''}`}>
@@ -238,7 +283,10 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-xs">
         <span className={`flex items-center gap-1 font-medium ${isRunning ? 'text-amber-400' : isPaused ? 'text-purple-400' : isCancelled ? 'text-zinc-400' : failed ? 'text-red-400' : 'text-emerald-400'}`}>
           {isRunning ? <Timer size={14} /> : isPaused ? <PauseCircle size={14} /> : isCancelled ? <Ban size={14} /> : failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
-          {run.status}
+          {statusLabel(run.status)}
+          {elapsedMs != null && (
+            <span className="font-normal tabular-nums text-zinc-400">{fmtElapsed(elapsedMs)}</span>
+          )}
         </span>
         {totalMs != null && (
           <span className="flex items-center gap-1 text-zinc-400">
@@ -263,7 +311,7 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
             onClick={() => setLogExpanded((v) => !v)}
             title={logExpanded ? 'Collapse log' : 'Expand log'}
             aria-label={logExpanded ? 'Collapse log' : 'Expand log'}
-            className="rounded-md border border-zinc-700 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            className="rounded-md border border-zinc-700 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
           >
             {logExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           </button>
@@ -272,7 +320,7 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
               onClick={onClose}
               title="Close run panel"
               aria-label="Close run panel"
-              className="rounded-md border border-zinc-700 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              className="rounded-md border border-zinc-700 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
             >
               <X size={12} />
             </button>
@@ -317,7 +365,14 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
               {run.error}
             </pre>
           )}
-          <div className={`${logExpanded ? 'min-h-0 flex-1' : 'max-h-56'} space-y-0.5 overflow-auto pr-1`}>
+          <div
+            ref={logRef}
+            onScroll={() => {
+              const el = logRef.current
+              if (el) nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+            }}
+            className={`${logExpanded ? 'min-h-0 flex-1' : 'max-h-56'} space-y-0.5 overflow-auto pr-1`}
+          >
             {totalExecutions === 0 && (
               <p className="py-2 text-xs text-zinc-600">No node execution recorded.</p>
             )}
@@ -346,6 +401,9 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
                     )}
                     <span className="shrink-0 font-mono text-[11px] text-zinc-600">{ex.nodeId}</span>
                     <span className="ml-auto flex shrink-0 items-center gap-2">
+                      {ex.startedAt != null && (
+                        <span className="text-[10px] tabular-nums text-zinc-600">{fmtClock(ex.startedAt)}</span>
+                      )}
                       {llmCalls ? (
                         <span className="rounded bg-indigo-950/60 px-1.5 py-0.5 text-[11px] text-indigo-300">
                           {tokensIn}→{tokensOut} tok · {llmCalls} call{llmCalls === 1 ? '' : 's'}
@@ -395,6 +453,9 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
                               <span className="truncate text-xs text-zinc-300">{c.label}</span>
                               <span className="shrink-0 font-mono text-[10px] text-zinc-600">{c.nodeId}</span>
                               <span className="ml-auto flex shrink-0 items-center gap-2">
+                                {c.startedAt != null && (
+                                  <span className="text-[10px] tabular-nums text-zinc-600">{fmtClock(c.startedAt)}</span>
+                                )}
                                 {c.llmCalls ? (
                                   <span className="rounded bg-indigo-950/60 px-1.5 py-0.5 text-[10px] text-indigo-300">
                                     {c.tokensIn}→{c.tokensOut} tok · {c.llmCalls} call{c.llmCalls === 1 ? '' : 's'}

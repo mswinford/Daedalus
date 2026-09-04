@@ -26,7 +26,9 @@ import {
   type NodeType,
   type WorkflowNode,
   type NodeConfig,
+  type StartNodeConfig,
 } from '@/lib/workflowTypes'
+import { runInputPlaceholder } from '@/lib/runInput'
 import {
   ERROR_EDGE_STYLE,
   nodesToRF,
@@ -183,6 +185,11 @@ function WorkflowEditorInner() {
     if (!n) return null
     return { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config, error_handling: n.data.errorHandling ?? false } as WorkflowNode
   }, [nodes, selectedId])
+
+  const startInputFields = useMemo(() => {
+    const start = nodes.find((n) => n.data.nodeType === 'start')
+    return (start?.data.config as StartNodeConfig | undefined)?.input_fields ?? []
+  }, [nodes])
 
   const handleConfigChange = (nodeId: string, config: NodeConfig) => {
     setDirty(true)
@@ -687,7 +694,13 @@ function WorkflowEditorInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  if (isLoading) return <div className="p-6 text-zinc-500">Loading...</div>
+  if (isLoading)
+    return (
+      <div className="flex h-full items-center justify-center gap-2 bg-zinc-950 text-sm text-zinc-500">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" aria-hidden />
+        Loading…
+      </div>
+    )
   const updateCount = updates.statuses.filter((s) => s.hasUpdate).length
   const hasBreakingUpdate = updates.statuses.some((s) => s.hasUpdate && s.isBreaking)
   const wfUpdate = updates.statuses.find((s) => s.kind === 'workflow')
@@ -719,8 +732,8 @@ function WorkflowEditorInner() {
   return (
     <div className="flex h-full flex-col bg-zinc-950">
       {/* Top bar */}
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
-        <div className="flex items-center gap-2">
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-zinc-800 px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
           <input
             value={nameOverride ?? workflow.name}
             onChange={(e) => { setNameOverride(e.target.value); setDirty(true) }}
@@ -734,7 +747,7 @@ function WorkflowEditorInner() {
             <TrackToggle checked={!!(wfTrackOverride ?? workflow.track_latest)} onChange={(v) => { setWfTrackOverride(v); setDirty(true) }} />
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           <button
             onClick={() => setShowResources(true)}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
@@ -858,7 +871,7 @@ function WorkflowEditorInner() {
           <textarea
             value={inputJson}
             onChange={(e) => { setInputJson(e.target.value); if (inputError) setInputError(null) }}
-            placeholder='Leave blank to run with no input, or e.g. {"score": 40}'
+            placeholder={runInputPlaceholder(startInputFields)}
             spellCheck={false}
             className="mt-1 h-16 w-full resize-y rounded-md border border-zinc-800 bg-zinc-900 p-2 font-mono text-xs text-zinc-200 outline-none focus:border-zinc-600"
           />

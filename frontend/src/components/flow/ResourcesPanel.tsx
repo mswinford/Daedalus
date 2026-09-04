@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowUpCircle, Cpu, Layers, PackagePlus, Plus, ScrollText, Trash2, Wrench, X } from 'lucide-react'
 
@@ -46,6 +46,14 @@ export default function ResourcesPanel({
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null)
   const [addingModel, setAddingModel] = useState(false)
   const [upgrading, setUpgrading] = useState<{ status: UpdateStatus; localEntry: Record<string, unknown> } | null>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !upgrading) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, upgrading])
 
   const saveTool = (t: ToolDefinition) => {
     onToolsChange(
@@ -117,7 +125,7 @@ export default function ResourcesPanel({
           <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-100">
             <Layers size={16} /> Workflow resources
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:text-zinc-100">
+          <button onClick={onClose} aria-label="Close resources panel" className="rounded p-1 text-zinc-400 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500">
             <X size={16} />
           </button>
         </div>
@@ -164,7 +172,8 @@ export default function ResourcesPanel({
                           if (!window.confirm(`Delete tool "${t.name}"? It will also be removed from any agents using it.`)) return
                           onToolsChange(tools.filter((x) => x.id !== t.id))
                         }}
-                        className="rounded p-1 text-zinc-500 hover:text-red-400"
+                        aria-label={`Delete tool ${t.name}`}
+                        className="rounded p-1 text-zinc-500 hover:text-red-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -236,7 +245,8 @@ export default function ResourcesPanel({
                           if (!window.confirm(`Delete model "${m.name}"? Agents using it will lose their model selection.`)) return
                           onModelsChange(models.filter((x) => x.id !== m.id))
                         }}
-                        className="rounded p-1 text-zinc-500 hover:text-red-400"
+                        aria-label={`Delete model ${m.name}`}
+                        className="rounded p-1 text-zinc-500 hover:text-red-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
                       >
                         <Trash2 size={13} />
                       </button>
