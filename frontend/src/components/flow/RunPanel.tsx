@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Ban, CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X, Maximize2, Minimize2 } from 'lucide-react'
 
-import type { WorkflowRun, HumanInterruptField } from '@/lib/api'
+import type { WorkflowRun, HumanInterruptField, RunSummary } from '@/lib/api'
 import { displayNamesFor, type NodeType } from '@/lib/workflowTypes'
 import type { FlowNodeType } from '@/lib/graphTransform'
 import { summarize, groupExecutions, regionStats, type ToolCallView } from '@/lib/runEvents'
@@ -111,6 +111,9 @@ function TimeoutCountdown({ deadlineMs, now }: { deadlineMs: number; now: number
 interface RunPanelProps {
   run: WorkflowRun
   nodes: FlowNodeType[]
+  /** This workflow's live runs (from GET /runs); enables the run switcher. */
+  runs?: RunSummary[]
+  onSwitchRun?: (runId: string) => void
   onResume?: (input: Record<string, any>) => void
   onCancel?: () => void
   onClose?: () => void
@@ -214,9 +217,19 @@ function HumanInputForm({
   )
 }
 
-export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: RunPanelProps) {
+export default function RunPanel({ run, nodes, runs, onSwitchRun, onResume, onCancel, onClose }: RunPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [logExpanded, setLogExpanded] = useState(false)
+
+  // The switcher's options: the polled live runs plus the current run (which
+  // may not be in the list yet right after it started).
+  const runOptions = useMemo(() => {
+    const m = new Map<string, { id: string; status?: string }>()
+    for (const r of runs ?? []) m.set(r.run_id, { id: r.run_id, status: r.status })
+    const currentId = run.id
+    if (currentId) m.set(currentId, { id: currentId, status: run.status })
+    return [...m.values()]
+  }, [runs, run.id, run.status])
 
   const nodeTypeById = useMemo(() => {
     const m = new Map<string, NodeType>()
@@ -339,7 +352,23 @@ export default function RunPanel({ run, nodes, onResume, onCancel, onClose }: Ru
               Cancel
             </button>
           )}
-          <span className="text-zinc-600">{run.id}</span>
+          {onSwitchRun && runOptions.length > 1 ? (
+            <select
+              value={run.id ?? ''}
+              onChange={(e) => onSwitchRun(e.target.value)}
+              title="Switch between this workflow's active runs"
+              aria-label="Switch run"
+              className="max-w-44 rounded-md border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
+            >
+              {runOptions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  run {r.id.slice(0, 8)} · {STATUS_LABELS[r.status ?? ''] ?? r.status ?? ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-zinc-600">{run.id}</span>
+          )}
         </span>
       </div>
 

@@ -567,6 +567,8 @@ function WorkflowEditorInner() {
   const runCloseRef = useRef<(() => void) | null>(null)
   const runLastSeqRef = useRef(0)
   const runFinishedRef = useRef(false)
+  // Monotonic token so a superseded showRun fetch can't open a stale stream.
+  const showRunTokenRef = useRef(0)
 
   // Paused runs rebuild their graph from the saved workflow on resume, so
   // upgrading capabilities mid-flight can break them.
@@ -574,6 +576,15 @@ function WorkflowEditorInner() {
     const pausedCount = (pausedRuns ?? []).filter((r) => r.workflow_id === id).length
     return runGuardWarning(run?.status, pausedCount)
   }, [pausedRuns, id, run])
+
+  // This workflow's live runs, for the run switcher — polled only while a
+  // run panel is open.
+  const { data: activeRuns } = useQuery({
+    queryKey: ['runs', 'workflow', id, 'active'],
+    queryFn: () => workflowsApi.listRuns({ workflow_id: id!, status: 'running,paused' }),
+    refetchInterval: 5000,
+    enabled: run != null && !!id,
+  })
 
   const streamEvents = (runId: string): (() => void) => {
     let close: () => void = () => {}
@@ -593,10 +604,34 @@ function WorkflowEditorInner() {
       () => {
         if (!runFinishedRef.current) {
           setRun((r) => (r ? { ...r, status: 'failed', error: r.error ?? 'Connection lost' } : r))
-        }
-      },
-    )
+      }
+    },
+  )
     return close
+  }
+
+  const resetRunView = () => {
+    runCloseRef.current?.()
+    runCloseRef.current = null
+    runLastSeqRef.current = 0
+    runFinishedRef.current = false
+  }
+
+  // Open an existing run (from the sidebar, ?run= deep link, or the run
+  // switcher): fetch it and stream it if it's still live.
+  const showRun = (runId: string) => {
+    resetRunView()
+    const token = ++showRunTokenRef.current
+    workflowsApi
+      .getRun(runId)
+      .then((r) => {
+        if (token !== showRunTokenRef.current) return
+        setRun(r)
+        if (r.status === 'running' || r.status === 'paused') {
+          runCloseRef.current = streamEvents(r.id)
+        }
+      })
+      .catch(() => {})
   }
 
   const handleRun = async () => {
@@ -636,10 +671,8 @@ function WorkflowEditorInner() {
       setValidatingForRun(false)
     }
 
-    runCloseRef.current?.()
-    runCloseRef.current = null
-    runLastSeqRef.current = 0
-    runFinishedRef.current = false
+    resetRunView()
+    showRunTokenRef.current++
 
     setRun({
       id: '', workflow_id: id!, status: 'running', input_data: parsed,
@@ -674,6 +707,7 @@ function WorkflowEditorInner() {
     runCloseRef.current?.()
     runCloseRef.current = null
     runFinishedRef.current = false
+    showRunTokenRef.current++
     setRun((r) => (r ? { ...r, status: 'running' } : r))
 
     try {
@@ -693,24 +727,7 @@ function WorkflowEditorInner() {
   const pendingRunId = searchParams.get('run')
   useEffect(() => {
     if (!pendingRunId) return
-    let cancelled = false
-    runCloseRef.current?.()
-    runCloseRef.current = null
-    runLastSeqRef.current = 0
-    runFinishedRef.current = false
-    workflowsApi
-      .getRun(pendingRunId)
-      .then((r) => {
-        if (cancelled) return
-        setRun(r)
-        if (r.status === 'running' || r.status === 'paused') {
-          runCloseRef.current = streamEvents(r.id)
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    showRun(pendingRunId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, pendingRunId])
 
@@ -1101,7 +1118,17 @@ function WorkflowEditorInner() {
       )}
 
       {/* Bottom: run log / debug panel */}
-      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} onCancel={handleCancel} onClose={handleRunClose} />}
+      {run && (
+        <RunPanel
+          run={run}
+          nodes={nodes}
+          runs={activeRuns ?? []}
+          onSwitchRun={showRun}
+          onResume={handleResume}
+          onCancel={handleCancel}
+          onClose={handleRunClose}
+        />
+      )}
     </div>
   )
 }
