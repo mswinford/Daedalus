@@ -15,6 +15,9 @@ async def lifespan(app: FastAPI):
     recovered = await runs.recover_paused_runs()
     if recovered:
         print(f"Recovered {recovered} paused run(s) from the checkpoint store")
+    zombies = await runs.recover_zombie_runs()
+    if zombies:
+        print(f"Marked {zombies} stale run(s) as failed (server restarted)")
     finished = await runs.recover_finished_runs()
     if finished:
         print(f"Restored {finished} finished run(s) from the checkpoint store")

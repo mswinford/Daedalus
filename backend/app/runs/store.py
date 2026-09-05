@@ -11,6 +11,7 @@ import queue
 import sqlite3
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -267,6 +268,58 @@ def _load_terminal_runs() -> list[sqlite3.Row]:
             "SELECT run_id, status, started_at, completed_at, estimated_cost_usd, "
             "capability_usage FROM runs WHERE status IN ('completed', 'failed')"
         ).fetchall()
+    finally:
+        conn.close()
+
+
+def _load_run_summaries(workflow_id: str | None = None,
+                        statuses: set[str] | None = None,
+                        limit: int = 100) -> list[sqlite3.Row]:
+    """Run summary rows (newest first) for the list endpoint.
+
+    Callers pass a limit inflated by the number of in-memory records so the
+    memory overlay applied on top cannot displace rows it should have kept."""
+    sql = "SELECT * FROM runs"
+    clauses: list[str] = []
+    params: list[Any] = []
+    if workflow_id:
+        clauses.append("workflow_id = ?")
+        params.append(workflow_id)
+    if statuses:
+        clauses.append(f"status IN ({','.join('?' * len(statuses))})")
+        params.extend(sorted(statuses))
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY started_at DESC LIMIT ?"
+    params.append(limit)
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        return conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+
+def _mark_stale_nonterminal_failed(active_run_ids: set[str]) -> int:
+    """Fail summary rows that are non-terminal but have no live record.
+
+    Called at startup after paused-run recovery: resurrected runs are in RUNS,
+    so what remains (running at shutdown, or orphaned paused rows) can never
+    resume and must not masquerade as live in the run list."""
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        rows = conn.execute(
+            "SELECT run_id FROM runs WHERE status IN ('running', 'paused')"
+        ).fetchall()
+        stale = [r["run_id"] for r in rows if r["run_id"] not in active_run_ids]
+        now = time.time()
+        for run_id in stale:
+            conn.execute(
+                "UPDATE runs SET status = 'failed', error = 'server restarted', "
+                "completed_at = ? WHERE run_id = ?",
+                (now, run_id),
+            )
+        conn.commit()
+        return len(stale)
     finally:
         conn.close()
 

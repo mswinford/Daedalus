@@ -19,6 +19,7 @@ from app.runs.store import (
     _load_events,
     _load_finished_summaries,
     _load_run_summary,
+    _mark_stale_nonterminal_failed,
     _save_run_summary,
 )
 from app.runs.timeouts import _schedule_human_timeout
@@ -271,3 +272,12 @@ async def recover_finished_runs() -> int:
         RUNS[record.run_id] = record
         recovered += 1
     return recovered
+
+
+async def recover_zombie_runs() -> int:
+    """Fail summary rows for runs that were non-terminal at shutdown.
+
+    Must run after recover_paused_runs: resurrected paused runs are in RUNS
+    and must not be marked failed. What remains (running at shutdown, or
+    orphaned paused rows with no checkpoint to rebuild) can never resume."""
+    return await asyncio.to_thread(_mark_stale_nonterminal_failed, set(RUNS))
