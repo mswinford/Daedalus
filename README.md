@@ -2,7 +2,7 @@
 
 A standalone web app for building **AI agent workflows** on [LangGraph](https://github.com/langchain-ai/langgraph). Workflows are directed graphs of nodes (agents, conditionals, transforms, sandboxed Python, human-in-loop gates) with file-based persistence. Author them in the visual React Flow editor or via the REST API.
 
-> **Status:** Phase 3 + post-Phase 3 increments — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject / cancel), async execution with live WebSocket streaming, a secrets store, per-agent message isolation, per-node error branches, workflow templates, and the `github_*` builtins are all implemented. A companion **Capability Registry** ([platform roadmap](./docs/ROADMAP.md): R1 complete, R2 in progress) adds identity, versioning, lifecycle, search, and the `invoke` node for calling registered capabilities — see [Capability Registry](#capability-registry).
+> **Status:** Phase 3 + post-Phase 3 increments — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject / cancel), async execution with live WebSocket streaming, a secrets store, per-agent message isolation, per-node error branches, workflow templates, the `github_*` builtins, and **concurrent runs** — multiple workflows, or multiple runs of the same workflow, in parallel, with a global runs surface (sidebar status dots, in-editor run switcher, per-workflow history) — are all implemented. A companion **Capability Registry** ([platform roadmap](./docs/ROADMAP.md): R1 complete, R2 in progress) adds identity, versioning, lifecycle, search, and the `invoke` node for calling registered capabilities — see [Capability Registry](#capability-registry).
 
 ---
 
@@ -20,13 +20,14 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - Run input validated against the workflow's `state_schema` (if defined) before execution.
 
 **API (works now)**
-- Full workflow CRUD + async `run` + `validate`, plus run retrieval, resume, cancel, and a secrets store. See [REST API](#rest-api).
+- Full workflow CRUD + async `run` + `validate`, plus run retrieval, a run list (`GET /api/runs`), paused-run listing, resume, cancel, and a secrets store. See [REST API](#rest-api).
 
 **Frontend (works now)**
-- Sidebar **master-detail** layout: workflow list with search, create, rename, delete.
-- Full React Flow **graph editor**: drag-and-drop nodes, connect edges, per-node **config panel**.
-- **Run debug panel**: live node/LLM trace, token + cost totals, expandable outputs, and a paused-state form for human-in-loop (approve / reject).
-- Models, tools, and secrets management panels. Auto-save with an unsaved/saving/saved indicator.
+- Sidebar **master-detail** layout: workflow list with search, create, rename, delete, live **run-status dots** per workflow (pulsing green = running, amber = paused), and a Pending Approvals section with countdowns + deep links.
+- Full React Flow **graph editor**: drag-and-drop nodes on a 16px grid, connect edges, per-node **config panel**, node **renaming** (display-only `label`, falls back to `Type N`), an **edge inspector** for flipping static↔conditional and editing condition expressions (amber-styled conditional edges), a minimap, and confirmations on destructive deletes.
+- **Run debug panel**: live node/LLM trace with timestamps + elapsed ticker, token + cost totals, expandable outputs, a paused-state form for human-in-loop (approve / reject), a **run switcher** when the workflow has more than one live run, and a close button. Validate-before-run blocks invalid workflows up front; save failures surface inline.
+- **Run history modal** per workflow: last 50 runs with status, duration, tokens, cost, and error; any run — live or terminal — opens in the Run panel (terminal runs render statically from their persisted event log).
+- Models, tools, and secrets management panels (consolidated "Resources" modal + registry import). Auto-save with an unsaved/saving/saved indicator.
 
 **Capability Registry (R1 complete, R2 in progress — works now)**
 - Capability Manifest schema (`schema/capability.py`) with six core kinds: `tool`, `prompt`, `model_profile`, `skill`, `agent`, `workflow`; composites reference other capabilities by `name@version`.
@@ -36,7 +37,7 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
 - **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame), publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage), the run-metrics pipeline (per-run usage snapshots pushed to the registry as capability `evaluation` stats, blended into search ranking), and **upgrade automation** — every import stamps its registry origin, the editor detects newer versions (badges; breaking majors in red) and upgrades in place with a per-field drift diff that preserves local edits and never breaks workflow references (breaking changes require explicit confirmation; active/paused runs are guarded).
 
-**Tests:** 448 backend tests passing (`python -m pytest -q`, as of 2026-09-03, incl. registry R1–R2); frontend 138 Vitest tests + typecheck/build clean.
+**Tests:** 454 backend tests passing (`python -m pytest -q`, as of 2026-09-05, incl. registry R1–R2); frontend 156 Vitest tests + typecheck/build clean.
 
 ---
 
@@ -336,6 +337,8 @@ Base URL: `http://127.0.0.1:3000`
 | `DELETE` | `/api/workflows/{id}` | Delete workflow |
 | `POST` | `/api/workflows/{id}/run` | Run asynchronously (body = input data; returns `202` + `run_id`) |
 | `POST` | `/api/workflows/{id}/validate` | Static validation (returns issues + warnings) |
+| `GET` | `/api/runs?workflow_id=&status=&limit=` | List runs — persisted history merged with live in-memory runs (memory wins per `run_id`); newest first |
+| `GET` | `/api/runs/paused` | List paused runs across all workflows (Pending Approvals) |
 | `GET` | `/api/runs/{runId}` | Get run status + result (polling) |
 | `POST` | `/api/runs/{runId}/resume` | Resume a paused run with human input |
 | `POST` | `/api/runs/{runId}/cancel` | Cancel a running or paused run (paused: immediate; running: stops after the current step) |
@@ -362,7 +365,7 @@ Base URL: `http://127.0.0.1:3000`
 }
 ```
 
-**Node:** `{ "id", "type", "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | conditional | transform | human_in_loop | custom_function | invoke`.
+**Node:** `{ "id", "type", "label"?, "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | conditional | transform | human_in_loop | custom_function | invoke`. `label` is display-only (the engine ignores it); the UI falls back to `Type N` (1-based ordinal among same-type nodes) when unset.
 
 **Edge:** `{ "id", "source_node_id", "source_handle", "target_node_id", "type": "static|conditional|error", "condition"? }`. For a conditional node, each non-`default` `source_handle` is a branch; the `conditions[i]` maps to the i-th branch edge (in workflow order). A `"default"` handle (or `default_branch`) is the fallback.
 
@@ -395,6 +398,7 @@ Base URL: `http://127.0.0.1:3000`
 - **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
 - **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
 - **Post-Phase 3 (done):** per-node error branches (opt-in error edges), workflow templates with the create-from-template UI, and the `github_*` builtins (branch / read / write / PR).
+- **Global runs surface (done):** concurrent runs (multiple workflows — or multiple runs of one workflow — in parallel), `GET /api/runs` with persisted history, startup zombie-run cleanup, sidebar run-status dots, an in-editor run switcher, and a per-workflow run-history modal. Design: [docs/global-runs-plan.md](./docs/global-runs-plan.md).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
 - **Capability platform (R1 complete):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 is in progress — the `invoke` node (call a registered capability by `name@version`), publish-time governance checks, the run-metrics → evaluation pipeline, upgrade automation for existing imports (update detection with version badges + per-field drift-diff upgrades), and live refs (opt-in `latest` tracking — tracked entries re-resolve to the newest same-major version at run start) have shipped; next up: the `eval_suite` kind and SQLite → Postgres (remote invocation settled by design — workflows are always embedded, remote services are invoked as opaque `http` tools). R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
 

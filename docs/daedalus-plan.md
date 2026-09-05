@@ -11,7 +11,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Current Status (Phase 3 complete + post-Phase 3 increments)
 
-> Last updated: 2026-09-03. Human-in-loop nodes are implemented end-to-end: LangGraph
+> Last updated: 2026-09-05. Human-in-loop nodes are implemented end-to-end: LangGraph
 > `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
 > survive restarts and are recovered on startup), and the frontend shows a paused state with an
 > input form + resume button. The editor is a sidebar / master-detail layout with debounced
@@ -53,6 +53,25 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > generated at expansion and unreferenceable, so no authored edge can cross an invoke frame —
 > loops around an invoke re-enter the region cleanly each pass. Section-level retry is a loop
 > pattern (back edge from the error path + attempt counter), not a primitive.
+> Also shipped (2026-09-05): **concurrent runs + global runs surface** (design in
+> `docs/global-runs-plan.md`) — the backend was already parallel-safe (RUNS keyed by
+> run_id, per-run checkpoint threads, no per-workflow exclusivity), so this added:
+> `GET /api/runs?workflow_id=&status=&limit=` merging persisted SQLite summaries with live
+> in-memory records (memory wins per run_id); startup cleanup that terminalizes zombie
+> `running`/`paused` rows left behind by a restart (`recover_zombie_runs`, after
+> `recover_paused_runs`); sidebar run-status dots per workflow (5s poll — pulsing green =
+> running, amber = paused-only); an in-editor **run switcher** for workflows with >1 live
+> run (shared `showRun()` path with the `?run=` deep link, monotonic token so a superseded
+> fetch can't open a stale stream); and a per-workflow **run-history modal** (last 50 runs;
+> terminal runs render statically from their persisted event log). Also shipped: **node
+> renaming** (optional display-only `label` on WorkflowNode — no migration, engine ignores
+> it; UI falls back to `Type N` ordinals in canvas nodes, run-log rows, and the config
+> panel), an **edge inspector** (click any non-error edge → static↔conditional toggle +
+> json_path/regex condition editor; conditional edges styled amber with the description as
+> a truncated label; error edges stay delete-only), and a UX batch (delete confirmations,
+> save-failure visibility, validate-before-run gate, HIL required-field enforcement,
+> closable run panel, minimap, empty-canvas hint, run-log timestamps/auto-scroll/elapsed
+> ticker, 16px grid snapping, a11y pass — aria-labels, Escape-to-close, focus rings).
 > Next up: `eval_suite` kind, SQLite → Postgres (ROADMAP.md R2 remainder). Remote invocation settled by design (2026-09-03) — workflows are always embedded; remote services are invoked as opaque `http` tools. Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
@@ -394,7 +413,7 @@ Residual edge (edit then switch within 800ms) is covered by #3. StrictMode doubl
 - `/` with no selection → `EmptyState` ("Pick a workflow or create one").
 
 #### Out of scope / follow-ups
-Collapsible sidebar, drag-to-reorder, per-workflow run history (the future dashboard), backend-generated ids.
+Collapsible sidebar, drag-to-reorder, a cross-workflow runs dashboard (per-workflow run history has since shipped as the editor's History modal), backend-generated ids.
 
 #### Verify
 No frontend unit tests — `npm run build` (tsc + vite) must pass. Manual: create → switch between two workflows (no hop, state resets); edit then immediately switch (auto-save persisted it); delete the open workflow (lands on `/`); reload a deep link.
@@ -572,6 +591,8 @@ Status: `[done]` = implemented and tested, `[plan]` = not yet built.
 [done] PUT    /api/workflows/:id          # Update workflow
 [done] DELETE /api/workflows/:id          # Delete workflow
 [done] POST   /api/workflows/:id/run      # Execute (async; returns 202 + run_id)
+[done] GET    /api/runs                   # List runs (persisted + live; ?workflow_id=&status=&limit=)
+[done] GET    /api/runs/paused            # Paused runs across all workflows (Pending Approvals)
 [done] GET    /api/runs/:runId            # Get run status + full result
 [done] POST   /api/runs/:runId/resume     # Resume a paused run with human input
 [done] WS     /api/runs/:runId/events     # Real-time execution stream (replay + live)

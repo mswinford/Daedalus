@@ -21,7 +21,7 @@ The genuinely new work is narrow — **identity, versioning, ownership, lifecycl
 
 | Component | What it is | Status | Plan |
 |---|---|---|---|
-| **Daedalus** | Workflow authoring + execution engine (LangGraph); tools, models, secrets, HIL, observability | Shipped (Phase 3) | [daedalus-plan.md](./daedalus-plan.md) |
+| **Daedalus** | Workflow authoring + execution engine (LangGraph); tools, models, secrets, HIL, observability, concurrent runs | Shipped (Phase 3 + post-Phase 3 increments; global runs surface done) | [daedalus-plan.md](./daedalus-plan.md) |
 | **Capability Registry** | Identity · versioning · ownership · lifecycle · search · packaging. A thin layer *above* Daedalus; git (provenance) + SQLite→Postgres index | R1 complete (steps 1–8 shipped); R2 in progress — publish-time governance checks, invoke node, run metrics → `evaluation` scores, upgrade automation for existing imports, and live refs (`latest` tracking) shipped | [capability-registry-plan.md](./capability-registry-plan.md) |
 | **`schema` package** | Shared Pydantic models — the Capability Manifest contract + all node/tool/workflow types | Shipped; extended with the Capability Manifest (R1 step 1) | in both |
 
