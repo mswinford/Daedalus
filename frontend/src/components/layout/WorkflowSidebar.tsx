@@ -64,10 +64,12 @@ function PendingApprovalRow({
 function SidebarRow({
   workflow,
   active,
+  runState,
   onDelete,
 }: {
   workflow: WorkflowSummary
   active: boolean
+  runState?: 'running' | 'paused'
   onDelete: () => void
 }) {
   return (
@@ -77,9 +79,19 @@ function SidebarRow({
       }`}
     >
       <Link to={`/workflows/${workflow.id}`} className="block min-w-0 flex-1 px-3 py-2">
-        <p className={`truncate text-sm ${active ? 'font-medium text-zinc-100' : 'text-zinc-300'}`}>
-          {workflow.name}
-        </p>
+        <div className="flex items-center gap-1.5">
+          {runState && (
+            <span
+              title={runState === 'running' ? 'Run in progress' : 'Run paused, waiting for input'}
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                runState === 'running' ? 'animate-pulse bg-emerald-400' : 'bg-amber-400'
+              }`}
+            />
+          )}
+          <p className={`min-w-0 flex-1 truncate text-sm ${active ? 'font-medium text-zinc-100' : 'text-zinc-300'}`}>
+            {workflow.name}
+          </p>
+        </div>
         {workflow.description && (
           <p className="truncate text-xs text-zinc-500">{workflow.description}</p>
         )}
@@ -119,6 +131,20 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
     queryFn: () => workflowsApi.listPausedRuns(),
     refetchInterval: 5000,
   })
+
+  const { data: activeRuns } = useQuery({
+    queryKey: ['runs', 'active'],
+    queryFn: () => workflowsApi.listRuns({ status: 'running,paused' }),
+    refetchInterval: 5000,
+  })
+  const runStateByWorkflow = useMemo(() => {
+    const m = new Map<string, 'running' | 'paused'>()
+    for (const r of activeRuns ?? []) {
+      if (r.status === 'running') m.set(r.workflow_id, 'running')
+      else if (!m.has(r.workflow_id)) m.set(r.workflow_id, 'paused')
+    }
+    return m
+  }, [activeRuns])
   const now = useNow((pausedRuns?.length ?? 0) > 0)
   const workflowName = (id: string) => data?.find((w) => w.id === id)?.name ?? id
 
@@ -278,6 +304,7 @@ export default function WorkflowSidebar({ activeId }: { activeId: string | null 
               key={wf.id}
               workflow={wf}
               active={activeId === wf.id}
+              runState={runStateByWorkflow.get(wf.id)}
               onDelete={() => handleDelete(wf)}
             />
           ))

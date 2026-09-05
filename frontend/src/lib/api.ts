@@ -94,6 +94,18 @@ export interface PausedRunSummary {
   started_at?: number
 }
 
+export interface RunSummary {
+  run_id: string
+  workflow_id: string
+  status: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  started_at: number
+  completed_at?: number | null
+  error?: string | null
+  total_tokens_input: number
+  total_tokens_output: number
+  estimated_cost_usd: number
+}
+
 export interface TemplateSummary {
   id: string
   name: string
@@ -159,6 +171,8 @@ export const workflowsApi = {
     api.post<RunStartResponse>(`/workflows/${id}/run`, input).then(r => r.data),
   getRun: (runId: string) => api.get<WorkflowRun>(`/runs/${runId}`).then(r => r.data),
   listPausedRuns: () => api.get<PausedRunSummary[]>('/runs/paused').then(r => r.data),
+  listRuns: (params?: { workflow_id?: string; status?: string; limit?: number }) =>
+    api.get<RunSummary[]>('/runs', { params }).then(r => r.data),
   resumeRun: (runId: string, humanInput: Record<string, any>) =>
     api.post(`/runs/${runId}/resume`, humanInput).then(r => r.data),
   cancelRun: (runId: string) =>
