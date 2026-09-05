@@ -15,7 +15,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X, MousePointerClick } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X, MousePointerClick, History } from 'lucide-react'
 
 import { workflowsApi, streamRunEvents, apiErrorMessage, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
@@ -46,6 +46,7 @@ import EdgeInspector from '@/components/flow/EdgeInspector'
 import ResourcesPanel from '@/components/flow/ResourcesPanel'
 import type { CapabilityKind } from '@/lib/registryApi'
 import RunPanel from '@/components/flow/RunPanel'
+import RunHistoryPanel from '@/components/flow/RunHistoryPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
 import CapabilityVersionBadge from '@/components/flow/CapabilityVersionBadge'
@@ -97,6 +98,7 @@ function WorkflowEditorInner() {
   const [showResources, setShowResources] = useState(false)
   const [pickerKind, setPickerKind] = useState<CapabilityKind | null>(null)
   const [showSecrets, setShowSecrets] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -854,6 +856,13 @@ function WorkflowEditorInner() {
             <KeyRound size={14} />
             Secrets
           </button>
+          <button
+            onClick={() => setShowHistory(true)}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            <History size={14} />
+            History
+          </button>
           {validation && (
             <span className={`mr-1 flex items-center gap-1 text-xs ${validation.valid ? 'text-emerald-400' : 'text-red-400'}`}>
               {validation.valid ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
@@ -1105,6 +1114,18 @@ function WorkflowEditorInner() {
 
       {/* Secrets modal */}
       {showSecrets && <SecretsPanel onClose={() => setShowSecrets(false)} />}
+
+      {/* Run history modal */}
+      {showHistory && id && (
+        <RunHistoryPanel
+          workflowId={id}
+          onOpenRun={(runId) => {
+            setShowHistory(false)
+            showRun(runId)
+          }}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
 
       {/* Capability picker */}
       {showPicker && (
