@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.api import workflows as wf_module
 from app import runs as runs_module
+from app.runs.record import RunRecord
 
 
 @pytest.fixture(autouse=True)
@@ -514,3 +515,120 @@ def test_finished_run_survives_restart(client):
         assert body["output_data"]["node_outputs"]["cf"]["grade"] == "A"
         types = [e["type"] for e in body["events"]]
         assert types[-1] == "run_end"
+
+
+# ─── GET /runs list endpoint ────────────────────────────────────────────────
+
+
+def _seed_summary(run_id: str, workflow_id: str, status: str, started_at: float,
+                  completed_at: float | None = None, error: str | None = None) -> None:
+    from app.config import get_settings
+    from app.runs.store import _store_connect
+
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        conn.execute(
+            "INSERT INTO runs (run_id, workflow_id, status, started_at, completed_at, error) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, workflow_id, status, started_at, completed_at, error),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_list_runs_merges_store_and_memory(client):
+    """Store rows give history; live records win on a run_id clash and cover
+    runs whose summary write is still queued."""
+    _seed_summary("r-old", "test-wf", "completed", 1000.0, 1005.0)
+    _seed_summary("r-stale", "test-wf", "running", 2000.0)
+
+    live = RunRecord(run_id="r-live", workflow_id="test-wf", input_data={})
+    live.started_at = 3000.0
+    runs_module.RUNS["r-live"] = live
+    # r-stale is in the store as 'running' but has a fresher in-memory record:
+    stale = RunRecord(run_id="r-stale", workflow_id="test-wf", input_data={})
+    stale.started_at = 2000.0
+    stale.status = "completed"
+    stale.completed_at = 2010.0
+    runs_module.RUNS["r-stale"] = stale
+
+    body = client.get("/api/runs").json()
+    assert [r["run_id"] for r in body] == ["r-live", "r-stale", "r-old"]  # newest first
+    by_id = {r["run_id"]: r for r in body}
+    assert by_id["r-stale"]["status"] == "completed"  # memory wins over stale row
+    assert by_id["r-stale"]["completed_at"] == 2010.0
+    assert by_id["r-old"]["status"] == "completed"
+
+
+def test_list_runs_filters(client):
+    _seed_summary("a1", "wf-a", "running", 1000.0)
+    _seed_summary("b1", "wf-b", "paused", 2000.0)
+    _seed_summary("b2", "wf-b", "failed", 3000.0, 3010.0, "boom")
+
+    assert [r["run_id"] for r in client.get("/api/runs", params={"workflow_id": "wf-b"}).json()] == ["b2", "b1"]
+    assert [r["run_id"] for r in client.get("/api/runs", params={"status": "paused"}).json()] == ["b1"]
+    assert [r["run_id"] for r in client.get(
+        "/api/runs", params={"workflow_id": "wf-b", "status": "failed,paused"}).json()] == ["b2", "b1"]
+
+    resp = client.get("/api/runs", params={"status": "bogus"})
+    assert resp.status_code == 422
+
+
+def test_list_runs_limit(client):
+    for i in range(5):
+        _seed_summary(f"r{i}", "test-wf", "completed", float(i), float(i) + 1)
+    body = client.get("/api/runs", params={"limit": 2}).json()
+    assert [r["run_id"] for r in body] == ["r4", "r3"]
+
+
+def test_list_runs_memory_only_record_appears(client):
+    """A run whose summary write is still queued shows up from RUNS alone."""
+    live = RunRecord(run_id="r-queued", workflow_id="test-wf", input_data={})
+    live.started_at = 5000.0
+    runs_module.RUNS["r-queued"] = live
+    body = client.get("/api/runs").json()
+    assert [r["run_id"] for r in body] == ["r-queued"]
+    assert body[0]["status"] == "running"
+
+
+# ─── zombie cleanup at startup ──────────────────────────────────────────────
+
+
+def test_mark_stale_nonterminal_failed_skips_active_and_terminal():
+    from app.config import get_settings
+    from app.runs.store import _mark_stale_nonterminal_failed, _store_connect
+
+    _seed_summary("z-running", "wf-a", "running", 1000.0)
+    _seed_summary("z-paused", "wf-a", "paused", 2000.0)
+    _seed_summary("z-active", "wf-a", "running", 3000.0)
+    _seed_summary("z-done", "wf-a", "completed", 4000.0, 4010.0)
+
+    count = _mark_stale_nonterminal_failed({"z-active"})
+    assert count == 2
+
+    conn = _store_connect(str(get_settings().checkpoint_db))
+    try:
+        rows = {r["run_id"]: r for r in conn.execute("SELECT * FROM runs")}
+    finally:
+        conn.close()
+    assert rows["z-running"]["status"] == "failed"
+    assert rows["z-running"]["error"] == "server restarted"
+    assert rows["z-running"]["completed_at"] is not None
+    assert rows["z-paused"]["status"] == "failed"
+    assert rows["z-active"]["status"] == "running"  # live record resurrected it
+    assert rows["z-done"]["status"] == "completed"
+
+
+def test_zombie_running_run_failed_after_restart(client):
+    """A run that was running at shutdown is marked failed by startup recovery,
+    so GET /runs never shows a zombie 'running' row."""
+    _seed_summary("zombie", "test-wf", "running", 1000.0)
+
+    runs_module.RUNS.clear()  # "restart" — the run's record is gone
+    with TestClient(app) as restarted:
+        body = restarted.get("/api/runs").json()
+        assert len(body) == 1
+        assert body[0]["run_id"] == "zombie"
+        assert body[0]["status"] == "failed"
+        assert body[0]["error"] == "server restarted"

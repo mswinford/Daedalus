@@ -18,4 +18,4 @@ for _p in (_PROJECT_ROOT, _PROJECT_ROOT / "backend"):
 @pytest.fixture(autouse=True)
 def _isolated_checkpoint_db(tmp_path, monkeypatch):
     """Give every test its own checkpoint SQLite file (no cross-test bleed)."""
-    monkeypatch.setenv("AI_FORGE_CHECKPOINT_DB", str(tmp_path / "checkpoints.db"))
+    monkeypatch.setenv("DAEDALUS_CHECKPOINT_DB", str(tmp_path / "checkpoints.db"))

@@ -1,2 +1,22 @@
+monorepo_root = true
+
+[monorepo]
+config_roots = [
+  "frontend",
+  "backend",
+  "registry"
+]
+
 [env]
 _.file = ".env"
+
+[tools]
+aube = "latest"
+node = "26.8.2"
+python = "3.14.7"
+
+[tasks.install]
+run = [
+  "uv pip install -e '.[dev]'",
+  { task = "//frontend:install" }
+]

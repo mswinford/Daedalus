@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { type Edge } from '@xyflow/react'
 
-import { sourceHandlesFor, nodesToRF, edgesToRF, rfToNodes, rfToEdges, ERROR_EDGE_STYLE } from './graphTransform'
+import { sourceHandlesFor, nodesToRF, edgesToRF, rfToNodes, rfToEdges, edgeVisuals, ERROR_EDGE_STYLE, CONDITIONAL_EDGE_STYLE } from './graphTransform'
 import type { WorkflowNode, WorkflowEdge, StartNode, AgentNode, ConditionalNode, EndNode } from './workflowTypes'
 
 const startNode: StartNode = {
@@ -128,5 +128,51 @@ describe('round-trips', () => {
     expect(rfToEdges([e])).toEqual([
       { id: 'e9', source_node_id: 'a1', source_handle: 'default', target_node_id: 's', type: 'static', condition: null },
     ])
+  })
+})
+
+describe('edgeVisuals', () => {
+  it('static edges get no style or label', () => {
+    const v = edgeVisuals({ type: 'static', condition: null })
+    expect(v.style).toBeUndefined()
+    expect(v.label).toBeUndefined()
+  })
+
+  it('conditional edges get amber style and a label from the description', () => {
+    const v = edgeVisuals({ type: 'conditional', condition: { type: 'json_path', expression: '$.x', description: 'high score' } })
+    expect(v.style).toBe(CONDITIONAL_EDGE_STYLE)
+    expect(v.label).toBe('high score')
+  })
+
+  it('falls back to the expression and truncates long labels at 40 chars', () => {
+    const long = 'a'.repeat(60)
+    const v = edgeVisuals({ type: 'conditional', condition: { type: 'json_path', expression: long } })
+    expect(v.label).toBe('a'.repeat(40))
+  })
+
+  it('conditional without a condition renders plain (engine treats it as non-conditional too)', () => {
+    const v = edgeVisuals({ type: 'conditional', condition: null })
+    expect(v.style).toBeUndefined()
+    expect(v.label).toBeUndefined()
+  })
+
+  it('error edges keep the red dashed style and no label', () => {
+    const v = edgeVisuals({ type: 'error', condition: null })
+    expect(v.style).toBe(ERROR_EDGE_STYLE)
+    expect(v.label).toBeUndefined()
+  })
+
+  it('edgesToRF propagates conditional visuals', () => {
+    const e: WorkflowEdge = {
+      id: 'ec',
+      source_node_id: 'a1',
+      source_handle: 'default',
+      target_node_id: 's',
+      type: 'conditional',
+      condition: { type: 'regex', expression: '^ok' },
+    }
+    const rf = edgesToRF([e])
+    expect(rf[0].style).toBe(CONDITIONAL_EDGE_STYLE)
+    expect(rf[0].label).toBe('^ok')
   })
 })

@@ -12,12 +12,16 @@ export interface NodeExecution {
   nodeId: string
   label: string
   color: string
+  /** Unix timestamp (seconds) of the first event for this node. */
+  startedAt?: number
   durationMs?: number
   output?: unknown
   error?: string
   tokensIn?: number
   tokensOut?: number
   llmCalls?: number
+  retries?: number
+  lastRetryError?: string
   toolCalls?: ToolCallView[]
 }
 
@@ -29,20 +33,20 @@ export function splitInvokeId(nodeId: string): { invokeId: string; innerId: stri
 }
 
 /** Fold the flat event stream into one summary per executed node, in run order. */
-export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>): NodeExecution[] {
+export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType>, displayNameById?: Map<string, string>): NodeExecution[] {
   const byId = new Map<string, NodeExecution>()
   const order: string[] = []
 
-  const ensure = (nodeId: string): NodeExecution => {
+  const ensure = (nodeId: string, ts?: number): NodeExecution => {
     let ex = byId.get(nodeId)
     if (!ex) {
       const type = nodeTypeById.get(nodeId)
       if (type) {
-        ex = { nodeId, label: NODE_META[type].label, color: NODE_META[type].color }
+        ex = { nodeId, label: displayNameById?.get(nodeId) ?? NODE_META[type].label, color: NODE_META[type].color, startedAt: ts }
       } else {
         // Expanded inner nodes are not in the parent's node list — fall back to the authored inner id.
         const split = splitInvokeId(nodeId)
-        ex = { nodeId, label: split ? split.innerId : nodeId, color: '#71717a' }
+        ex = { nodeId, label: split ? split.innerId : nodeId, color: '#71717a', startedAt: ts }
       }
       byId.set(nodeId, ex)
       order.push(nodeId)
@@ -52,7 +56,7 @@ export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType
 
   for (const ev of events) {
     if (!ev.node_id) continue
-    const ex = ensure(ev.node_id)
+    const ex = ensure(ev.node_id, ev.timestamp)
     if (ev.type === 'node_end') {
       ex.durationMs = ev.data.duration_ms
       ex.output = ev.data.output
@@ -65,6 +69,9 @@ export function summarize(events: RunEvent[], nodeTypeById: Map<string, NodeType
       ex.tokensIn = (ex.tokensIn ?? 0) + (ev.data.tokens_input ?? 0)
       ex.tokensOut = (ex.tokensOut ?? 0) + (ev.data.tokens_output ?? 0)
       ex.llmCalls = (ex.llmCalls ?? 0) + 1
+    } else if (ev.type === 'retry') {
+      ex.retries = (ex.retries ?? 0) + 1
+      ex.lastRetryError = ev.data.error
     } else if (ev.type === 'tool_call') {
       ex.toolCalls = ex.toolCalls ?? []
       ex.toolCalls.push({ name: ev.data.name, args: ev.data.args })

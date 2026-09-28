@@ -1,5 +1,5 @@
 """
-AI Forge — Workflow Schema
+Daedalus — Workflow Schema
 
 Pydantic models that define the structure of a workflow.
 These are the single source of truth for the JSON format persisted to disk.
@@ -435,6 +435,9 @@ class Node(BaseModel):
     error_handling: bool = Field(
         False, description="Opt in to an error handle so failures can be routed via a type='error' edge"
     )
+    label: Optional[str] = Field(
+        None, description="Optional display name for canvas and run logs; falls back to the node type name"
+    )
 
 
 # ─── Edge Types ──────────────────────────────────────────────────────────────
@@ -513,6 +516,7 @@ class RunEvent(BaseModel):
         "human_respond",
         "human_timeout",
         "run_cancelled",
+        "iteration_limit",
         "retry",
         "capability_notice",
     ]

@@ -1,4 +1,4 @@
-"""Thin CLI entry point for the capability registry (mirrors ai_forge/cli.py).
+"""Thin CLI entry point for the capability registry (mirrors daedalus/cli.py).
 
 Commands:
     serve     Run the registry HTTP server (default when no command is given)
@@ -67,7 +67,7 @@ async def _publish_async(paths: list[Path]) -> int:
 
     db = await Database.connect(settings.registry_db)
     try:
-        await ensure_repo(settings.capabilities_repo)
+        await ensure_repo(settings.capabilities_repo, settings.capabilities_remote or None)
 
         # 2) Classify each manifest against the current index.
         to_write: list[CapabilityManifest] = []
@@ -113,6 +113,7 @@ async def _publish_async(paths: list[Path]) -> int:
             await commit_all(
                 settings.capabilities_repo,
                 f"publish {', '.join(f'{m.name}@{m.version}' for m in to_write)}",
+                remote=settings.capabilities_remote or None,
             )
             report = await sync_from_repo(settings.capabilities_repo, db)
             if report["conflicts"]:
@@ -140,8 +141,8 @@ def main() -> None:
     _bootstrap_sys_path()
 
     parser = argparse.ArgumentParser(
-        prog="ai-forge-registry",
-        description="AI Forge capability registry",
+        prog="daedalus-registry",
+        description="Daedalus capability registry",
     )
     sub = parser.add_subparsers(dest="command")
 

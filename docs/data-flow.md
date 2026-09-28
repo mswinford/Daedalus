@@ -10,7 +10,7 @@ How a workflow run flows from HTTP request to response, and what each node type 
 POST /api/workflows/{id}/run  {"request": "...", "score": 95, ...}
         │
         ▼
-_load_workflow()          loads ~/.ai-forge/workflows/{id}.json, validates against Pydantic schema
+_load_workflow()          loads ~/.daedalus/workflows/{id}.json, validates against Pydantic schema
         │
         ▼
 RunRecord created         in-memory run store (status=running), run_id = uuid4
@@ -18,18 +18,21 @@ RunRecord created         in-memory run store (status=running), run_id = uuid4
         ▼
 runner.run_workflow_sync  backend/app/engine/runner.py
         │  1. validate input against state_schema (if defined)
-        │  2. build LangGraph graph from workflow JSON (GraphBuilder), with MemorySaver checkpointer
+        │  2. build LangGraph graph from workflow JSON (GraphBuilder), with a per-run SQLite checkpointer
         │  3. map run input → initial state
         │  4. execute graph; each node emits a RunEvent → broadcast to WS subscribers
         │     (a human_in_loop node pauses the graph via interrupt())
         ▼
 GET /api/runs/{id}        poll for status + result   ·   WS /api/runs/{id}/events stream live
+GET /api/runs             list runs (persisted history + live), filter by workflow_id/status
 POST /api/runs/{id}/resume  resume a paused run with Command(resume=human_input)
 ```
 
-Runs are **asynchronous**: `POST .../run` returns `202` + `run_id` and the graph executes in a worker thread (`asyncio.to_thread`). Events stream over WebSocket; the finished `WorkflowRun` is retrievable by polling. A human-in-loop node pauses the run (LangGraph `interrupt()`); it is resumed later via `POST /api/runs/{id}/resume`, which calls `runner.resume_workflow` with a `Command(resume=...)` against the SQLite checkpointer (`~/.ai-forge/checkpoints.db`, one connection per run). A run can be cancelled at any non-terminal point via `POST /api/runs/{id}/cancel`: a paused run is terminated immediately and its checkpoint thread is deleted (so restart-recovery can never resurrect it); a running run stops at the next super-step boundary — the runner drives the graph with `astream(stream_mode="values")` and checks a per-run cancel flag between steps, so the in-flight node's work finishes first.
+Runs are **asynchronous**: `POST .../run` returns `202` + `run_id` and the graph executes in a worker thread (`asyncio.to_thread`). Events stream over WebSocket; the finished `WorkflowRun` is retrievable by polling. A human-in-loop node pauses the run (LangGraph `interrupt()`); it is resumed later via `POST /api/runs/{id}/resume`, which calls `runner.resume_workflow` with a `Command(resume=...)` against the SQLite checkpointer (`~/.daedalus/checkpoints.db`, one connection per run). A run can be cancelled at any non-terminal point via `POST /api/runs/{id}/cancel`: a paused run is terminated immediately and its checkpoint thread is deleted (so restart-recovery can never resurrect it); a running run stops at the next super-step boundary — the runner drives the graph with `astream(stream_mode="values")` and checks a per-run cancel flag between steps, so the in-flight node's work finishes first.
 
-The workflow JSON is translated into a LangGraph `StateGraph` once per run (`builder.py`). Every node is an async function that receives the shared state and returns the parts of the state it changed. Each node is wrapped by `_instrument`, which emits `node_start` / `node_end` (with duration + summarized output) events and re-raises LangGraph's `GraphInterrupt` untouched. Any other exception becomes a fatal `node_error` event — **unless** the node owns an error edge (`error_handling` opt-in), in which case the exception is converted into the `_error_info` state marker instead so the router can take the error path (see §4).
+Runs are fully **concurrent** — including several runs of the same workflow: the in-memory store and checkpoint threads are keyed by `run_id` (checkpointer `thread_id = run_id`), so there is no per-workflow exclusivity. `GET /api/runs` lists them all, merging the persisted SQLite summaries with live records; at startup, any summary row still marked `running`/`paused` whose `run_id` has no live record (i.e. active when the server died) is terminalized as a zombie of the previous process.
+
+The workflow JSON is translated into a LangGraph `StateGraph` once per run (`builder.py`). Every node is an async function that receives the shared state and returns the parts of the state it changed. Each node is wrapped by `_instrument`, which emits `node_start` / `node_end` (with duration + summarized output) events and re-raises LangGraph's `GraphInterrupt` untouched. Any other exception becomes a fatal `node_error` event — **unless** the node owns an error edge (`error_handling` opt-in), in which case the exception is converted into the `_error_info` state marker instead so the router can take the error path (see §4). Before that failure path runs, nodes with an enabled `RetryConfig` (agent / transform / custom_function) get re-invoked on transient failures: `engine/retry.py` classifies the exception as `rate_limit`, `timeout`, or `server_error` (conservative — logic errors are never retryable), and if the category is in `retry_on` and attempts remain, the wrapper sleeps `backoff_base × 2^n` (capped at 30s) and retries. Each attempt emits a `retry` event; `node_end.duration_ms` covers all attempts. Node functions return new state without mutating it, so every attempt starts clean — but side effects inside node code do re-execute, so retried code should be idempotent.
 
 ## 2. The shared state
 
@@ -136,7 +139,7 @@ Available builtins are restricted to safe ones (`safe_builtins` + list/dict/set/
 
 ### human_in_loop (`builder.py`)
 
-Pauses the run using LangGraph's `interrupt()`, emitting a `human_request` event with a structured payload (node id, message, declared `input_fields`, and `approval_required`). The graph is checkpointed to SQLite (`~/.ai-forge/checkpoints.db`, one connection per run); the run's status becomes `paused`.
+Pauses the run using LangGraph's `interrupt()`, emitting a `human_request` event with a structured payload (node id, message, declared `input_fields`, and `approval_required`). The graph is checkpointed to SQLite (`~/.daedalus/checkpoints.db`, one connection per run); the run's status becomes `paused`.
 
 On resume (`POST /api/runs/{id}/resume`), the human's response arrives via `Command(resume=...)`:
 
@@ -169,6 +172,8 @@ Edge shape: `{id, source_node_id, source_handle, target_node_id, type: "static"|
 - The router returns a `source_handle`; the path map translates each handle to its target node id (or `END`).
 
 **Error edges.** A node that opted in to error handling (`Node.error_handling`) may own one outgoing edge with `type == "error"` (source handle `"error"`, red dashed in the UI). When that node raises, `_instrument` stores the exception in `_error_info` instead of failing the run, and the router checks the marker **before** normal routing: if it is set, the run follows the error edge; otherwise routing proceeds as usual and a successful node clears the marker. A HIL pause (`GraphInterrupt`) is never treated as a failure — it always re-raises and pauses the run. Error edges are excluded from conditional branch matching, so a conditional node can carry both condition branches and an error handle. Validation: at most one error edge per source, none from `start`, and the source must also have a non-error fallback path.
+
+**Loops (bounded cycles).** Back edges are legal — a loop is just a cycle plus an exit condition in state; there is no separate loop construct or "retry region" primitive (section-level retry is the same pattern: back edge from the section's error path to its entry, with an attempt counter). The safety mechanism is a hard cap in `_invoke_with_cancel` (`runner.py`): each drive segment counts super-steps and raises `IterationLimitExceeded` past `MAX_SUPER_STEPS` (500), which the executor turns into a terminal `iteration_limit` event and a failed run. The cap is per segment, so a paused run gets a fresh budget after each resume — pauses are human-paced and any runaway remains cancellable. Validation reports cycles as an informational warning (`W_CYCLE_DETECTED`) rather than a problem. Invoke regions stay atomic under loops: user edges can only touch the invoke node as a whole (inner ids are generated at expansion), so a loop around an invoke re-enters the region cleanly each pass — entry gate re-validates and re-stashes, exit gate restores.
 
 ## 5. Condition expressions (`backend/app/engine/conditions.py`)
 

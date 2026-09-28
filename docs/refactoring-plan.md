@@ -1,4 +1,4 @@
-# AI Forge — Refactoring Plan (complete)
+# Daedalus — Refactoring Plan (complete)
 
 Date: 2026-08-30 → 2026-08-31 · Status: **Complete** — all 12 items landed (`fa72a7d`…`5c11d69`). This doc is now a completion record; the "Do NOT refactor" section and residuals below remain active guidance.
 

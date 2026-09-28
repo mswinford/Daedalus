@@ -35,12 +35,13 @@ async def publish(request: Request, manifest: CapabilityManifest):
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
-    await ensure_repo(settings.capabilities_repo)
+    await ensure_repo(settings.capabilities_repo, settings.capabilities_remote or None)
     try:
         await write_manifest_to_repo(settings.capabilities_repo, manifest)
         source_commit = await commit_all(
             settings.capabilities_repo,
             f"publish {manifest.name}@{manifest.version}",
+            remote=settings.capabilities_remote or None,
         )
         report = await sync_from_repo(settings.capabilities_repo, db)
     except VersionConflictError as e:

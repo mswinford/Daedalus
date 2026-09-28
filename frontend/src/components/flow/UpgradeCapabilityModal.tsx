@@ -126,7 +126,7 @@ export default function UpgradeCapabilityModal({ status, localEntry, project, ru
               v{status.currentVersion ?? '?'} → v{status.latestVersion}
             </span>
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+          <button onClick={onClose} aria-label="Close upgrade dialog" className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500">
             <X size={16} />
           </button>
         </div>

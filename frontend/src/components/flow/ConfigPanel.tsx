@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, Trash2, AlertTriangle, ArrowUpCircle } from 'lucide-react'
+import { Plus, Trash2, AlertTriangle, ArrowUpCircle, Pencil } from 'lucide-react'
 import type { Edge } from '@xyflow/react'
 
 import { secretsApi } from '@/lib/api'
 
 import {
+  NODE_META,
   type WorkflowNode,
   type NodeConfig,
   type ModelConfig,
@@ -14,6 +15,7 @@ import {
   type ConditionalNodeConfig,
   type TransformNodeConfig,
   type CustomFunctionNodeConfig,
+  type RetryConfig,
   type StartNodeConfig,
   type EndNodeConfig,
   type HumanInLoopNodeConfig,
@@ -37,9 +39,52 @@ interface Props {
   onConfigChange: (nodeId: string, config: NodeConfig) => void
   onErrorHandlingChange: (nodeId: string, enabled: boolean) => void
   onDeleteNode: (nodeId: string) => void
+  displayName?: string
+  onLabelChange?: (nodeId: string, label: string | null) => void
   edges: Edge[]
   updates?: UpdateStatus[]
   onUpgradeOrigin?: (where: string) => void
+}
+
+// ─── node name (inline rename) ──────────────────────────────────────────────
+
+function NodeNameEditor({ nodeId, name, label, onCommit }: { nodeId: string; name: string; label?: string | null; onCommit?: (nodeId: string, label: string | null) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const commit = () => {
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed !== (label ?? '')) onCommit?.(nodeId, trimmed || null)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => { setDraft(label ?? ''); setEditing(true) }}
+        title="Rename node"
+        className="group flex min-w-0 items-center gap-1.5 text-left text-sm font-medium text-zinc-200 hover:text-white"
+      >
+        <span className="truncate">{name}</span>
+        <Pencil size={12} className="shrink-0 text-zinc-600 group-hover:text-zinc-400" />
+      </button>
+    )
+  }
+
+  return (
+    <input
+      autoFocus
+      value={draft}
+      maxLength={40}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit()
+        else if (e.key === 'Escape') setEditing(false)
+      }}
+      className="w-full rounded border border-zinc-600 bg-zinc-900 px-1.5 py-0.5 text-sm font-medium text-zinc-200 outline-none focus:border-indigo-500"
+    />
+  )
 }
 
 // ─── small form primitives ──────────────────────────────────────────────────
@@ -232,6 +277,7 @@ function AgentEditor({ config, set, models, tools, prompts, nodeId, updates, onU
           })}
         </div>
       </div>
+      <RetryEditor retry={config.retry} onChange={(retry) => set({ ...config, retry })} />
     </div>
   )
 }
@@ -329,6 +375,7 @@ function TransformEditor({ config, set }: { config: TransformNodeConfig; set: (c
       <Field label="Output field">
         <input className={inputCls} value={config.output_field} onChange={(e) => set({ ...config, output_field: e.target.value })} />
       </Field>
+      <RetryEditor retry={config.retry} onChange={(retry) => set({ ...config, retry })} />
     </div>
   )
 }
@@ -350,6 +397,50 @@ function CustomFunctionEditor({ config, set }: { config: CustomFunctionNodeConfi
       <Field label="Output fields">
         <ListField value={config.output_fields} onChange={(v) => set({ ...config, output_fields: v })} />
       </Field>
+      <RetryEditor retry={config.retry} onChange={(retry) => set({ ...config, retry })} />
+    </div>
+  )
+}
+
+const RETRY_CATEGORIES = [
+  { id: 'rate_limit', label: 'Rate limit (429)' },
+  { id: 'timeout', label: 'Timeout' },
+  { id: 'server_error', label: 'Server error (5xx)' },
+] as const
+
+function RetryEditor({ retry, onChange }: { retry: RetryConfig | null | undefined; onChange: (r: RetryConfig) => void }) {
+  const r: RetryConfig = retry ?? { enabled: false, max_retries: 3, backoff_base: 1.0, retry_on: ['rate_limit', 'timeout', 'server_error'] }
+  const set = (patch: Partial<RetryConfig>) => onChange({ ...r, ...patch })
+  const toggleCategory = (id: string) => {
+    const retry_on = r.retry_on?.includes(id) ? r.retry_on.filter((c) => c !== id) : [...(r.retry_on ?? []), id]
+    set({ retry_on })
+  }
+  return (
+    <div className="space-y-2 rounded-md border border-zinc-800 p-3">
+      <label className="flex items-center gap-2 text-xs font-medium text-zinc-300">
+        <input type="checkbox" checked={r.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        Retry on transient errors
+      </label>
+      {r.enabled && (
+        <div className="space-y-2 pl-1">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Max retries">
+              <NumberInput value={r.max_retries ?? 3} onChange={(v) => set({ max_retries: v })} min={0} max={10} />
+            </Field>
+            <Field label="Backoff base (s)">
+              <input type="number" step="0.1" min="0.1" className={inputCls} value={r.backoff_base ?? 1.0} onChange={(e) => set({ backoff_base: Math.max(0.1, parseFloat(e.target.value) || 0.1) })} />
+            </Field>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {RETRY_CATEGORIES.map((c) => (
+              <label key={c.id} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <input type="checkbox" checked={(r.retry_on ?? []).includes(c.id)} onChange={() => toggleCategory(c.id)} />
+                {c.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -662,7 +753,7 @@ function InvokeEditor({ config, set }: { config: InvokeNodeConfig; set: (c: Invo
 
 // ─── panel shell ────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, edges, updates, onUpgradeOrigin }: Props) {
+export default function ConfigPanel({ node, models, tools, prompts, onConfigChange, onErrorHandlingChange, onDeleteNode, displayName, onLabelChange, edges, updates, onUpgradeOrigin }: Props) {
   if (!node) {
     return (
       <div className="text-sm text-zinc-500">Select a node to configure it.</div>
@@ -676,8 +767,9 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
     <div className="space-y-3">
       <div className="border-b border-zinc-800 pb-2">
         <p className="text-xs text-zinc-500">Editing node</p>
-        <p className="flex items-center gap-1.5 font-mono text-sm text-zinc-200">
-          <span className="truncate">{node.id}</span>
+        <NodeNameEditor nodeId={node.id} name={displayName ?? NODE_META[node.type].label} label={node.label} onCommit={onLabelChange} />
+        <p className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-zinc-600">
+          <span className="truncate" title={node.id}>{node.id}</span>
           {agentStatus && (
             <CapabilityVersionBadge current={agentStatus.currentVersion} latest={agentStatus.latestVersion} breaking={agentStatus.isBreaking} tracking={node.type === 'agent' ? !!(node.config as AgentNodeConfig).track_latest : false} />
           )}
@@ -724,7 +816,10 @@ export default function ConfigPanel({ node, models, tools, prompts, onConfigChan
 
       <div className="border-t border-zinc-800 pt-3">
         <button
-          onClick={() => onDeleteNode(node.id)}
+          onClick={() => {
+            if (!window.confirm(`Delete ${node.type} node "${node.id}"? This cannot be undone.`)) return
+            onDeleteNode(node.id)
+          }}
           className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-900/50 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-950/30"
         >
           <Trash2 size={14} />

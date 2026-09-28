@@ -6,6 +6,7 @@ import {
   ReactFlowProvider,
   Background,
   Controls,
+  MiniMap,
   useNodesState,
   useEdgesState,
   useReactFlow,
@@ -14,19 +15,24 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react'
-import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X } from 'lucide-react'
+import { Save, Play, Braces, ShieldCheck, CheckCircle2, AlertTriangle, Layers, KeyRound, PackagePlus, RefreshCw, X, MousePointerClick, History } from 'lucide-react'
 
 import { workflowsApi, streamRunEvents, apiErrorMessage, type ValidationResult, type Workflow, type WorkflowRun } from '@/lib/api'
 import {
   ALL_NODE_TYPES,
+  PALETTE_GROUPS,
   NODE_META,
   defaultConfig,
+  displayNamesFor,
   type NodeType,
   type WorkflowNode,
   type NodeConfig,
+  type StartNodeConfig,
 } from '@/lib/workflowTypes'
+import { runInputPlaceholder } from '@/lib/runInput'
 import {
   ERROR_EDGE_STYLE,
+  edgeVisuals,
   nodesToRF,
   edgesToRF,
   rfToNodes,
@@ -34,11 +40,13 @@ import {
   sourceHandlesFor,
   type FlowNodeType,
 } from '@/lib/graphTransform'
-import FlowNode from '@/components/flow/FlowNode'
+import FlowNode, { NodeNameContext } from '@/components/flow/FlowNode'
 import ConfigPanel from '@/components/flow/ConfigPanel'
+import EdgeInspector from '@/components/flow/EdgeInspector'
 import ResourcesPanel from '@/components/flow/ResourcesPanel'
 import type { CapabilityKind } from '@/lib/registryApi'
 import RunPanel from '@/components/flow/RunPanel'
+import RunHistoryPanel from '@/components/flow/RunHistoryPanel'
 import SecretsPanel from '@/components/flow/SecretsPanel'
 import CapabilityPicker from '@/components/flow/CapabilityPicker'
 import CapabilityVersionBadge from '@/components/flow/CapabilityVersionBadge'
@@ -55,9 +63,11 @@ import {
   upsertModel,
   upsertTools,
 } from '@/lib/capabilityUpgrade'
-import type { AgentNodeConfig, AgentSkill, ModelConfig, ToolDefinition } from '@/lib/workflowTypes'
+import type { AgentNodeConfig, AgentSkill, ConditionConfig, ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workflowTypes'
 
 import '@xyflow/react/dist/style.css'
+
+const GRID = 16
 
 const nodeTypes = {
   start: FlowNode,
@@ -78,19 +88,25 @@ function WorkflowEditorInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeType>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [inputJson, setInputJson] = useState('')
   const [showInput, setShowInput] = useState(false)
   const [inputError, setInputError] = useState<string | null>(null)
   const [models, setModels] = useState<ModelConfig[]>([])
   const [tools, setTools] = useState<ToolDefinition[]>([])
+  const [prompts, setPrompts] = useState<PromptDefinition[]>([])
   const [showResources, setShowResources] = useState(false)
   const [pickerKind, setPickerKind] = useState<CapabilityKind | null>(null)
   const [showSecrets, setShowSecrets] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   // Local override for the workflow-level live-ref flag (the query data is read-only).
   const [wfTrackOverride, setWfTrackOverride] = useState<boolean | null>(null)
+  // Local override for the name while editing (query data is read-only).
+  const [nameOverride, setNameOverride] = useState<string | null>(null)
 
   const { data: workflow, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['workflow', id],
@@ -121,6 +137,7 @@ function WorkflowEditorInner() {
     setEdges(edgesToRF(workflow.edges))
     setModels(workflow.models)
     setTools(workflow.tools)
+    setPrompts(workflow.prompts ?? [])
     setSelectedId(null)
     setValidation(null)
     setDirty(false)
@@ -147,21 +164,21 @@ function WorkflowEditorInner() {
     if (!workflow || !id) return null
     return {
       id: workflow.id,
-      name: workflow.name,
+      name: nameOverride ?? workflow.name,
       description: workflow.description ?? null,
       schema_version: workflow.schema_version,
       nodes: rfToNodes(nodes),
       edges: rfToEdges(edges),
       tools,
       models,
-      prompts: workflow.prompts ?? [],
+      prompts,
       state_schema: workflow.state_schema ?? null,
       // Top-level provenance must round-trip or autosave would wipe the stamp.
       source_capability: workflow.source_capability ?? null,
       source_version: workflow.source_version ?? null,
       track_latest: wfTrackOverride ?? workflow.track_latest ?? false,
     }
-  }, [workflow, id, nodes, edges, tools, models, wfTrackOverride])
+  }, [workflow, id, nodes, edges, tools, models, prompts, wfTrackOverride, nameOverride])
 
   useEffect(() => {
     latestPayloadRef.current = buildPayload()
@@ -175,8 +192,38 @@ function WorkflowEditorInner() {
     if (!selectedId) return null
     const n = nodes.find((x) => x.id === selectedId)
     if (!n) return null
-    return { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config, error_handling: n.data.errorHandling ?? false } as WorkflowNode
+    return { id: n.id, type: n.data.nodeType, position: n.position, config: n.data.config, error_handling: n.data.errorHandling ?? false, label: n.data.label ?? null } as WorkflowNode
   }, [nodes, selectedId])
+
+  const displayNameById = useMemo(
+    () => displayNamesFor(nodes.map((n) => ({ id: n.id, type: n.data.nodeType, label: n.data.label }))),
+    [nodes]
+  )
+
+  // Derived, so deleting a selected edge (canvas or via node delete) hides the inspector automatically.
+  const selectedEdge = useMemo(
+    () => (selectedEdgeId ? edges.find((e) => e.id === selectedEdgeId) ?? null : null),
+    [edges, selectedEdgeId],
+  )
+
+  const handleEdgeChange = useCallback(
+    (edgeId: string, patch: { type: 'static' | 'conditional'; condition: ConditionConfig | null }) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId
+            ? { ...e, ...edgeVisuals(patch), data: { semanticType: patch.type, condition: patch.condition } }
+            : e,
+        ),
+      )
+      setDirty(true)
+    },
+    [setEdges],
+  )
+
+  const startInputFields = useMemo(() => {
+    const start = nodes.find((n) => n.data.nodeType === 'start')
+    return (start?.data.config as StartNodeConfig | undefined)?.input_fields ?? []
+  }, [nodes])
 
   const handleConfigChange = (nodeId: string, config: NodeConfig) => {
     setDirty(true)
@@ -187,6 +234,11 @@ function WorkflowEditorInner() {
         return { ...n, data: { ...n.data, config, branchHandles: sourceHandlesFor(temp, rfToEdges(edges)) } }
       }),
     )
+  }
+
+  const handleLabelChange = (nodeId: string, label: string | null) => {
+    setDirty(true)
+    setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, label } } : n)))
   }
 
   // Pool removals must also drop the references in agent configs, otherwise
@@ -226,6 +278,22 @@ function WorkflowEditorInner() {
           const c = n.data.config as AgentNodeConfig
           if (!removed.includes(c.model_id)) return n
           return { ...n, data: { ...n.data, config: { ...c, model_id: '' } } }
+        }),
+      )
+    }
+    setDirty(true)
+  }
+
+  const handlePromptsChange = (p: PromptDefinition[]) => {
+    setPrompts(p)
+    const removed = prompts.filter((x) => !p.some((y) => y.id === x.id)).map((x) => x.id)
+    if (removed.length > 0) {
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.data.nodeType !== 'agent') return n
+          const c = n.data.config as AgentNodeConfig
+          if (!c.prompt_ref || !removed.includes(c.prompt_ref)) return n
+          return { ...n, data: { ...n.data, config: { ...c, prompt_ref: null } } }
         }),
       )
     }
@@ -334,7 +402,8 @@ function WorkflowEditorInner() {
       e.preventDefault()
       const type = e.dataTransfer.getData('application/reactflow') as NodeType
       if (!type || !ALL_NODE_TYPES.includes(type)) return
-      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const raw = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const position = { x: Math.round(raw.x / GRID) * GRID, y: Math.round(raw.y / GRID) * GRID }
       const newId = crypto.randomUUID()
       const config = defaultConfig(type)
       const newNode: FlowNodeType = {
@@ -425,6 +494,7 @@ function WorkflowEditorInner() {
 
   const handleNodesDelete = useCallback(
     (deleted: FlowNodeType[]) => {
+      if (deleted.length > 0 && !window.confirm(`Delete ${deleted.length} node${deleted.length === 1 ? '' : 's'}? Connected edges will be removed too.`)) return
       const ids = new Set(deleted.map((n) => n.id))
       setEdges((eds) => eds.filter((e) => !ids.has(e.source) && !ids.has(e.target)))
       if (selectedId && ids.has(selectedId)) setSelectedId(null)
@@ -464,11 +534,13 @@ function WorkflowEditorInner() {
     },
     onSuccess: (saved) => {
       setDirty(false)
+      setSaveError(null)
       setValidation(null)
       validationRef.current = new Map()
       setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, validation: undefined } })))
       syncedJsonRef.current = JSON.stringify(saved)
     },
+    onError: (err) => setSaveError(apiErrorMessage(err)),
   })
 
   const importMutation = useMutation({
@@ -493,9 +565,13 @@ function WorkflowEditorInner() {
   })
 
   const [run, setRun] = useState<WorkflowRun | null>(null)
+  const [runBlocked, setRunBlocked] = useState<string | null>(null)
+  const [validatingForRun, setValidatingForRun] = useState(false)
   const runCloseRef = useRef<(() => void) | null>(null)
   const runLastSeqRef = useRef(0)
   const runFinishedRef = useRef(false)
+  // Monotonic token so a superseded showRun fetch can't open a stale stream.
+  const showRunTokenRef = useRef(0)
 
   // Paused runs rebuild their graph from the saved workflow on resume, so
   // upgrading capabilities mid-flight can break them.
@@ -503,6 +579,15 @@ function WorkflowEditorInner() {
     const pausedCount = (pausedRuns ?? []).filter((r) => r.workflow_id === id).length
     return runGuardWarning(run?.status, pausedCount)
   }, [pausedRuns, id, run])
+
+  // This workflow's live runs, for the run switcher — polled only while a
+  // run panel is open.
+  const { data: activeRuns } = useQuery({
+    queryKey: ['runs', 'workflow', id, 'active'],
+    queryFn: () => workflowsApi.listRuns({ workflow_id: id!, status: 'running,paused' }),
+    refetchInterval: 5000,
+    enabled: run != null && !!id,
+  })
 
   const streamEvents = (runId: string): (() => void) => {
     let close: () => void = () => {}
@@ -512,7 +597,7 @@ function WorkflowEditorInner() {
         if (ev.seq != null && ev.seq <= runLastSeqRef.current) return
         if (ev.seq != null) runLastSeqRef.current = ev.seq
         setRun((r) => (r ? { ...r, events: [...r.events, ev] } : r))
-        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || ev.type === 'run_cancelled' || (ev.type === 'node_error' && !!ev.data?.fatal)
+        const terminal = ev.type === 'run_end' || ev.type === 'human_timeout' || ev.type === 'run_cancelled' || ev.type === 'iteration_limit' || (ev.type === 'node_error' && !!ev.data?.fatal)
         if (terminal || ev.type === 'human_request') {
           runFinishedRef.current = true
           workflowsApi.getRun(runId).then(setRun).catch(() => {})
@@ -522,10 +607,34 @@ function WorkflowEditorInner() {
       () => {
         if (!runFinishedRef.current) {
           setRun((r) => (r ? { ...r, status: 'failed', error: r.error ?? 'Connection lost' } : r))
-        }
-      },
-    )
+      }
+    },
+  )
     return close
+  }
+
+  const resetRunView = () => {
+    runCloseRef.current?.()
+    runCloseRef.current = null
+    runLastSeqRef.current = 0
+    runFinishedRef.current = false
+  }
+
+  // Open an existing run (from the sidebar, ?run= deep link, or the run
+  // switcher): fetch it and stream it if it's still live.
+  const showRun = (runId: string) => {
+    resetRunView()
+    const token = ++showRunTokenRef.current
+    workflowsApi
+      .getRun(runId)
+      .then((r) => {
+        if (token !== showRunTokenRef.current) return
+        setRun(r)
+        if (r.status === 'running' || r.status === 'paused') {
+          runCloseRef.current = streamEvents(r.id)
+        }
+      })
+      .catch(() => {})
   }
 
   const handleRun = async () => {
@@ -545,10 +654,28 @@ function WorkflowEditorInner() {
     }
     setInputError(null)
 
-    runCloseRef.current?.()
-    runCloseRef.current = null
-    runLastSeqRef.current = 0
-    runFinishedRef.current = false
+    // The run endpoint never validates — check the current payload first so
+    // errors surface up front instead of mid-stream.
+    setRunBlocked(null)
+    setValidatingForRun(true)
+    try {
+      const payload = buildPayload()
+      if (!payload) throw new Error('Workflow not loaded')
+      const result = await workflowsApi.validate(id!, payload)
+      setValidation(result)
+      if (result.errors.length > 0) {
+        setRunBlocked(`Run blocked — ${result.errors.length} validation error${result.errors.length === 1 ? '' : 's'}`)
+        return
+      }
+    } catch (err) {
+      setRunBlocked(apiErrorMessage(err))
+      return
+    } finally {
+      setValidatingForRun(false)
+    }
+
+    resetRunView()
+    showRunTokenRef.current++
 
     setRun({
       id: '', workflow_id: id!, status: 'running', input_data: parsed,
@@ -561,7 +688,7 @@ function WorkflowEditorInner() {
       const close = streamEvents(run_id)
       runCloseRef.current = close
     } catch (err) {
-      setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+      setRun((r) => (r ? { ...r, status: 'failed', error: apiErrorMessage(err) } : r))
     }
   }
 
@@ -573,8 +700,8 @@ function WorkflowEditorInner() {
       // `run_cancelled` event over the existing stream. Either way a fresh
       // fetch keeps the panel in sync.
       workflowsApi.getRun(run.id).then(setRun).catch(() => {})
-    } catch {
-      workflowsApi.getRun(run.id).then(setRun).catch(() => {})
+    } catch (err) {
+      setRun((r) => (r ? { ...r, error: apiErrorMessage(err) } : r))
     }
   }
 
@@ -583,6 +710,7 @@ function WorkflowEditorInner() {
     runCloseRef.current?.()
     runCloseRef.current = null
     runFinishedRef.current = false
+    showRunTokenRef.current++
     setRun((r) => (r ? { ...r, status: 'running' } : r))
 
     try {
@@ -590,7 +718,7 @@ function WorkflowEditorInner() {
       const close = streamEvents(run.id)
       runCloseRef.current = close
     } catch (err) {
-      setRun((r) => (r ? { ...r, status: 'failed', error: String(err) } : r))
+      setRun((r) => (r ? { ...r, status: 'failed', error: apiErrorMessage(err) } : r))
     }
   }
 
@@ -602,31 +730,28 @@ function WorkflowEditorInner() {
   const pendingRunId = searchParams.get('run')
   useEffect(() => {
     if (!pendingRunId) return
-    let cancelled = false
-    runCloseRef.current?.()
-    runCloseRef.current = null
-    runLastSeqRef.current = 0
-    runFinishedRef.current = false
-    workflowsApi
-      .getRun(pendingRunId)
-      .then((r) => {
-        if (cancelled) return
-        setRun(r)
-        if (r.status === 'running' || r.status === 'paused') {
-          runCloseRef.current = streamEvents(r.id)
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    showRun(pendingRunId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, pendingRunId])
+
+  // Dismiss the local panel only — the server-side run keeps going (paused
+  // runs stay reachable from the sidebar).
+  const handleRunClose = () => {
+    runCloseRef.current?.()
+    runCloseRef.current = null
+    setRun(null)
+    if (searchParams.get('run')) {
+      const next = new URLSearchParams(searchParams.toString())
+      next.delete('run')
+      const qs = next.toString()
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
+    }
+  }
 
   // Debounced auto-save: persist ~800ms after the last edit while dirty.
   useEffect(() => {
     if (!dirty || !workflow) return
-    const t = setTimeout(() => saveMutation.mutate(), 800)
+    const t = setTimeout(() => { setSaveError(null); saveMutation.mutate() }, 800)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, workflow, nodes, edges, tools, models])
@@ -635,13 +760,19 @@ function WorkflowEditorInner() {
   useEffect(() => {
     return () => {
       if (dirtyRef.current && id && latestPayloadRef.current) {
-        workflowsApi.update(id, latestPayloadRef.current).catch(() => {})
+        workflowsApi.update(id, latestPayloadRef.current).catch((err) => setSaveError(apiErrorMessage(err)))
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  if (isLoading) return <div className="p-6 text-zinc-500">Loading...</div>
+  if (isLoading)
+    return (
+      <div className="flex h-full items-center justify-center gap-2 bg-zinc-950 text-sm text-zinc-500">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" aria-hidden />
+        Loading…
+      </div>
+    )
   const updateCount = updates.statuses.filter((s) => s.hasUpdate).length
   const hasBreakingUpdate = updates.statuses.some((s) => s.hasUpdate && s.isBreaking)
   const wfUpdate = updates.statuses.find((s) => s.kind === 'workflow')
@@ -673,9 +804,14 @@ function WorkflowEditorInner() {
   return (
     <div className="flex h-full flex-col bg-zinc-950">
       {/* Top bar */}
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
-        <div className="flex items-center gap-2">
-          <h1 className="font-medium">{workflow.name}</h1>
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-zinc-800 px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <input
+            value={nameOverride ?? workflow.name}
+            onChange={(e) => { setNameOverride(e.target.value); setDirty(true) }}
+            aria-label="Workflow name"
+            className="w-56 rounded-md border border-transparent bg-transparent px-1.5 py-0.5 font-medium outline-none hover:border-zinc-700 focus:border-zinc-600 focus:bg-zinc-900"
+          />
           {wfUpdate && (
             <CapabilityVersionBadge current={wfUpdate.currentVersion} latest={wfUpdate.latestVersion} breaking={wfUpdate.isBreaking} tracking={!!(wfTrackOverride ?? workflow.track_latest)} />
           )}
@@ -683,7 +819,7 @@ function WorkflowEditorInner() {
             <TrackToggle checked={!!(wfTrackOverride ?? workflow.track_latest)} onChange={(v) => { setWfTrackOverride(v); setDirty(true) }} />
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           <button
             onClick={() => setShowResources(true)}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
@@ -721,6 +857,13 @@ function WorkflowEditorInner() {
             <KeyRound size={14} />
             Secrets
           </button>
+          <button
+            onClick={() => setShowHistory(true)}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            <History size={14} />
+            History
+          </button>
           {validation && (
             <span className={`mr-1 flex items-center gap-1 text-xs ${validation.valid ? 'text-emerald-400' : 'text-red-400'}`}>
               {validation.valid ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
@@ -737,6 +880,11 @@ function WorkflowEditorInner() {
           </button>
           {saveMutation.isPending ? (
             <span className="mr-1 text-xs text-zinc-400">Saving…</span>
+          ) : saveError ? (
+            <span className="mr-1 flex max-w-[280px] items-center gap-1 text-xs text-red-400" title={saveError}>
+              <AlertTriangle size={13} className="shrink-0" />
+              <span className="truncate">Save failed — {saveError}</span>
+            </span>
           ) : dirty ? (
             <span className="mr-1 flex items-center gap-1.5 text-xs text-amber-400">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
@@ -749,7 +897,7 @@ function WorkflowEditorInner() {
             </span>
           )}
           <button
-            onClick={() => saveMutation.mutate()}
+            onClick={() => { setSaveError(null); saveMutation.mutate() }}
             disabled={saveMutation.isPending}
             className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
           >
@@ -765,9 +913,15 @@ function WorkflowEditorInner() {
             <Braces size={14} />
             Input
           </button>
+          {runBlocked && (
+            <span className="mr-1 flex max-w-[280px] items-center gap-1 text-xs text-red-400" title={runBlocked}>
+              <AlertTriangle size={13} className="shrink-0" />
+              <span className="truncate">{runBlocked}</span>
+            </span>
+          )}
           <button
             onClick={handleRun}
-            disabled={run?.status === 'running'}
+            disabled={run?.status === 'running' || validatingForRun}
             className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
           >
             <Play size={14} />
@@ -796,7 +950,7 @@ function WorkflowEditorInner() {
           <textarea
             value={inputJson}
             onChange={(e) => { setInputJson(e.target.value); if (inputError) setInputError(null) }}
-            placeholder='Leave blank to run with no input, or e.g. {"score": 40}'
+            placeholder={runInputPlaceholder(startInputFields)}
             spellCheck={false}
             className="mt-1 h-16 w-full resize-y rounded-md border border-zinc-800 bg-zinc-900 p-2 font-mono text-xs text-zinc-200 outline-none focus:border-zinc-600"
           />
@@ -809,22 +963,27 @@ function WorkflowEditorInner() {
         {/* Left: node palette (draggable) */}
         <aside className="w-48 border-r border-zinc-800 p-3">
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Add nodes</p>
-          <div className="space-y-1">
-            {ALL_NODE_TYPES.map((t) => (
-              <div
-                key={t}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/reactflow', t)
-                  e.dataTransfer.effectAllowed = 'move'
-                }}
-                className="flex cursor-grab items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-1.5 text-sm text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 active:cursor-grabbing"
-              >
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_META[t].color }} />
-                {NODE_META[t].label}
+          {PALETTE_GROUPS.map((g) => (
+            <div key={g.label} className="mb-2.5">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-600">{g.label}</p>
+              <div className="space-y-1">
+                {g.types.map((t) => (
+                  <div
+                    key={t}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/reactflow', t)
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    className="flex cursor-grab items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-1.5 text-sm text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 active:cursor-grabbing"
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_META[t].color }} />
+                    {NODE_META[t].label}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
           <p className="mt-3 text-[11px] leading-relaxed text-zinc-600">Drag onto canvas to add. Click a node to edit. Delete key removes selection.</p>
         </aside>
 
@@ -834,6 +993,7 @@ function WorkflowEditorInner() {
           onDrop={handleDrop}
           onDragOver={handleDragOver}
         >
+          <NodeNameContext.Provider value={displayNameById}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -843,15 +1003,36 @@ function WorkflowEditorInner() {
             onNodesDelete={handleNodesDelete}
             onEdgesDelete={handleEdgesDelete}
             nodeTypes={nodeTypes}
-            onNodeClick={(_e, n) => setSelectedId(n.id)}
-            onEdgeClick={() => setSelectedId(null)}
-            onPaneClick={() => setSelectedId(null)}
+            onNodeClick={(_e, n) => { setSelectedId(n.id); setSelectedEdgeId(null) }}
+            onEdgeClick={(_e, edge) => {
+              setSelectedId(null)
+              // Error edges are self-evident (red dashed) and stay delete-only.
+              if ((edge.data?.semanticType as string | undefined) !== 'error') setSelectedEdgeId(edge.id)
+            }}
+            onPaneClick={() => { setSelectedId(null); setSelectedEdgeId(null) }}
             deleteKeyCode="Delete"
+            snapToGrid
+            snapGrid={[GRID, GRID]}
             fitView
           >
             <Background color="#27272a" gap={16} />
             <Controls className="!bg-zinc-900 !border-zinc-800" />
+            <MiniMap
+              className="!bg-zinc-900 !border-zinc-800"
+              style={{ width: 140, height: 90 }}
+              nodeColor={(n) => NODE_META[(n as FlowNodeType).data.nodeType].color}
+            />
           </ReactFlow>
+          </NodeNameContext.Provider>
+
+          {nodes.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-2 text-zinc-600">
+                <MousePointerClick size={20} />
+                <p className="text-sm">Drag a Start node from the palette to begin</p>
+              </div>
+            </div>
+          )}
 
           {/* Validation issue list */}
           {validation && [...validation.errors, ...validation.warnings].length > 0 && (
@@ -870,21 +1051,37 @@ function WorkflowEditorInner() {
           )}
         </main>
 
-        {/* Right: config panel */}
+        {/* Right: config panel (node or edge) */}
         <aside className="w-72 overflow-y-auto border-l border-zinc-800 p-3">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Config</p>
-          <ConfigPanel
-            node={selectedNode}
-            models={models}
-            tools={tools}
-            prompts={workflow?.prompts ?? []}
-            onConfigChange={handleConfigChange}
-            onErrorHandlingChange={handleErrorToggle}
-            onDeleteNode={handleDeleteNode}
-            edges={edges}
-            updates={updates.statuses}
-            onUpgradeOrigin={openConfigUpgrade}
-          />
+          {selectedEdge ? (
+            <>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Edge</p>
+              <EdgeInspector
+                edge={selectedEdge}
+                sourceName={displayNameById.get(selectedEdge.source) ?? selectedEdge.source}
+                targetName={displayNameById.get(selectedEdge.target) ?? selectedEdge.target}
+                onChange={(patch) => handleEdgeChange(selectedEdge.id, patch)}
+              />
+            </>
+          ) : (
+            <>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Config</p>
+              <ConfigPanel
+                node={selectedNode}
+                models={models}
+                tools={tools}
+                prompts={prompts}
+                onConfigChange={handleConfigChange}
+                onErrorHandlingChange={handleErrorToggle}
+                onDeleteNode={handleDeleteNode}
+                displayName={selectedNode ? displayNameById.get(selectedNode.id) : undefined}
+                onLabelChange={handleLabelChange}
+                edges={edges}
+                updates={updates.statuses}
+                onUpgradeOrigin={openConfigUpgrade}
+              />
+            </>
+          )}
         </aside>
       </div>
 
@@ -905,12 +1102,12 @@ function WorkflowEditorInner() {
         <ResourcesPanel
           tools={tools}
           models={models}
-          prompts={workflow?.prompts ?? []}
-          wfId={id ?? undefined}
+          prompts={prompts}
           updates={updates.statuses}
           runWarning={runWarning}
           onToolsChange={handleToolsChange}
           onModelsChange={handleModelsChange}
+          onPromptsChange={handlePromptsChange}
           onOpenRegistry={(kind) => { setShowResources(false); setPickerKind(kind); setShowPicker(true) }}
           onClose={() => setShowResources(false)}
         />
@@ -918,6 +1115,18 @@ function WorkflowEditorInner() {
 
       {/* Secrets modal */}
       {showSecrets && <SecretsPanel onClose={() => setShowSecrets(false)} />}
+
+      {/* Run history modal */}
+      {showHistory && id && (
+        <RunHistoryPanel
+          workflowId={id}
+          onOpenRun={(runId) => {
+            setShowHistory(false)
+            showRun(runId)
+          }}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
 
       {/* Capability picker */}
       {showPicker && (
@@ -931,7 +1140,17 @@ function WorkflowEditorInner() {
       )}
 
       {/* Bottom: run log / debug panel */}
-      {run && <RunPanel run={run} nodes={nodes} onResume={handleResume} onCancel={handleCancel} />}
+      {run && (
+        <RunPanel
+          run={run}
+          nodes={nodes}
+          runs={activeRuns ?? []}
+          onSwitchRun={showRun}
+          onResume={handleResume}
+          onCancel={handleCancel}
+          onClose={handleRunClose}
+        />
+      )}
     </div>
   )
 }

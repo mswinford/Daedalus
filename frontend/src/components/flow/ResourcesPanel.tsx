@@ -1,10 +1,8 @@
-import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { ArrowUpCircle, Cpu, Layers, PackagePlus, Plus, ScrollText, Trash2, Wrench, X } from 'lucide-react'
 
 import type { ModelConfig, PromptDefinition, ToolDefinition } from '@/lib/workflowTypes'
 import type { UpdateStatus } from '@/lib/capabilityUpdates'
-import { workflowsApi } from '@/lib/api'
 import CapabilityVersionBadge from './CapabilityVersionBadge'
 import TrackToggle from './TrackToggle'
 import ToolForm, { IMPL_LABEL } from './ToolForm'
@@ -15,11 +13,11 @@ interface Props {
   tools: ToolDefinition[]
   models: ModelConfig[]
   prompts?: PromptDefinition[]
-  wfId?: string
   updates?: UpdateStatus[]
   runWarning?: string | null
   onToolsChange: (tools: ToolDefinition[]) => void
   onModelsChange: (models: ModelConfig[]) => void
+  onPromptsChange: (prompts: PromptDefinition[]) => void
   onOpenRegistry: (kind: 'tool' | 'model_profile') => void
   onClose: () => void
 }
@@ -32,20 +30,27 @@ export default function ResourcesPanel({
   tools,
   models,
   prompts = [],
-  wfId,
   updates,
   runWarning,
   onToolsChange,
   onModelsChange,
+  onPromptsChange,
   onOpenRegistry,
   onClose,
 }: Props) {
-  const queryClient = useQueryClient()
   const [editingTool, setEditingTool] = useState<ToolDefinition | null>(null)
   const [addingTool, setAddingTool] = useState(false)
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null)
   const [addingModel, setAddingModel] = useState(false)
   const [upgrading, setUpgrading] = useState<{ status: UpdateStatus; localEntry: Record<string, unknown> } | null>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !upgrading) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, upgrading])
 
   const saveTool = (t: ToolDefinition) => {
     onToolsChange(
@@ -63,13 +68,8 @@ export default function ResourcesPanel({
     setAddingModel(false)
   }
 
-  const setPromptTrack = async (p: PromptDefinition, v: boolean) => {
-    if (!wfId) return
-    const fresh = await workflowsApi.get(wfId)
-    const nextPrompts = (fresh.prompts ?? []).map((x) => (x.id === p.id ? { ...x, track_latest: v } : x))
-    await workflowsApi.update(wfId, { ...fresh, prompts: nextPrompts })
-    await queryClient.invalidateQueries({ queryKey: ['workflows'] })
-    await queryClient.invalidateQueries({ queryKey: ['workflow', wfId] })
+  const setPromptTrack = (p: PromptDefinition, v: boolean) => {
+    onPromptsChange(prompts.map((x) => (x.id === p.id ? { ...x, track_latest: v } : x)))
   }
 
   const applyUpgrade = async (upgraded: Record<string, unknown>) => {
@@ -80,15 +80,11 @@ export default function ResourcesPanel({
     } else if (kind === 'model_profile') {
       onModelsChange(models.map((x) => (x.id === upgraded.id ? (upgraded as unknown as ModelConfig) : x)))
     } else if (kind === 'prompt') {
-      if (!wfId) throw new Error('Workflow id unavailable')
-      const fresh = await workflowsApi.get(wfId)
-      const idx = (fresh.prompts ?? []).findIndex((p) => p.id === upgraded.id)
+      const idx = prompts.findIndex((p) => p.id === upgraded.id)
       if (idx < 0) throw new Error('Prompt no longer exists in the workflow')
-      const nextPrompts = [...(fresh.prompts ?? [])]
+      const nextPrompts = [...prompts]
       nextPrompts[idx] = upgraded as unknown as PromptDefinition
-      await workflowsApi.update(wfId, { ...fresh, prompts: nextPrompts })
-      await queryClient.invalidateQueries({ queryKey: ['workflows'] })
-      await queryClient.invalidateQueries({ queryKey: ['workflow', wfId] })
+      onPromptsChange(nextPrompts)
     } else {
       throw new Error(`Cannot upgrade ${kind} here`)
     }
@@ -117,7 +113,7 @@ export default function ResourcesPanel({
           <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-100">
             <Layers size={16} /> Workflow resources
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:text-zinc-100">
+          <button onClick={onClose} aria-label="Close resources panel" className="rounded p-1 text-zinc-400 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500">
             <X size={16} />
           </button>
         </div>
@@ -160,8 +156,12 @@ export default function ResourcesPanel({
                         {editingTool?.id === t.id ? 'Close' : 'Edit'}
                       </button>
                       <button
-                        onClick={() => onToolsChange(tools.filter((x) => x.id !== t.id))}
-                        className="rounded p-1 text-zinc-500 hover:text-red-400"
+                        onClick={() => {
+                          if (!window.confirm(`Delete tool "${t.name}"? It will also be removed from any agents using it.`)) return
+                          onToolsChange(tools.filter((x) => x.id !== t.id))
+                        }}
+                        aria-label={`Delete tool ${t.name}`}
+                        className="rounded p-1 text-zinc-500 hover:text-red-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -229,8 +229,12 @@ export default function ResourcesPanel({
                         {editingModel?.id === m.id ? 'Close' : 'Edit'}
                       </button>
                       <button
-                        onClick={() => onModelsChange(models.filter((x) => x.id !== m.id))}
-                        className="rounded p-1 text-zinc-500 hover:text-red-400"
+                        onClick={() => {
+                          if (!window.confirm(`Delete model "${m.name}"? Agents using it will lose their model selection.`)) return
+                          onModelsChange(models.filter((x) => x.id !== m.id))
+                        }}
+                        aria-label={`Delete model ${m.name}`}
+                        className="rounded p-1 text-zinc-500 hover:text-red-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
                       >
                         <Trash2 size={13} />
                       </button>

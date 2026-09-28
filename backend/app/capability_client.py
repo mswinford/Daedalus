@@ -1,7 +1,7 @@
 """Sync client for the capability registry's /use endpoint.
 
 The engine runs in worker threads, so this is a plain httpx (sync) client.
-The base URL comes from AI_FORGE_REGISTRY_URL, defaulting to the local
+The base URL comes from DAEDALUS_REGISTRY_URL, defaulting to the local
 registry port.
 """
 import os
@@ -24,7 +24,7 @@ class CapabilityNotFoundError(CapabilityFetchError):
 class CapabilityClient:
     def __init__(self, base_url: str | None = None, timeout: float = 10.0):
         self.base_url = (
-            base_url or os.environ.get("AI_FORGE_REGISTRY_URL", "http://127.0.0.1:3010")
+            base_url or os.environ.get("DAEDALUS_REGISTRY_URL", "http://127.0.0.1:3010")
         ).rstrip("/")
         self.timeout = timeout
 

@@ -1,4 +1,4 @@
-"""CLI entry point for AI Forge."""
+"""CLI entry point for Daedalus."""
 import sys
 from pathlib import Path
 
@@ -12,7 +12,7 @@ def main():
     from app.config import get_settings
 
     settings = get_settings()
-    print(f"Starting AI Forge on {settings.host}:{settings.port}")
+    print(f"Starting Daedalus on {settings.host}:{settings.port}")
     print(f"Workflows directory: {settings.workflows_dir}")
 
     uvicorn.run(

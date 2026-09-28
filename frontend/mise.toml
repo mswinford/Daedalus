@@ -1,0 +1,7 @@
+[tasks.install]
+description = "Install the locked dependency tree"
+alias = "i"
+run = "aube ci"
+
+[deps.aube]
+auto = true

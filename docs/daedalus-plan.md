@@ -1,4 +1,4 @@
-# AI Forge — Plan & Architecture Document
+# Daedalus — Plan & Architecture Document
 
 ## Overview
 
@@ -11,7 +11,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 
 ## Current Status (Phase 3 complete + post-Phase 3 increments)
 
-> Last updated: 2026-09-03. Human-in-loop nodes are implemented end-to-end: LangGraph
+> Last updated: 2026-09-05. Human-in-loop nodes are implemented end-to-end: LangGraph
 > `interrupt()` pauses execution, the run persists its state via a SQLite checkpointer (paused runs
 > survive restarts and are recovered on startup), and the frontend shows a paused state with an
 > input form + resume button. The editor is a sidebar / master-detail layout with debounced
@@ -38,6 +38,40 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
 > immediately and its checkpoint thread is deleted (indefinite HIL waits can no longer accumulate
 > as zombie approvals across restarts); a running run stops at the next super-step boundary;
 > cancelled runs stay inspectable but are excluded from capability metrics aggregation.
+> Also shipped: **per-node retry** — agent / transform / custom_function nodes carry an optional
+> `RetryConfig` (enabled, max_retries 0–10, backoff_base with exponential doubling, retry_on
+> categories); `_instrument` re-invokes transient failures (classified by `engine/retry.py`:
+> rate_limit / timeout / server_error, conservative heuristics — bare numbers in prose are not
+> status codes) before the normal failure path, emits a `retry` event per attempt (amber badge in
+> the Run panel), and caps each backoff sleep at 30s so cancellation stays responsive.
+> GraphInterrupt is never retried; non-matching errors fail fast. Caveat: retries re-execute side
+> effects, so retried node code should be idempotent. Also shipped: **bounded loops** — back edges
+> (cycles) are legal; `_invoke_with_cancel` counts super-steps per drive segment and raises past
+> MAX_SUPER_STEPS=500 → terminal `iteration_limit` event + failed run (frontend treats it as
+> terminal). Per-segment budget (fresh after each HIL resume); W_CYCLE_DETECTED reworded from
+> "problem" to informational. No E_LOOP_CROSSES_FRAME check is needed: inner region ids are
+> generated at expansion and unreferenceable, so no authored edge can cross an invoke frame —
+> loops around an invoke re-enter the region cleanly each pass. Section-level retry is a loop
+> pattern (back edge from the error path + attempt counter), not a primitive.
+> Also shipped (2026-09-05): **concurrent runs + global runs surface** (design in
+> `docs/global-runs-plan.md`) — the backend was already parallel-safe (RUNS keyed by
+> run_id, per-run checkpoint threads, no per-workflow exclusivity), so this added:
+> `GET /api/runs?workflow_id=&status=&limit=` merging persisted SQLite summaries with live
+> in-memory records (memory wins per run_id); startup cleanup that terminalizes zombie
+> `running`/`paused` rows left behind by a restart (`recover_zombie_runs`, after
+> `recover_paused_runs`); sidebar run-status dots per workflow (5s poll — pulsing green =
+> running, amber = paused-only); an in-editor **run switcher** for workflows with >1 live
+> run (shared `showRun()` path with the `?run=` deep link, monotonic token so a superseded
+> fetch can't open a stale stream); and a per-workflow **run-history modal** (last 50 runs;
+> terminal runs render statically from their persisted event log). Also shipped: **node
+> renaming** (optional display-only `label` on WorkflowNode — no migration, engine ignores
+> it; UI falls back to `Type N` ordinals in canvas nodes, run-log rows, and the config
+> panel), an **edge inspector** (click any non-error edge → static↔conditional toggle +
+> json_path/regex condition editor; conditional edges styled amber with the description as
+> a truncated label; error edges stay delete-only), and a UX batch (delete confirmations,
+> save-failure visibility, validate-before-run gate, HIL required-field enforcement,
+> closable run panel, minimap, empty-canvas hint, run-log timestamps/auto-scroll/elapsed
+> ticker, 16px grid snapping, a11y pass — aria-labels, Escape-to-close, focus rings).
 > Next up: `eval_suite` kind, SQLite → Postgres (ROADMAP.md R2 remainder). Remote invocation settled by design (2026-09-03) — workflows are always embedded; remote services are invoked as opaque `http` tools. Live refs (opt-in `latest` tracking) shipped — see the Roadmap.
 > Use this section as the source of truth when resuming in a new session — it supersedes the
 > phase notes below.
@@ -112,7 +146,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   (name/type/required), and implementation (`builtin` / `custom_function` / `http`, each with its
   own config fields). Accessible via "Tools" button in top bar. Agent nodes select tools from this
   list (checkbox). Save persists tools to workflow JSON. Frontend-only; no backend change needed.
-- **Secrets store**: `~/.ai-forge/secrets.json` (flat JSON, chmod 600) with env-var precedence
+- **Secrets store**: `~/.daedalus/secrets.json` (flat JSON, chmod 600) with env-var precedence
   (`os.environ` > file). Resolved via `get_secret(name)` — available in sandboxed custom functions
   and `${NAME}` placeholders in http tool headers. REST API: GET list (names + source only), PUT
   upsert, DELETE. Frontend: "Secrets" button opens a modal panel for CRUD. Accessible via "Secrets"
@@ -140,17 +174,17 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   swapped in later without touching the node. The node never pauses mid-step: it is one
   super-step from the graph's point of view (no internal HIL, no session checkpointing).
   Config: task template (`{{data.*}}` placeholders), optional model id (auto routing when
-  empty), working dir (per-run scratch under `~/.ai-forge/runs/{run_id}/copilot-{node}`, kept
+  empty), working dir (per-run scratch under `~/.daedalus/runs/{run_id}/copilot-{node}`, kept
   after the run, or an explicit absolute path), permission policy — `safe_only` by default
   (file writes confined to the working dir, no shell, no URL access; `approve_all` is an
   explicit per-node opt-in) — wall-clock timeout, and output-field mapping into `data`.
   Failure rules: idle without an assistant message → deterministic auth/subscription error
   (the runtime fails silently otherwise); session error events → failure; timeout → failure.
-  The SDK is an optional dependency (`pip install ai-forge[copilot]`); auth is ambient
+  The SDK is an optional dependency (`pip install "daedalus[copilot]"`); auth is ambient
   (logged-in user or `COPILOT_GITHUB_TOKEN`) or a secret-backed token via `auth_ref`.
   Phases 2/3 (OAuth app flow with connect button; workflow-tool → SDK custom-tool mapping,
   HIL permission bridge) are pending.
-- **Tests**: backend suite green as of 2026-09-03 (440 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+- **Tests**: backend suite green as of 2026-09-28 (475 tests, `python -m pytest -q`, incl. Capability Registry R1–R2); frontend 156 Vitest tests + typecheck/build clean.
 
 ### Engine data-flow gaps (Phase 2.1) — ALL DONE
 - [x] **#1 Data-flow foundation** — custom_function write-back + nested dot-path reads
@@ -181,7 +215,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
   pane, debounced auto-save with unmount flush. See "Sidebar / master-detail editor — Design".
 - [x] **Async execution** *(done 2026-08-28)* — POST /run returns 202 + runId immediately; WebSocket
   streams per-node events live (with seq-based replay/dedup); GET /runs/:id for polling fallback.
-- [x] **Secrets store** *(done 2026-08-28)* — `~/.ai-forge/secrets.json` + env-var precedence;
+- [x] **Secrets store** *(done 2026-08-28)* — `~/.daedalus/secrets.json` + env-var precedence;
   `get_secret()` in sandbox; `${NAME}` in http headers; REST API + frontend panel.
 - [x] **Per-agent message isolation** *(done 2026-08-28)* — `messages_by_node` dict in state;
   sequential agents get fresh conversations, share only `data`. Unblocks multi-repo Option B.
@@ -197,7 +231,7 @@ A standalone web application for building AI agent workflows using LangGraph. Fe
    via `?run=<id>` (reconnects to the event stream, so the approval form works).
 - [x] **SQLite checkpointing** *(done 2026-08-29)* — replaced `MemorySaver` with
   `langgraph-checkpoint-sqlite`; each run opens its own `AsyncSqliteSaver` connection on the shared
-  file (`~/.ai-forge/checkpoints.db`, WAL mode) because aiosqlite connections bind to one event loop.
+  file (`~/.daedalus/checkpoints.db`, WAL mode) because aiosqlite connections bind to one event loop.
   The HIL interrupt payload now carries `workflow_id`; on startup `recover_paused_runs()` finds
   threads whose latest checkpoint still has an `__interrupt__` write, rebuilds the record from the
   real graph's state snapshot, and re-arms the timeout (failing immediately if the deadline passed
@@ -280,7 +314,7 @@ Design decisions:
 
 Gaps to close first:
 - [x] **URL templating for `http` tools** — done (see "Harden the http tool" above).
-- [x] **Secrets store** — done; GitHub token stored in `~/.ai-forge/secrets.json`, referenced via
+- [x] **Secrets store** — done; GitHub token stored in `~/.daedalus/secrets.json`, referenced via
   `${GITHUB_TOKEN}` in headers or `get_secret("GITHUB_TOKEN")` in sandbox.
 - [x] **`github_*` builtins** — done: `github_create_branch`, `github_read_file`, `github_write_file`,
   `github_create_pr` registered via `@register_builtin` in `backend/app/engine/tools.py`
@@ -396,7 +430,7 @@ Residual edge (edit then switch within 800ms) is covered by #3. StrictMode doubl
 - `/` with no selection → `EmptyState` ("Pick a workflow or create one").
 
 #### Out of scope / follow-ups
-Collapsible sidebar, drag-to-reorder, per-workflow run history (the future dashboard), backend-generated ids.
+Collapsible sidebar, drag-to-reorder, a cross-workflow runs dashboard (per-workflow run history has since shipped as the editor's History modal), backend-generated ids.
 
 #### Verify
 No frontend unit tests — `npm run build` (tsc + vite) must pass. Manual: create → switch between two workflows (no hop, state resets); edit then immediately switch (auto-save persisted it); delete the open workflow (lands on `/`); reload a deep link.
@@ -485,7 +519,7 @@ Estimate ~1 day.
 - **SQLite checkpointer** — Workflow state persisted for crash recovery and human-in-loop pauses
 
 ### Secrets & API Keys *(implemented)*
-- **Env vars + config file** — `~/.ai-forge/secrets.json` (chmod 600), env vars take precedence
+- **Env vars + config file** — `~/.daedalus/secrets.json` (chmod 600), env vars take precedence
 - **`get_secret()` helper** — Available in sandboxed custom function nodes and `${NAME}` in http headers
 - **UI panel** — "Secrets" button in editor top bar; list (name + source), add/update, delete
 
@@ -533,9 +567,9 @@ Estimate ~1 day.
 - **Run ID labels** — Each pending task labeled with run ID and timestamp
 
 ### Deployment
-- **pip install** — `pip install ai-forge`, then `ai-forge serve --port 3000`
-- **Docker** — `docker run -p 3000:3000 ai-forge`
-- JSON workflows stored in `~/.ai-forge/workflows/`
+- **pip install** — `pip install daedalus`, then `daedalus serve --port 3000`
+- **Docker** — `docker run -p 3000:3000 daedalus`
+- JSON workflows stored in `~/.daedalus/workflows/`
 
 ### Observability
 - **Internal dashboard** — Run trends, slow nodes, error hotspots, token usage
@@ -556,7 +590,7 @@ Estimate ~1 day.
 - Sandboxing via RestrictedPython or container-based isolation
 
 ### Persistence
-- Each workflow = one JSON file in `~/.ai-forge/workflows/`
+- Each workflow = one JSON file in `~/.daedalus/workflows/`
 - Schema includes version number for migrations
 - Export/import workflow as JSON
 - Optional git integration (the workflows directory can be a git repo)
@@ -574,6 +608,8 @@ Status: `[done]` = implemented and tested, `[plan]` = not yet built.
 [done] PUT    /api/workflows/:id          # Update workflow
 [done] DELETE /api/workflows/:id          # Delete workflow
 [done] POST   /api/workflows/:id/run      # Execute (async; returns 202 + run_id)
+[done] GET    /api/runs                   # List runs (persisted + live; ?workflow_id=&status=&limit=)
+[done] GET    /api/runs/paused            # Paused runs across all workflows (Pending Approvals)
 [done] GET    /api/runs/:runId            # Get run status + full result
 [done] POST   /api/runs/:runId/resume     # Resume a paused run with human input
 [done] WS     /api/runs/:runId/events     # Real-time execution stream (replay + live)

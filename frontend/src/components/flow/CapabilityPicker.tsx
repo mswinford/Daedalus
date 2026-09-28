@@ -127,7 +127,7 @@ export default function CapabilityPicker({ getWorkflow, defaultAgentId, onApply,
           <h2 className="text-sm font-medium text-zinc-100">
             {kindFilter ? `Add ${KIND_TITLE[kindFilter] ?? 'a capability'}` : 'Add capability'}
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+          <button onClick={onClose} aria-label="Close capability picker" className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500">
             <X size={16} />
           </button>
         </div>

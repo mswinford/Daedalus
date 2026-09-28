@@ -11,7 +11,7 @@ def _manifest(name="acme/wf", version="1.0.0", **kw):
         "tags": ["demo"],
         "kind": "workflow",
         "spec": {"kind": "workflow", "workflow": Workflow(id="w", name="w").model_dump()},
-        "interface": {"type": "ai_forge_workflow"},
+        "interface": {"type": "daedalus_workflow"},
         "governance": {"owner": "acme"},
     }
     base.update(kw)
@@ -19,8 +19,8 @@ def _manifest(name="acme/wf", version="1.0.0", **kw):
 
 
 def _client(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_FORGE_REGISTRY_DB", str(tmp_path / "registry.db"))
-    monkeypatch.setenv("AI_FORGE_CAPABILITIES_REPO", str(tmp_path / "caps"))
+    monkeypatch.setenv("DAEDALUS_REGISTRY_DB", str(tmp_path / "registry.db"))
+    monkeypatch.setenv("DAEDALUS_CAPABILITIES_REPO", str(tmp_path / "caps"))
     from registry.main import app
     return TestClient(app)
 

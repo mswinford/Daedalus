@@ -2,7 +2,7 @@
   "name": "forge/github-write-file",
   "version": "1.0.0",
   "kind": "tool",
-  "description": "Create or update a file in a GitHub repository branch with a single commit. Content is passed raw (the builtin handles encoding). Requires the GITHUB_TOKEN secret and AI Forge's github_write_file builtin (ships with the backend).",
+  "description": "Create or update a file in a GitHub repository branch with a single commit. Content is passed raw (the builtin handles encoding). Requires the GITHUB_TOKEN secret and Daedalus's github_write_file builtin (ships with the backend).",
   "tags": ["github", "builtin", "vcs"],
   "spec": {
     "kind": "tool",

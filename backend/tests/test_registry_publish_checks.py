@@ -93,7 +93,7 @@ def _agent_manifest(name="acme/a", version="1.0.0", model_ref=None, tools=None,
 def _workflow_manifest(name="acme/wf", version="1.0.0", input_schema=None,
                        output_schema=None, wf=None, **kw):
     interface = {
-        "type": "ai_forge_workflow",
+        "type": "daedalus_workflow",
         "input_schema": input_schema or {
             "type": "object",
             "properties": {"message": {"type": "string"}},
@@ -113,8 +113,8 @@ def _ref(name, version="latest"):
 # ─── API-level tests ─────────────────────────────────────────────────────────
 
 def _client(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_FORGE_REGISTRY_DB", str(tmp_path / "registry.db"))
-    monkeypatch.setenv("AI_FORGE_CAPABILITIES_REPO", str(tmp_path / "caps"))
+    monkeypatch.setenv("DAEDALUS_REGISTRY_DB", str(tmp_path / "registry.db"))
+    monkeypatch.setenv("DAEDALUS_CAPABILITIES_REPO", str(tmp_path / "caps"))
     from registry.main import app
     return TestClient(app)
 
@@ -343,8 +343,8 @@ def test_workflow_graph_only_change_is_minor(tmp_path, monkeypatch):
 
 def _cli(tmp_path, monkeypatch, manifests):
     """Write manifests to temp files and run the CLI publish on them."""
-    monkeypatch.setenv("AI_FORGE_REGISTRY_DB", str(tmp_path / "registry.db"))
-    monkeypatch.setenv("AI_FORGE_CAPABILITIES_REPO", str(tmp_path / "caps"))
+    monkeypatch.setenv("DAEDALUS_REGISTRY_DB", str(tmp_path / "registry.db"))
+    monkeypatch.setenv("DAEDALUS_CAPABILITIES_REPO", str(tmp_path / "caps"))
     import sqlite3
     from pathlib import Path
 

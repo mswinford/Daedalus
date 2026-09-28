@@ -31,7 +31,12 @@ from app.config import get_settings
 from app.engine.expand import ExpansionError, prepare_workflow_for_run
 from app.runs.executor import _drive
 from app.runs.record import RUNS, RunRecord
-from app.runs.store import _delete_checkpoint_thread, _is_terminal, _save_run_summary
+from app.runs.store import (
+    _delete_checkpoint_thread,
+    _is_terminal,
+    _load_run_summaries,
+    _save_run_summary,
+)
 from app.runs.timeouts import _cancel_human_timeout
 
 router = APIRouter()
@@ -178,6 +183,67 @@ def list_paused_runs():
         })
     out.sort(key=lambda r: r["requested_at"] or 0)
     return out
+
+
+_VALID_RUN_STATUSES = {"running", "paused", "completed", "failed", "cancelled"}
+
+
+def _summary_from_record(record: RunRecord) -> dict[str, Any]:
+    return {
+        "run_id": record.run_id,
+        "workflow_id": record.workflow_id,
+        "status": record.status,
+        "started_at": record.started_at,
+        "completed_at": record.completed_at,
+        "error": record.error,
+        "total_tokens_input": record.total_tokens_input,
+        "total_tokens_output": record.total_tokens_output,
+        "estimated_cost_usd": record.estimated_cost_usd,
+    }
+
+
+def _summary_from_row(row) -> dict[str, Any]:
+    return {
+        "run_id": row["run_id"],
+        "workflow_id": row["workflow_id"],
+        "status": row["status"],
+        "started_at": row["started_at"],
+        "completed_at": row["completed_at"],
+        "error": row["error"],
+        "total_tokens_input": row["total_tokens_input"],
+        "total_tokens_output": row["total_tokens_output"],
+        "estimated_cost_usd": row["estimated_cost_usd"],
+    }
+
+
+@router.get("/runs")
+def list_runs(workflow_id: str | None = None, status: str | None = None, limit: int = 100):
+    """List run summaries, newest first.
+
+    Merges the persisted store (full history across restarts) with live
+    in-memory records (freshest status); on a run_id clash memory wins."""
+    limit = max(1, min(limit, 500))
+    statuses: set[str] | None = None
+    if status:
+        wanted = {s.strip() for s in status.split(",") if s.strip()}
+        unknown = wanted - _VALID_RUN_STATUSES
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown status filter(s): {', '.join(sorted(unknown))}",
+            )
+        statuses = wanted or None
+
+    rows = _load_run_summaries(workflow_id, statuses, limit + len(RUNS))
+    by_id: dict[str, dict[str, Any]] = {r["run_id"]: _summary_from_row(r) for r in rows}
+    for record in RUNS.values():
+        if workflow_id and record.workflow_id != workflow_id:
+            continue
+        if statuses and record.status not in statuses:
+            continue
+        by_id[record.run_id] = _summary_from_record(record)
+    out = sorted(by_id.values(), key=lambda r: r["started_at"], reverse=True)
+    return out[:limit]
 
 
 @router.get("/runs/{run_id}")

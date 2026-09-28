@@ -2,7 +2,7 @@
   "name": "forge/github-read-file",
   "version": "1.0.0",
   "kind": "tool",
-  "description": "Read the full content of a single file from a GitHub repository (up to 1 MB) from a branch, tag, or commit — defaults to the default branch. Requires the GITHUB_TOKEN secret and AI Forge's github_read_file builtin (ships with the backend).",
+  "description": "Read the full content of a single file from a GitHub repository (up to 1 MB) from a branch, tag, or commit — defaults to the default branch. Requires the GITHUB_TOKEN secret and Daedalus's github_read_file builtin (ships with the backend).",
   "tags": ["github", "builtin", "vcs"],
   "spec": {
     "kind": "tool",

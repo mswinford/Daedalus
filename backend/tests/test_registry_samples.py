@@ -47,8 +47,8 @@ def test_sample_references_resolve_within_samples():
 
 @pytest.fixture()
 def isolated_registry(tmp_path, monkeypatch):
-    monkeypatch.setenv("AI_FORGE_REGISTRY_DB", str(tmp_path / "registry.db"))
-    monkeypatch.setenv("AI_FORGE_CAPABILITIES_REPO", str(tmp_path / "capabilities"))
+    monkeypatch.setenv("DAEDALUS_REGISTRY_DB", str(tmp_path / "registry.db"))
+    monkeypatch.setenv("DAEDALUS_CAPABILITIES_REPO", str(tmp_path / "capabilities"))
     return tmp_path
 
 
@@ -97,7 +97,7 @@ def test_publish_invalid_manifest_rejected(isolated_registry):
 
 
 def test_cli_seed_command(isolated_registry, monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["ai-forge-registry", "seed"])
+    monkeypatch.setattr(sys, "argv", ["daedalus-registry", "seed"])
     with pytest.raises(SystemExit) as e:
         main()
     assert e.value.code == 0

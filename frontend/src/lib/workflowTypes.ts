@@ -160,6 +160,7 @@ interface BaseNode {
   id: string
   position: { x: number; y: number }
   error_handling?: boolean
+  label?: string | null
 }
 
 export interface StartNode extends BaseNode {
@@ -242,6 +243,28 @@ export const NODE_META: Record<GenNodeType, { label: string; color: string }> = 
   copilot_agent: { label: 'Copilot Agent', color: '#a3e635' },
 }
 
+/** Display name for a node: its label, or "<Type> <n>" when several nodes share a type. */
+export function nodeDisplayName(type: GenNodeType, ordinal: number, count: number, label?: string | null): string {
+  const trimmed = label?.trim()
+  if (trimmed) return trimmed
+  const base = NODE_META[type].label
+  return count > 1 ? `${base} ${ordinal}` : base
+}
+
+/** Map node id → display name for a whole graph, numbering same-type nodes in list order. */
+export function displayNamesFor(nodes: Array<{ id: string; type: GenNodeType; label?: string | null }>): Map<string, string> {
+  const counts = new Map<GenNodeType, number>()
+  for (const n of nodes) counts.set(n.type, (counts.get(n.type) ?? 0) + 1)
+  const seen = new Map<GenNodeType, number>()
+  const out = new Map<string, string>()
+  for (const n of nodes) {
+    const ordinal = (seen.get(n.type) ?? 0) + 1
+    seen.set(n.type, ordinal)
+    out.set(n.id, nodeDisplayName(n.type, ordinal, counts.get(n.type) ?? 1, n.label))
+  }
+  return out
+}
+
 export const ALL_NODE_TYPES: GenNodeType[] = [
   'start',
   'end',
@@ -252,6 +275,14 @@ export const ALL_NODE_TYPES: GenNodeType[] = [
   'custom_function',
   'invoke',
   'copilot_agent',
+]
+
+/** Palette grouping — the order users build a workflow in. */
+export const PALETTE_GROUPS: Array<{ label: string; types: GenNodeType[] }> = [
+  { label: 'Structure', types: ['start', 'end'] },
+  { label: 'Compute', types: ['agent', 'transform', 'custom_function'] },
+  { label: 'Control flow', types: ['conditional', 'invoke'] },
+  { label: 'Human', types: ['human_in_loop'] },
 ]
 
 export function defaultConfig(type: GenNodeType): NodeConfig {

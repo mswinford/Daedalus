@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Ban, CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Ban, CheckCircle2, XCircle, Timer, Coins, Cpu, PauseCircle, Play, X, Maximize2, Minimize2 } from 'lucide-react'
 
-import type { WorkflowRun, HumanInterruptField } from '@/lib/api'
-import type { NodeType } from '@/lib/workflowTypes'
+import type { WorkflowRun, HumanInterruptField, RunSummary } from '@/lib/api'
+import { displayNamesFor, type NodeType } from '@/lib/workflowTypes'
 import type { FlowNodeType } from '@/lib/graphTransform'
 import { summarize, groupExecutions, regionStats, type ToolCallView } from '@/lib/runEvents'
 
@@ -48,18 +48,48 @@ function formatOutput(value: unknown): string {
   }
 }
 
-function useNow(active: boolean): number {
+function useNow(active: boolean, intervalMs = 500): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!active) return
-    const id = setInterval(() => setNow(Date.now()), 500)
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
     return () => clearInterval(id)
-  }, [active])
+  }, [active, intervalMs])
   return now
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Pending',
+  running: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  paused: 'Paused',
+}
+
+function statusLabel(status?: string): string | undefined {
+  return status ? (STATUS_LABELS[status] ?? status) : undefined
+}
+
+function fmtClock(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour12: false })
+}
+
+function fmtElapsed(ms: number): string {
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
 }
 
 export function remainingSeconds(deadlineMs: number, now: number): number {
   return Math.max(0, Math.ceil((deadlineMs - now) / 1000))
+}
+
+/** Labels of required fields whose value is missing or whitespace-only. */
+export function missingRequiredFields(fields: HumanInterruptField[], values: Record<string, string>): string[] {
+  return fields
+    .filter((f) => f.required && (values[f.name] ?? '').trim() === '')
+    .map((f) => f.label)
 }
 
 function TimeoutCountdown({ deadlineMs, now }: { deadlineMs: number; now: number }) {
@@ -81,8 +111,12 @@ function TimeoutCountdown({ deadlineMs, now }: { deadlineMs: number; now: number
 interface RunPanelProps {
   run: WorkflowRun
   nodes: FlowNodeType[]
+  /** This workflow's live runs (from GET /runs); enables the run switcher. */
+  runs?: RunSummary[]
+  onSwitchRun?: (runId: string) => void
   onResume?: (input: Record<string, any>) => void
   onCancel?: () => void
+  onClose?: () => void
 }
 
 function HumanInputForm({
@@ -95,8 +129,19 @@ function HumanInputForm({
   onSubmit: (input: Record<string, any>) => void
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
+  const [error, setError] = useState<string | null>(null)
+
+  const updateValue = (name: string, value: string) => {
+    setValues((v) => ({ ...v, [name]: value }))
+    if (error) setError(null)
+  }
 
   const handleSubmit = () => {
+    const missing = missingRequiredFields(fields, values)
+    if (missing.length > 0) {
+      setError(`Please fill in: ${missing.join(', ')}`)
+      return
+    }
     const input: Record<string, any> = {}
     for (const f of fields) {
       const raw = values[f.name] ?? ''
@@ -121,7 +166,7 @@ function HumanInputForm({
               <select
                 className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
                 value={values[f.name] ?? ''}
-                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                onChange={(e) => updateValue(f.name, e.target.value)}
               >
                 <option value="">—</option>
                 {f.options.map((o) => (
@@ -132,7 +177,7 @@ function HumanInputForm({
               <select
                 className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
                 value={values[f.name] ?? ''}
-                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                onChange={(e) => updateValue(f.name, e.target.value)}
               >
                 <option value="">—</option>
                 <option value="true">Yes</option>
@@ -143,12 +188,13 @@ function HumanInputForm({
                 type={f.type === 'number' ? 'number' : 'text'}
                 className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
                 value={values[f.name] ?? ''}
-                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                onChange={(e) => updateValue(f.name, e.target.value)}
               />
             )}
           </label>
         ))}
       </div>
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={handleSubmit}
@@ -171,8 +217,19 @@ function HumanInputForm({
   )
 }
 
-export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelProps) {
+export default function RunPanel({ run, nodes, runs, onSwitchRun, onResume, onCancel, onClose }: RunPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [logExpanded, setLogExpanded] = useState(false)
+
+  // The switcher's options: the polled live runs plus the current run (which
+  // may not be in the list yet right after it started).
+  const runOptions = useMemo(() => {
+    const m = new Map<string, { id: string; status?: string }>()
+    for (const r of runs ?? []) m.set(r.run_id, { id: r.run_id, status: r.status })
+    const currentId = run.id
+    if (currentId) m.set(currentId, { id: currentId, status: run.status })
+    return [...m.values()]
+  }, [runs, run.id, run.status])
 
   const nodeTypeById = useMemo(() => {
     const m = new Map<string, NodeType>()
@@ -180,10 +237,15 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
     return m
   }, [nodes])
 
+  const displayNameById = useMemo(
+    () => displayNamesFor(nodes.map((n) => ({ id: n.id, type: n.data.nodeType, label: n.data.label }))),
+    [nodes]
+  )
+
   const { rows, totalExecutions } = useMemo(() => {
-    const executions = summarize(run.events, nodeTypeById)
+    const executions = summarize(run.events, nodeTypeById, displayNameById)
     return { rows: groupExecutions(executions), totalExecutions: executions.length }
-  }, [run.events, nodeTypeById])
+  }, [run.events, nodeTypeById, displayNameById])
 
   const totalMs =
     run.started_at != null && run.completed_at != null
@@ -208,16 +270,41 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
     run.interrupt_value?.timeout_seconds != null && run.interrupt_value.requested_at != null
       ? run.interrupt_value.requested_at * 1000 + run.interrupt_value.timeout_seconds * 1000
       : null
-  const now = useNow(isPaused && deadlineMs != null)
+  const now = useNow(isRunning || (isPaused && deadlineMs != null), isRunning ? 100 : 500)
   const timedOut = deadlineMs != null && now >= deadlineMs
 
+  // Elapsed ticker: prefer the server's started_at, else count from when this
+  // panel first saw the run in a running state.
+  const runStartRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (isRunning) {
+      if (runStartRef.current == null) runStartRef.current = Date.now()
+    } else {
+      runStartRef.current = null
+    }
+  }, [isRunning])
+  const elapsedMs = isRunning
+    ? Math.max(0, now - (run.started_at != null ? run.started_at * 1000 : (runStartRef.current ?? now)))
+    : null
+
+  // Follow new rows only while the user is already near the bottom of the log.
+  const logRef = useRef<HTMLDivElement>(null)
+  const nearBottomRef = useRef(true)
+  useEffect(() => {
+    const el = logRef.current
+    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [rows.length])
+
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950">
+    <div className={`border-t border-zinc-800 bg-zinc-950 ${logExpanded ? 'flex h-[70vh] flex-col' : ''}`}>
       {/* Header metrics */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-xs">
         <span className={`flex items-center gap-1 font-medium ${isRunning ? 'text-amber-400' : isPaused ? 'text-purple-400' : isCancelled ? 'text-zinc-400' : failed ? 'text-red-400' : 'text-emerald-400'}`}>
           {isRunning ? <Timer size={14} /> : isPaused ? <PauseCircle size={14} /> : isCancelled ? <Ban size={14} /> : failed ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
-          {run.status}
+          {statusLabel(run.status)}
+          {elapsedMs != null && (
+            <span className="font-normal tabular-nums text-zinc-400">{fmtElapsed(elapsedMs)}</span>
+          )}
         </span>
         {totalMs != null && (
           <span className="flex items-center gap-1 text-zinc-400">
@@ -238,6 +325,24 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
           </span>
         )}
         <span className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setLogExpanded((v) => !v)}
+            title={logExpanded ? 'Collapse log' : 'Expand log'}
+            aria-label={logExpanded ? 'Collapse log' : 'Expand log'}
+            className="rounded-md border border-zinc-700 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
+          >
+            {logExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              title="Close run panel"
+              aria-label="Close run panel"
+              className="rounded-md border border-zinc-700 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
+            >
+              <X size={12} />
+            </button>
+          )}
           {(isRunning || isPaused) && onCancel && (
             <button
               onClick={onCancel}
@@ -247,14 +352,30 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
               Cancel
             </button>
           )}
-          <span className="text-zinc-600">{run.id}</span>
+          {onSwitchRun && runOptions.length > 1 ? (
+            <select
+              value={run.id ?? ''}
+              onChange={(e) => onSwitchRun(e.target.value)}
+              title="Switch between this workflow's active runs"
+              aria-label="Switch run"
+              className="max-w-44 rounded-md border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
+            >
+              {runOptions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  run {r.id.slice(0, 8)} · {STATUS_LABELS[r.status ?? ''] ?? r.status ?? ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-zinc-600">{run.id}</span>
+          )}
         </span>
       </div>
 
       {/* Body: execution timeline + output */}
-      <div className="flex flex-col gap-3 border-t border-zinc-800/60 px-3 py-2 md:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 border-t border-zinc-800/60 px-3 py-2 md:flex-row">
         {/* Left: per-node execution */}
-        <div className="min-w-0 flex-1">
+        <div className={`min-w-0 flex-1 ${logExpanded ? 'flex min-h-0 flex-col' : ''}`}>
             <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
               Execution · {totalExecutions} node{totalExecutions === 1 ? '' : 's'}
             </p>
@@ -278,7 +399,14 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
               {run.error}
             </pre>
           )}
-          <div className="max-h-56 space-y-0.5 overflow-auto pr-1">
+          <div
+            ref={logRef}
+            onScroll={() => {
+              const el = logRef.current
+              if (el) nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+            }}
+            className={`${logExpanded ? 'min-h-0 flex-1' : 'max-h-56'} space-y-0.5 overflow-auto pr-1`}
+          >
             {totalExecutions === 0 && (
               <p className="py-2 text-xs text-zinc-600">No node execution recorded.</p>
             )}
@@ -307,6 +435,9 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                     )}
                     <span className="shrink-0 font-mono text-[11px] text-zinc-600">{ex.nodeId}</span>
                     <span className="ml-auto flex shrink-0 items-center gap-2">
+                      {ex.startedAt != null && (
+                        <span className="text-[10px] tabular-nums text-zinc-600">{fmtClock(ex.startedAt)}</span>
+                      )}
                       {llmCalls ? (
                         <span className="rounded bg-indigo-950/60 px-1.5 py-0.5 text-[11px] text-indigo-300">
                           {tokensIn}→{tokensOut} tok · {llmCalls} call{llmCalls === 1 ? '' : 's'}
@@ -317,6 +448,11 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                           {ex.toolCalls.length} tool call{ex.toolCalls.length === 1 ? '' : 's'}
                         </span>
                       )}
+                      {ex.retries ? (
+                        <span className="rounded bg-amber-950/60 px-1.5 py-0.5 text-[11px] text-amber-300" title={ex.lastRetryError}>
+                          {ex.retries} retr{ex.retries === 1 ? 'y' : 'ies'}
+                        </span>
+                      ) : null}
                       {durationMs != null && (
                         <span className="text-[11px] text-zinc-500">{fmtMs(durationMs)}</span>
                       )}
@@ -324,7 +460,7 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                   </button>
                   {open && body !== '' && (
                     <pre
-                      className={`mb-1 ml-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border p-2 text-xs ${
+                      className={`mb-1 ml-4 ${logExpanded ? 'max-h-none' : 'max-h-48'} overflow-auto whitespace-pre-wrap rounded-md border p-2 text-xs ${
                         ex.error
                           ? 'border-red-900/50 bg-red-950/30 text-red-300'
                           : 'border-zinc-800 bg-zinc-900/60 text-zinc-400'
@@ -351,6 +487,9 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                               <span className="truncate text-xs text-zinc-300">{c.label}</span>
                               <span className="shrink-0 font-mono text-[10px] text-zinc-600">{c.nodeId}</span>
                               <span className="ml-auto flex shrink-0 items-center gap-2">
+                                {c.startedAt != null && (
+                                  <span className="text-[10px] tabular-nums text-zinc-600">{fmtClock(c.startedAt)}</span>
+                                )}
                                 {c.llmCalls ? (
                                   <span className="rounded bg-indigo-950/60 px-1.5 py-0.5 text-[10px] text-indigo-300">
                                     {c.tokensIn}→{c.tokensOut} tok · {c.llmCalls} call{c.llmCalls === 1 ? '' : 's'}
@@ -371,7 +510,7 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
                             )}
                             {cOpen && cBody !== '' && (
                               <pre
-                                className={`mb-1 ml-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border p-2 text-xs ${
+                                className={`mb-1 ml-4 ${logExpanded ? 'max-h-none' : 'max-h-48'} overflow-auto whitespace-pre-wrap rounded-md border p-2 text-xs ${
                                   c.error
                                     ? 'border-red-900/50 bg-red-950/30 text-red-300'
                                     : 'border-zinc-800 bg-zinc-900/60 text-zinc-400'
@@ -392,9 +531,9 @@ export default function RunPanel({ run, nodes, onResume, onCancel }: RunPanelPro
         </div>
 
         {/* Right: final output */}
-        <div className="min-w-0 flex-1">
+        <div className={`min-w-0 flex-1 ${logExpanded ? 'flex min-h-0 flex-col' : ''}`}>
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">Output</p>
-          <div className="max-h-56 space-y-2 overflow-auto pr-1">
+          <div className={`${logExpanded ? 'min-h-0 flex-1' : 'max-h-56'} space-y-2 overflow-auto pr-1`}>
             {run.output_data?.output && (
               <p className="whitespace-pre-wrap rounded-md border border-zinc-800 bg-zinc-900/40 p-2 text-sm text-zinc-100">
                 {run.output_data.output}

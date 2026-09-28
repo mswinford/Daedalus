@@ -1,4 +1,4 @@
-"""Console entry point for the AI Forge backend server (the ``ai-forge`` command).
+"""Console entry point for the Daedalus backend server (the ``daedalus`` command).
 
 Boots the FastAPI app via uvicorn with auto-reload. Works both from an
 installed wheel (where ``app`` is a top-level module) and from a source
@@ -28,7 +28,7 @@ def main() -> None:
     from app.config import get_settings
 
     settings = get_settings()
-    print(f"AI Forge starting on {settings.host}:{settings.port}")
+    print(f"Daedalus starting on {settings.host}:{settings.port}")
     uvicorn.run("app.main:app", host=settings.host, port=settings.port, reload=True)
 
 

@@ -6,16 +6,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from registry.api import capabilities, publish, search, use
 from registry.config import get_settings
 from registry.db import Database
-from registry.indexer import sync_from_repo
+from registry.indexer import ensure_repo, pull_for_sync, sync_from_repo
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    print(f"AI Forge Registry starting on {settings.host}:{settings.port}")
+    print(f"Daedalus Registry starting on {settings.host}:{settings.port}")
     print(f"Index: {settings.registry_db}")
     print(f"Capabilities repo: {settings.capabilities_repo}")
+    if settings.capabilities_remote:
+        print(f"Capabilities remote: {settings.capabilities_remote}")
     app.state.db = await Database.connect(settings.registry_db)
+    if settings.capabilities_remote:
+        # Clone on first boot; fetch+rebase so out-of-band pushes (web UI,
+        # PRs, another machine) land before the index scan. Best-effort —
+        # an offline boot still indexes the local state.
+        await ensure_repo(settings.capabilities_repo, settings.capabilities_remote)
+        if not await pull_for_sync(settings.capabilities_repo, settings.capabilities_remote):
+            print("warning: capabilities repo not synced with remote; "
+                  "indexing local state")
     report = await sync_from_repo(settings.capabilities_repo, app.state.db)
     if report["synced"]:
         print(f"Indexed {report['synced']} new capability version(s) on start")
@@ -25,7 +35,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AI Forge Registry",
+    title="Daedalus Registry",
     version="0.1.0",
     lifespan=lifespan,
 )

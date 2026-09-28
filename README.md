@@ -1,8 +1,8 @@
-# AI Forge
+# Daedalus
 
 A standalone web app for building **AI agent workflows** on [LangGraph](https://github.com/langchain-ai/langgraph). Workflows are directed graphs of nodes (agents, conditionals, transforms, sandboxed Python, human-in-loop gates) with file-based persistence. Author them in the visual React Flow editor or via the REST API.
 
-> **Status:** Phase 3 + post-Phase 3 increments — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject / cancel), async execution with live WebSocket streaming, a secrets store, per-agent message isolation, per-node error branches, workflow templates, and the `github_*` builtins are all implemented. A companion **Capability Registry** ([platform roadmap](./docs/ROADMAP.md): R1 complete, R2 in progress) adds identity, versioning, lifecycle, search, and the `invoke` node for calling registered capabilities — see [Capability Registry](#capability-registry).
+> **Status:** Phase 3 + post-Phase 3 increments — the engine, REST API, static validation, and a full frontend (visual editor + config panels + run debug panel) are working end-to-end. Human-in-loop nodes (pause / resume / reject / cancel), async execution with live WebSocket streaming, a secrets store, per-agent message isolation, per-node error branches, workflow templates, the `github_*` builtins, and **concurrent runs** — multiple workflows, or multiple runs of the same workflow, in parallel, with a global runs surface (sidebar status dots, in-editor run switcher, per-workflow history) — are all implemented. A companion **Capability Registry** ([platform roadmap](./docs/ROADMAP.md): R1 complete, R2 in progress) adds identity, versioning, lifecycle, search, and the `invoke` node for calling registered capabilities — see [Capability Registry](#capability-registry).
 
 ---
 
@@ -13,28 +13,31 @@ A standalone web app for building **AI agent workflows** on [LangGraph](https://
 - Node types: `agent` (with tool-calling loop; agent nodes can carry `skills[]` — folded into the system prompt + tools at graph-build — and a `prompt_ref` dot-path into the workflow's `prompts[]`), `conditional`, `transform` (`template`, `mapping`, `custom_function`), `custom_function` (sandboxed Python via RestrictedPython), `invoke` (calls a registry capability by `name@version`), `human_in_loop` (pause / resume / reject), and `copilot_agent` (delegates an atomic agentic step to the GitHub Copilot SDK runtime — optional dependency, `pip install ai-forge[copilot]`).
 - Conditional routing on both **nodes** and **edges**. The `json_path` and `regex` condition types work; `llm` is not implemented yet.
 - **Error branches** — opt-in per-node error handle (config panel toggle); when a node fails, the run routes down its red-dashed `error` edge if one exists, otherwise the run fails. Human-in-loop pauses are never treated as failures.
+- **Per-node retry** — agent / transform / custom_function nodes can retry transient failures (`rate_limit`, `timeout`, `server_error`) with exponential backoff (config panel); each attempt emits a `retry` event (shown as an amber badge in the Run panel), error edges fire only after the budget is exhausted, and non-transient errors fail fast. Note: retries re-execute side effects — keep retried node code idempotent.
+- **Bounded loops** — back edges (cycles) are legal; every run segment is capped at 500 super-steps, and a loop that never exits fails the run with an `iteration_limit` event instead of hanging. Typical patterns: for-each over `data.items` (index counter in state) and regenerate-until-pass (append feedback to state, branch on a quality check).
 - OpenAI-compatible LLM provider (OpenAI, Ollama, llama.cpp, vLLM, LM Studio).
 - Per-agent message isolation — each agent keeps its own conversation; agents share only structured `data`.
 - Run input validated against the workflow's `state_schema` (if defined) before execution.
 
 **API (works now)**
-- Full workflow CRUD + async `run` + `validate`, plus run retrieval, resume, cancel, and a secrets store. See [REST API](#rest-api).
+- Full workflow CRUD + async `run` + `validate`, plus run retrieval, a run list (`GET /api/runs`), paused-run listing, resume, cancel, and a secrets store. See [REST API](#rest-api).
 
 **Frontend (works now)**
-- Sidebar **master-detail** layout: workflow list with search, create, rename, delete.
-- Full React Flow **graph editor**: drag-and-drop nodes, connect edges, per-node **config panel**.
-- **Run debug panel**: live node/LLM trace, token + cost totals, expandable outputs, and a paused-state form for human-in-loop (approve / reject).
-- Models, tools, and secrets management panels. Auto-save with an unsaved/saving/saved indicator.
+- Sidebar **master-detail** layout: workflow list with search, create, rename, delete, live **run-status dots** per workflow (pulsing green = running, amber = paused), and a Pending Approvals section with countdowns + deep links.
+- Full React Flow **graph editor**: drag-and-drop nodes on a 16px grid, connect edges, per-node **config panel**, node **renaming** (display-only `label`, falls back to `Type N`), an **edge inspector** for flipping static↔conditional and editing condition expressions (amber-styled conditional edges), a minimap, and confirmations on destructive deletes.
+- **Run debug panel**: live node/LLM trace with timestamps + elapsed ticker, token + cost totals, expandable outputs, a paused-state form for human-in-loop (approve / reject), a **run switcher** when the workflow has more than one live run, and a close button. Validate-before-run blocks invalid workflows up front; save failures surface inline.
+- **Run history modal** per workflow: last 50 runs with status, duration, tokens, cost, and error; any run — live or terminal — opens in the Run panel (terminal runs render statically from their persisted event log).
+- Models, tools, and secrets management panels (consolidated "Resources" modal + registry import). Auto-save with an unsaved/saving/saved indicator.
 
 **Capability Registry (R1 complete, R2 in progress — works now)**
 - Capability Manifest schema (`schema/capability.py`) with six core kinds: `tool`, `prompt`, `model_profile`, `skill`, `agent`, `workflow`; composites reference other capabilities by `name@version`.
 - Git-backed store + SQLite FTS5 index: immutable versions, lifecycle state machine (draft → review → approved → published → deprecated → retired).
 - Publish (git commit + index sync), search, and use APIs on a separate server (`127.0.0.1:3010`).
-- CLI: `ai-forge-registry serve | publish <files…> | seed` — publishing works offline; eleven sample capabilities (one per core kind + the `forge/*` GitHub set) ship in `registry/samples/`.
+- CLI: `daedalus-registry serve | publish <files…> | seed` — publishing works offline; eleven sample capabilities (one per core kind + the `forge/*` GitHub set) ship in `registry/samples/`.
 - **Capabilities view** in the frontend: browse/search, filter by kind, version history, and per-kind **Use in…** imports — pick a target workflow (and agent node for skills) and the capability is merged inline (`/use?inline=true` resolves skill/agent refs server-side).
 - **R2 shipped:** the `invoke` node (call a registered capability by `name@version` — tool kind executes in place, workflow kind expands into the parent graph at build time behind a call frame), publish-time governance checks (dependency resolution, kind stability, per-kind breaking-change detection that requires major semver bumps, composite secret coverage), the run-metrics pipeline (per-run usage snapshots pushed to the registry as capability `evaluation` stats, blended into search ranking), and **upgrade automation** — every import stamps its registry origin, the editor detects newer versions (badges; breaking majors in red) and upgrades in place with a per-field drift diff that preserves local edits and never breaks workflow references (breaking changes require explicit confirmation; active/paused runs are guarded).
 
-**Tests:** 440 backend tests passing (`python -m pytest -q`, as of 2026-09-03, incl. registry R1–R2); frontend 135 Vitest tests + typecheck/build clean.
+**Tests:** 475 backend tests passing (`python -m pytest -q`, as of 2026-09-28, incl. registry R1–R2); frontend 156 Vitest tests + typecheck/build clean.
 
 ---
 
@@ -47,10 +50,10 @@ Frontend (React + TS + Vite, React Flow)
    │                         ├─ Engine (LangGraph builder + runner)
    │                         ├─ LLM providers (OpenAI-compatible)
    │                         ├─ Sandbox (RestrictedPython)
-   │                         └─ Persistence (JSON files in ~/.ai-forge)
+   │                         └─ Persistence (JSON files in ~/.daedalus)
    └─ /registry ───────────▶ Capability Registry (FastAPI, :3010)
-                             ├─ Git store (~/.ai-forge/capabilities/)
-                             └─ SQLite FTS5 index (~/.ai-forge/registry.db)
+                             ├─ Git store (~/.daedalus/capabilities/)
+                             └─ SQLite FTS5 index (~/.daedalus/registry.db)
 ```
 
 | Layer | Technology |
@@ -59,11 +62,11 @@ Frontend (React + TS + Vite, React Flow)
 | Backend | FastAPI + Python 3.11+ |
 | Workflow engine | LangGraph (SQLite checkpointer for pause/resume; paused runs survive restarts) |
 | LLM layer | LangChain (OpenAI-compatible), abstract provider interface |
-| Capability registry | FastAPI + aiosqlite; manifests in a local git repo (`~/.ai-forge/capabilities/`), FTS5 index in `~/.ai-forge/registry.db` |
-| Persistence | One JSON file per workflow in `~/.ai-forge/workflows/`; run checkpoints in `~/.ai-forge/checkpoints.db`; secrets in `~/.ai-forge/secrets.json` |
+| Capability registry | FastAPI + aiosqlite; manifests in a git repo (`~/.daedalus/capabilities/`, optional remote via `DAEDALUS_CAPABILITIES_REMOTE`), FTS5 index in `~/.daedalus/registry.db` |
+| Persistence | One JSON file per workflow in `~/.daedalus/workflows/`; run checkpoints in `~/.daedalus/checkpoints.db`; secrets in `~/.daedalus/secrets.json` |
 | Sandboxing | RestrictedPython (containers planned for Phase 4) |
 
-Full design and phase plan: [AI Forge Plan](./docs/ai-forge-plan.md) · platform vision & roadmap: [Roadmap](./docs/ROADMAP.md).
+Full design and phase plan: [Daedalus Plan](./docs/daedalus-plan.md) · platform vision & roadmap: [Roadmap](./docs/ROADMAP.md).
 
 ---
 
@@ -85,7 +88,7 @@ Full design and phase plan: [AI Forge Plan](./docs/ai-forge-plan.md) · platform
 ### 1. Backend
 
 ```bash
-cd ai-forge
+cd daedalus
 python -m venv .venv && source .venv/bin/activate   # optional but recommended
 pip install -e ".[dev]"
 python backend/cli.py   # starts uvicorn on 127.0.0.1:3000 (auto-reload)
@@ -97,7 +100,7 @@ python backend/cli.py   # starts uvicorn on 127.0.0.1:3000 (auto-reload)
 cd backend && uvicorn app.main:app --host 127.0.0.1 --port 3000 --reload
 ```
 
-Workflows are stored as JSON files under `~/.ai-forge/workflows/`.
+Workflows are stored as JSON files under `~/.daedalus/workflows/`.
 
 Verify it's up:
 
@@ -120,12 +123,27 @@ The dev server proxies `/api` (including WebSocket upgrades) to the backend on p
 The registry is a separate server; it holds versioned, searchable capability manifests (tools, prompts, model profiles, skills, agents, workflows):
 
 ```bash
-python -m registry.cli serve        # or: ai-forge-registry serve  → 127.0.0.1:3010
+python -m registry.cli serve        # or: daedalus-registry serve  → 127.0.0.1:3010
 python -m registry.cli seed         # publish the eleven bundled sample capabilities
 curl http://127.0.0.1:3010/health
 ```
 
 With the frontend running, the **Capabilities** view in the sidebar browses and uses them. `publish` and `seed` work offline — they validate manifests, write into the local git repo, commit once, and sync the index; no server needed. See [Capability Registry](#capability-registry).
+
+#### Pointing the registry at a real git remote
+
+The capabilities repo is a plain git repository, so it can live on GitHub (or any host) — that gives you history, PR review of capability changes, and multi-machine sharing for free:
+
+```bash
+export DAEDALUS_CAPABILITIES_REMOTE=https://github.com/<you>/daedalus-capabilities.git
+export DAEDALUS_GIT_TOKEN=ghp_...   # optional; SSH keys / credential helpers work without it
+```
+
+- **First boot** clones the remote into `~/.daedalus/capabilities/` (an empty repo is fine — the first publish creates its default branch).
+- **Every publish** commits locally, then fetches + rebases onto the remote and pushes. Out-of-band changes (edits in the GitHub web UI, PRs, another machine publishing) are absorbed by the rebase; the index rescans and converges.
+- **Startup** fetches + rebases before indexing, so a restart picks up whatever landed while the registry was down. An offline boot still indexes the local state (warning only).
+- A true conflict — two publishers writing the *same* `name@version` with different content — fails the publish loudly instead of guessing.
+- The token is injected into HTTPS URLs in-memory only; `.git/config` always stores the plain URL. Without a remote configured, everything behaves exactly as before (local-only).
 
 ### 4. Run the tests
 
@@ -264,11 +282,11 @@ The `custom_function` node runs your Python in a RestrictedPython sandbox with a
 
 ## Capability Registry
 
-A thin **system-of-record + discovery** layer above AI Forge (R1 of the [platform roadmap](./docs/ROADMAP.md)) — it is not a runtime. It gives shareable units of AI capability (tools, prompts, model profiles, skills, agents, workflows) an identity (`owner/name`), strict semver versions, ownership/governance metadata, a lifecycle stage, and search.
+A thin **system-of-record + discovery** layer above Daedalus (R1 of the [platform roadmap](./docs/ROADMAP.md)) — it is not a runtime. It gives shareable units of AI capability (tools, prompts, model profiles, skills, agents, workflows) an identity (`owner/name`), strict semver versions, ownership/governance metadata, a lifecycle stage, and search.
 
-**How publishing works (R1):** `POST /registry/capabilities` or the CLI writes the manifest into a local git repo (`~/.ai-forge/capabilities/`), commits it, and syncs the SQLite FTS5 index. Publishing is a **direct commit to HEAD** — no remote, no branches, no PRs (single-user, localhost model). Review is tracked out-of-band through the lifecycle stage: `draft → review → approved → published → deprecated → retired`; only `published` versions surface as `latest`. Versions are immutable; git history provides provenance.
+**How publishing works (R1):** `POST /registry/capabilities` or the CLI writes the manifest into a local git repo (`~/.daedalus/capabilities/`), commits it, and syncs the SQLite FTS5 index. Publishing is a **direct commit to HEAD** — no remote, no branches, no PRs (single-user, localhost model). Review is tracked out-of-band through the lifecycle stage: `draft → review → approved → published → deprecated → retired`; only `published` versions surface as `latest`. Versions are immutable; git history provides provenance.
 
-**CLI** (`ai-forge-registry`, or `python -m registry.cli`):
+**CLI** (`daedalus-registry`, or `python -m registry.cli`):
 
 | Command | What it does |
 |---|---|
@@ -276,7 +294,7 @@ A thin **system-of-record + discovery** layer above AI Forge (R1 of the [platfor
 | `publish <files…>` | Validate manifest JSON files, write them into the git repo, commit once, sync the index. Idempotent; same `name@version` with different content is rejected. Works offline. |
 | `seed` | Publish the eleven bundled sample capabilities from `registry/samples/`. |
 
-**Sample capabilities** (seeded by `ai-forge-registry seed`; they cross-reference each other into a composition chain):
+**Sample capabilities** (seeded by `daedalus-registry seed`; they cross-reference each other into a composition chain):
 
 | Sample | Kind | Notes |
 |---|---|---|
@@ -319,6 +337,8 @@ Base URL: `http://127.0.0.1:3000`
 | `DELETE` | `/api/workflows/{id}` | Delete workflow |
 | `POST` | `/api/workflows/{id}/run` | Run asynchronously (body = input data; returns `202` + `run_id`) |
 | `POST` | `/api/workflows/{id}/validate` | Static validation (returns issues + warnings) |
+| `GET` | `/api/runs?workflow_id=&status=&limit=` | List runs — persisted history merged with live in-memory runs (memory wins per `run_id`); newest first |
+| `GET` | `/api/runs/paused` | List paused runs across all workflows (Pending Approvals) |
 | `GET` | `/api/runs/{runId}` | Get run status + result (polling) |
 | `POST` | `/api/runs/{runId}/resume` | Resume a paused run with human input |
 | `POST` | `/api/runs/{runId}/cancel` | Cancel a running or paused run (paused: immediate; running: stops after the current step) |
@@ -345,7 +365,7 @@ Base URL: `http://127.0.0.1:3000`
 }
 ```
 
-**Node:** `{ "id", "type", "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | copilot_agent | conditional | transform | human_in_loop | custom_function | invoke`.
+**Node:** `{ "id", "type", "label"?, "position": {"x","y"}, "config": {...} }` where `type` ∈ `start | end | agent | copilot_agent | conditional | transform | human_in_loop | custom_function | invoke`. `label` is display-only (the engine ignores it); the UI falls back to `Type N` (1-based ordinal among same-type nodes) when unset.
 
 **Edge:** `{ "id", "source_node_id", "source_handle", "target_node_id", "type": "static|conditional|error", "condition"? }`. For a conditional node, each non-`default` `source_handle` is a branch; the `conditions[i]` maps to the i-th branch edge (in workflow order). A `"default"` handle (or `default_branch`) is the fallback.
 
@@ -379,7 +399,8 @@ Base URL: `http://127.0.0.1:3000`
 - **Phase 2 (done):** React Flow graph editor + per-node config panel, async execution with WebSocket streaming, run log/debug panel.
 - **Phase 3 (done):** human-in-loop nodes with pause/resume/reject, timeout auto-fail, a Pending Approvals sidebar, and SQLite checkpointing (paused runs survive restarts).
 - **Post-Phase 3 (done):** per-node error branches (opt-in error edges), workflow templates with the create-from-template UI, and the `github_*` builtins (branch / read / write / PR).
+- **Global runs surface (done):** concurrent runs (multiple workflows — or multiple runs of one workflow — in parallel), `GET /api/runs` with persisted history, startup zombie-run cleanup, sidebar run-status dots, an in-editor run switcher, and a per-workflow run-history modal. Design: [docs/global-runs-plan.md](./docs/global-runs-plan.md).
 - **Phase 4:** container-based sandbox isolation, Anthropic provider, cost tracking, observability/Prometheus.
 - **Capability platform (R1 complete):** Find & Reuse — manifest schema, git-backed registry with search/publish/lifecycle, offline CLI + sample capabilities, and a Capabilities view in the frontend. R2 is in progress — the `invoke` node (call a registered capability by `name@version`), publish-time governance checks, the run-metrics → evaluation pipeline, upgrade automation for existing imports (update detection with version badges + per-field drift-diff upgrades), and live refs (opt-in `latest` tracking — tracked entries re-resolve to the newest same-major version at run start) have shipped; next up: the `eval_suite` kind and SQLite → Postgres (remote invocation settled by design — workflows are always embedded, remote services are invoked as opaque `http` tools). R3 adds agent-native discovery. See [the Roadmap](./docs/ROADMAP.md).
 
-Full detail in [the AI Forge Plan](./docs/ai-forge-plan.md).
+Full detail in [the Daedalus Plan](./docs/daedalus-plan.md).

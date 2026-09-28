@@ -40,7 +40,7 @@ def _wf_manifest(
         name=name, version=version, description=desc, tags=tags or ["demo"],
         kind="workflow",
         spec={"kind": "workflow", "workflow": Workflow(id="w", name="w").model_dump()},
-        interface={"type": "ai_forge_workflow"},
+        interface={"type": "daedalus_workflow"},
         governance={"owner": "acme"},
         stage=stage, created_at=created_at,
     )
@@ -98,7 +98,7 @@ def test_upsert_format_migration_reserializes_in_place(db):
         m = CapabilityManifest(
             name="acme/wf2", version="1.0.0", description="Demo", tags=["demo"],
             kind="workflow", spec={"kind": "workflow", "workflow": wf.model_dump()},
-            interface={"type": "ai_forge_workflow"}, governance={"owner": "acme"},
+            interface={"type": "daedalus_workflow"}, governance={"owner": "acme"},
             stage=LifecycleStage.DRAFT, created_at=1700000002.0,
         )
         await upsert_version(db, m)

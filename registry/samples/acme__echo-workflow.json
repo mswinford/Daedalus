@@ -92,7 +92,7 @@
     }
   },
   "interface": {
-    "type": "ai_forge_workflow",
+    "type": "daedalus_workflow",
     "input_schema": {
       "type": "object",
       "properties": { "message": { "type": "string" } },

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, X, KeyRound } from 'lucide-react'
 
@@ -60,6 +60,14 @@ export default function SecretsPanel({ onClose }: Props) {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const { data: secrets, isLoading, error } = useQuery({
     queryKey: ['secrets'],
     queryFn: secretsApi.list,
@@ -89,13 +97,13 @@ export default function SecretsPanel({ onClose }: Props) {
           <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-100">
             <KeyRound size={16} /> Secrets
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:text-zinc-100">
+          <button onClick={onClose} aria-label="Close secrets panel" className="rounded p-1 text-zinc-400 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500">
             <X size={16} />
           </button>
         </div>
 
         <p className="mb-3 text-xs leading-relaxed text-zinc-500">
-          Secrets are stored in <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">~/.ai-forge/secrets.json</code>.
+          Secrets are stored in <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">~/.daedalus/secrets.json</code>.
           Reference them in http tool headers or custom functions via{' '}
           <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">{'${NAME}'}</code> or{' '}
           <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">get_secret('NAME')</code>.
@@ -124,8 +132,12 @@ export default function SecretsPanel({ onClose }: Props) {
                     Update
                   </button>
                   <button
-                    onClick={() => deleteMut.mutate(s.name)}
-                    className="rounded p-1 text-zinc-500 hover:text-red-400"
+                    onClick={() => {
+                      if (!window.confirm(`Delete secret "${s.name}"? This cannot be undone.`)) return
+                      deleteMut.mutate(s.name)
+                    }}
+                    aria-label={`Delete secret ${s.name}`}
+                    className="rounded p-1 text-zinc-500 hover:text-red-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500"
                   >
                     <Trash2 size={13} />
                   </button>
